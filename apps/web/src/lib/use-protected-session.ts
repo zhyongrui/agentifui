@@ -1,7 +1,6 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 
 import {
@@ -9,19 +8,9 @@ import {
   readAuthSession,
   type AuthSession,
   type ProtectedPath,
-} from '../lib/auth-session';
+} from './auth-session';
 
-type ProtectedPageProps = {
-  path: ProtectedPath;
-  children: (session: AuthSession) => ReactNode;
-  loadingMessage?: string;
-};
-
-export function ProtectedPage({
-  path,
-  children,
-  loadingMessage = 'Checking your session...',
-}: ProtectedPageProps) {
+export function useProtectedSession(path: ProtectedPath) {
   const router = useRouter();
   const [session, setSession] = useState<AuthSession | null | undefined>(undefined);
 
@@ -38,13 +27,8 @@ export function ProtectedPage({
     setSession(nextSession);
   }, [path, router]);
 
-  if (session === undefined) {
-    return <p className="lead">{loadingMessage}</p>;
-  }
-
-  if (!session) {
-    return null;
-  }
-
-  return <>{children(session)}</>;
+  return {
+    session,
+    isLoading: session === undefined,
+  };
 }
