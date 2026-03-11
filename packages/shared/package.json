@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./auth": "./src/auth/index.ts"
+    "./auth": "./src/auth/index.ts",
+    "./apps": "./src/apps/index.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

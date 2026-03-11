@@ -6,8 +6,8 @@ type MainLayoutProps = {
 
 export default function MainLayout({ children }: MainLayoutProps) {
   return (
-    <main className="shell">
-      <section className="panel">{children}</section>
+    <main className="shell shell-main">
+      <section className="panel panel-main">{children}</section>
     </main>
   );
 }

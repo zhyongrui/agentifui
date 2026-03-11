@@ -30,6 +30,7 @@ a {
 }
 
 input,
+select,
 button {
   font: inherit;
 }
@@ -188,4 +189,279 @@ button:disabled {
 .helper-text a {
   color: var(--accent);
   font-weight: 600;
+}
+
+.shell-main {
+  place-items: start center;
+  padding-block: 40px;
+}
+
+.panel-main {
+  width: min(100%, 1160px);
+}
+
+.page-narrow {
+  max-width: 560px;
+}
+
+.workspace {
+  display: grid;
+  gap: 24px;
+}
+
+.workspace-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.workspace-title {
+  max-width: 720px;
+}
+
+.workspace-title h1 {
+  margin: 0 0 12px;
+}
+
+.workspace-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-content: flex-start;
+}
+
+.workspace-badge,
+.status-chip,
+.alert-pill,
+.workspace-count,
+.tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
+.workspace-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.field select {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: white;
+}
+
+.workspace-toggle {
+  align-content: end;
+}
+
+.quota-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.quota-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.quota-card-header,
+.quota-card-meta,
+.section-header,
+.app-actions,
+.app-title-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.quota-card-meta,
+.section-header p,
+.app-card-copy p,
+.app-card-note {
+  color: var(--muted);
+}
+
+.quota-progress {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(30, 27, 22, 0.08);
+}
+
+.quota-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #d48829);
+}
+
+.quota-warning .quota-progress-bar {
+  background: linear-gradient(90deg, #d48829, #e4a74f);
+}
+
+.quota-critical .quota-progress-bar,
+.alert-critical {
+  background: rgba(173, 97, 18, 0.14);
+}
+
+.quota-blocked .quota-progress-bar,
+.alert-blocked {
+  background: rgba(174, 49, 49, 0.14);
+}
+
+.workspace-alerts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.alert-pill {
+  font-weight: 600;
+}
+
+.alert-warning {
+  background: rgba(212, 136, 41, 0.12);
+}
+
+.alert-critical {
+  color: #8e5a10;
+}
+
+.alert-blocked {
+  color: #8d2323;
+}
+
+.workspace-section {
+  display: grid;
+  gap: 16px;
+}
+
+.section-header {
+  align-items: end;
+}
+
+.section-header h2,
+.app-card h3 {
+  margin: 0;
+}
+
+.section-header p,
+.app-card-copy p,
+.app-card-note {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.workspace-count {
+  min-width: 42px;
+  font-weight: 700;
+}
+
+.workspace-empty {
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.app-card {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 14px 30px rgba(30, 27, 22, 0.05);
+}
+
+.app-card-header {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.app-avatar {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: rgba(13, 107, 77, 0.14);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.app-card-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.status-chip {
+  min-height: 28px;
+  padding: 4px 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.status-ready {
+  color: var(--accent-strong);
+}
+
+.status-beta {
+  color: #9a6112;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  min-height: 28px;
+  padding: 4px 10px;
+}
+
+.tag-muted {
+  color: var(--muted);
+}
+
+.app-card-note {
+  min-height: 48px;
+}
+
+.is-active {
+  border-color: rgba(13, 107, 77, 0.3);
+  color: var(--accent-strong);
+}
+
+@media (max-width: 960px) {
+  .workspace-toolbar,
+  .quota-grid,
+  .app-grid {
+    grid-template-columns: 1fr;
+  }
 }

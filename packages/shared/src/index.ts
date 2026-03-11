@@ -8,4 +8,5 @@ export type HealthResponse = {
   time: string;
 };
 
-export * from './auth/index.js';
+export * from './auth/index';
+export * from './apps/index';

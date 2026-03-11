@@ -14,7 +14,7 @@ export default function SecuritySettingsPage() {
   }
 
   return (
-    <div className="stack">
+    <div className="stack page-narrow">
       <span className="eyebrow">S1-1</span>
       <h1>Security Settings</h1>
       <p className="lead">
