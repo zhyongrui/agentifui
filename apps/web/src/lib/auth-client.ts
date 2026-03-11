@@ -6,6 +6,10 @@ import type {
   LoginResponse,
   RegisterRequest,
   RegisterResponse,
+  SsoCallbackRequest,
+  SsoCallbackResponse,
+  SsoDiscoveryRequest,
+  SsoDiscoveryResponse,
 } from '@agentifui/shared/auth';
 
 const DEFAULT_GATEWAY_URL = 'http://localhost:4000';
@@ -38,6 +42,20 @@ export function registerWithPassword(payload: RegisterRequest) {
 export function acceptInvitation(payload: InvitationAcceptRequest) {
   return postJson<InvitationAcceptRequest, InvitationAcceptResponse>(
     '/auth/invitations/accept',
+    payload
+  );
+}
+
+export function discoverSso(payload: SsoDiscoveryRequest) {
+  return postJson<SsoDiscoveryRequest, SsoDiscoveryResponse>(
+    '/auth/sso/discovery',
+    payload
+  );
+}
+
+export function continueWithSso(payload: SsoCallbackRequest) {
+  return postJson<SsoCallbackRequest, SsoCallbackResponse>(
+    '/auth/sso/callback',
     payload
   );
 }

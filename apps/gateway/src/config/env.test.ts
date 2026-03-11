@@ -11,6 +11,7 @@ describe('parseGatewayEnv', () => {
       corsOrigin: true,
       ssoDomainMap: {},
       defaultTenantId: 'dev-tenant',
+      defaultSsoUserStatus: 'pending',
       authLockoutThreshold: 5,
       authLockoutDurationMs: 1800000,
     });
@@ -25,6 +26,7 @@ describe('parseGatewayEnv', () => {
         GATEWAY_CORS_ORIGIN: 'http://localhost:3000',
         GATEWAY_SSO_DOMAINS: 'iflabx.com=iflabx-sso, agentifui.com=agentifui-saml',
         GATEWAY_DEFAULT_TENANT_ID: 'tenant-a',
+        GATEWAY_SSO_JIT_DEFAULT_STATUS: 'active',
         GATEWAY_AUTH_LOCKOUT_THRESHOLD: '3',
         GATEWAY_AUTH_LOCKOUT_DURATION_MS: '60000',
       })
@@ -38,6 +40,7 @@ describe('parseGatewayEnv', () => {
         'agentifui.com': 'agentifui-saml',
       },
       defaultTenantId: 'tenant-a',
+      defaultSsoUserStatus: 'active',
       authLockoutThreshold: 3,
       authLockoutDurationMs: 60000,
     });
@@ -56,8 +59,14 @@ describe('parseGatewayEnv', () => {
       parseGatewayEnv({
         GATEWAY_AUTH_LOCKOUT_THRESHOLD: '0',
       })
-    ).toThrowError(
-      'Invalid GATEWAY_AUTH_LOCKOUT_THRESHOLD value: 0'
-    );
+    ).toThrowError('Invalid GATEWAY_AUTH_LOCKOUT_THRESHOLD value: 0');
+  });
+
+  it('rejects invalid sso jit status values', () => {
+    expect(() =>
+      parseGatewayEnv({
+        GATEWAY_SSO_JIT_DEFAULT_STATUS: 'suspended',
+      })
+    ).toThrowError('Invalid GATEWAY_SSO_JIT_DEFAULT_STATUS value: suspended');
   });
 });

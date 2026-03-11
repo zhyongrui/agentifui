@@ -9,6 +9,7 @@ const env = {
   corsOrigin: true,
   ssoDomainMap: {},
   defaultTenantId: 'test-tenant',
+  defaultSsoUserStatus: 'pending' as const,
   authLockoutThreshold: 5,
   authLockoutDurationMs: 1800000,
 };

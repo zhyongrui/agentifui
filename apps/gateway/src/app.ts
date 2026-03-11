@@ -31,6 +31,7 @@ export async function buildApp(
     options.authService ??
     createAuthService({
       defaultTenantId: env.defaultTenantId,
+      defaultSsoUserStatus: env.defaultSsoUserStatus,
       lockoutThreshold: env.authLockoutThreshold,
       lockoutDurationMs: env.authLockoutDurationMs,
     });

@@ -3,7 +3,17 @@ import { describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 import { createAuthService } from '../services/auth-service.js';
 
-const testEnv = {
+const testEnv: {
+  nodeEnv: 'test';
+  host: string;
+  port: number;
+  corsOrigin: boolean;
+  ssoDomainMap: Record<string, string>;
+  defaultTenantId: string;
+  defaultSsoUserStatus: 'pending' | 'active';
+  authLockoutThreshold: number;
+  authLockoutDurationMs: number;
+} = {
   nodeEnv: 'test' as const,
   host: '127.0.0.1',
   port: 4000,
@@ -12,23 +22,35 @@ const testEnv = {
     'iflabx.com': 'iflabx-sso',
   },
   defaultTenantId: 'tenant-dev',
+  defaultSsoUserStatus: 'pending',
   authLockoutThreshold: 5,
   authLockoutDurationMs: 1800000,
 };
 
-function createTestAuthService() {
+function createTestAuthService(overrides: Partial<Parameters<typeof createAuthService>[0]> = {}) {
   return createAuthService({
     defaultTenantId: testEnv.defaultTenantId,
+    defaultSsoUserStatus: testEnv.defaultSsoUserStatus,
     lockoutThreshold: testEnv.authLockoutThreshold,
     lockoutDurationMs: testEnv.authLockoutDurationMs,
+    ...overrides,
   });
 }
 
-async function createTestApp(authService = createTestAuthService()) {
-  const app = await buildApp(testEnv, {
-    logger: false,
-    authService,
-  });
+async function createTestApp(
+  authService = createTestAuthService(),
+  envOverrides: Partial<typeof testEnv> = {}
+) {
+  const app = await buildApp(
+    {
+      ...testEnv,
+      ...envOverrides,
+    },
+    {
+      logger: false,
+      authService,
+    }
+  );
 
   return {
     app,
@@ -56,6 +78,109 @@ describe('auth routes', () => {
           domain: 'iflabx.com',
           hasSso: true,
           providerId: 'iflabx-sso',
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('creates a pending jit user via sso callback', async () => {
+    const { app } = await createTestApp();
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/sso/callback',
+        payload: {
+          email: 'jit@iflabx.com',
+          providerId: 'iflabx-sso',
+          displayName: 'JIT User',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        ok: true,
+        data: {
+          providerId: 'iflabx-sso',
+          createdViaJit: true,
+          user: {
+            tenantId: 'tenant-dev',
+            email: 'jit@iflabx.com',
+            displayName: 'JIT User',
+            status: 'pending',
+          },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('reuses an existing sso user on the next callback', async () => {
+    const authService = createTestAuthService({
+      defaultSsoUserStatus: 'active',
+    });
+    const { app } = await createTestApp(authService, {
+      defaultSsoUserStatus: 'active',
+    });
+
+    try {
+      await app.inject({
+        method: 'POST',
+        url: '/auth/sso/callback',
+        payload: {
+          email: 'jit@iflabx.com',
+          providerId: 'iflabx-sso',
+          displayName: 'JIT User',
+        },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/sso/callback',
+        payload: {
+          email: 'jit@iflabx.com',
+          providerId: 'iflabx-sso',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        ok: true,
+        data: {
+          providerId: 'iflabx-sso',
+          createdViaJit: false,
+          user: {
+            email: 'jit@iflabx.com',
+            status: 'active',
+          },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects sso callback when the domain provider is not configured', async () => {
+    const { app } = await createTestApp();
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/sso/callback',
+        payload: {
+          email: 'jit@iflabx.com',
+          providerId: 'unknown-sso',
+        },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'AUTH_SSO_NOT_CONFIGURED',
         },
       });
     } finally {

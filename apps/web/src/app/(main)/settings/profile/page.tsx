@@ -1,18 +1,23 @@
-import { ProtectedPage } from '../../../components/protected-page';
+import { ProtectedPage } from '../../../../components/protected-page';
 
-export default function AppsPage() {
+export default function ProfileSettingsPage() {
   return (
-    <ProtectedPage path="/apps">
+    <ProtectedPage path="/settings/profile">
       {session => (
         <div className="stack">
-          <span className="eyebrow">S1-3 placeholder</span>
-          <h1>Apps workspace</h1>
+          <span className="eyebrow">S1-1</span>
+          <h1>Profile</h1>
           <p className="lead">
-            欢迎回来，{session.user.displayName}。这里会在 `S1-3` 接入真正的应用目录。
+            这是当前认证切片里唯一允许 `pending` 用户继续访问的主区页面。
           </p>
+
           <div className="detail-list">
             <div className="detail-row">
-              <span className="detail-label">Current user</span>
+              <span className="detail-label">Display name</span>
+              <strong>{session.user.displayName}</strong>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Email</span>
               <strong>{session.user.email}</strong>
             </div>
             <div className="detail-row">

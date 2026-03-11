@@ -19,6 +19,13 @@ export type SsoDiscoveryRequest = {
   email: string;
 };
 
+export type SsoCallbackRequest = {
+  email: string;
+  providerId: string;
+  code?: string;
+  displayName?: string;
+};
+
 export type AuthErrorCode =
   | 'AUTH_INVALID_PAYLOAD'
   | 'AUTH_INVALID_EMAIL'
@@ -28,6 +35,7 @@ export type AuthErrorCode =
   | 'AUTH_PASSWORD_TOO_WEAK'
   | 'AUTH_INVITE_TOKEN_INVALID'
   | 'AUTH_INVITE_LINK_EXPIRED'
+  | 'AUTH_SSO_NOT_CONFIGURED'
   | 'AUTH_MFA_REQUIRED'
   | 'AUTH_ACCOUNT_PENDING'
   | 'AUTH_NOT_IMPLEMENTED';
@@ -79,6 +87,13 @@ export type InvitationAcceptResponse = AuthSuccessResponse<{
 export type LoginResponse = AuthSuccessResponse<{
   sessionToken: string;
   user: AuthUser;
+}>;
+
+export type SsoCallbackResponse = AuthSuccessResponse<{
+  sessionToken: string;
+  user: AuthUser;
+  providerId: string;
+  createdViaJit: boolean;
 }>;
 
 export type LogoutResponse = AuthSuccessResponse<{

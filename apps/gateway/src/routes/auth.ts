@@ -7,6 +7,8 @@ import type {
   LogoutResponse,
   RegisterRequest,
   RegisterResponse,
+  SsoCallbackRequest,
+  SsoCallbackResponse,
   SsoDiscoveryRequest,
   SsoDiscoveryResponse,
 } from '@agentifui/shared/auth';
@@ -66,6 +68,47 @@ export async function registerAuthRoutes(
         hasSso: providerId !== null,
         providerId,
       },
+    };
+
+    return response;
+  });
+
+  app.post('/auth/sso/callback', async (request, reply) => {
+    const body = (request.body ?? {}) as Partial<SsoCallbackRequest>;
+
+    if (!body.email || !body.providerId || !isValidEmail(body.email)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'AUTH_INVALID_PAYLOAD',
+        'SSO callback requires a valid email and provider identifier.'
+      );
+    }
+
+    const domain = getEmailDomain(body.email);
+    const configuredProviderId = env.ssoDomainMap[domain];
+
+    if (!configuredProviderId || configuredProviderId !== body.providerId) {
+      reply.code(404);
+      return buildErrorResponse(
+        'AUTH_SSO_NOT_CONFIGURED',
+        'No SSO provider is configured for this email domain.'
+      );
+    }
+
+    const result = authService.loginWithSso({
+      email: body.email,
+      providerId: body.providerId,
+      displayName: body.displayName,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: SsoCallbackResponse = {
+      ok: true,
+      data: result.data,
     };
 
     return response;

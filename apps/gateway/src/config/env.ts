@@ -1,3 +1,7 @@
+import type { AuthUserStatus } from '@agentifui/shared/auth';
+
+type SsoJitUserStatus = Extract<AuthUserStatus, 'pending' | 'active'>;
+
 export type GatewayEnv = {
   nodeEnv: 'development' | 'test' | 'production';
   host: string;
@@ -5,6 +9,7 @@ export type GatewayEnv = {
   corsOrigin: boolean | string;
   ssoDomainMap: Record<string, string>;
   defaultTenantId: string;
+  defaultSsoUserStatus: SsoJitUserStatus;
   authLockoutThreshold: number;
   authLockoutDurationMs: number;
 };
@@ -12,6 +17,7 @@ export type GatewayEnv = {
 const DEFAULT_GATEWAY_HOST = '0.0.0.0';
 const DEFAULT_GATEWAY_PORT = 4000;
 const DEFAULT_TENANT_ID = 'dev-tenant';
+const DEFAULT_SSO_JIT_USER_STATUS: SsoJitUserStatus = 'pending';
 const DEFAULT_AUTH_LOCKOUT_THRESHOLD = 5;
 const DEFAULT_AUTH_LOCKOUT_DURATION_MS = 30 * 60 * 1000;
 
@@ -77,6 +83,18 @@ function parseSsoDomainMap(value: string | undefined): Record<string, string> {
     }, {});
 }
 
+function parseSsoJitUserStatus(value: string | undefined): SsoJitUserStatus {
+  if (!value) {
+    return DEFAULT_SSO_JIT_USER_STATUS;
+  }
+
+  if (value === 'pending' || value === 'active') {
+    return value;
+  }
+
+  throw new Error(`Invalid GATEWAY_SSO_JIT_DEFAULT_STATUS value: ${value}`);
+}
+
 export function parseGatewayEnv(source: NodeJS.ProcessEnv): GatewayEnv {
   return {
     nodeEnv: parseNodeEnv(source.NODE_ENV),
@@ -88,6 +106,9 @@ export function parseGatewayEnv(source: NodeJS.ProcessEnv): GatewayEnv {
         : true,
     ssoDomainMap: parseSsoDomainMap(source.GATEWAY_SSO_DOMAINS),
     defaultTenantId: source.GATEWAY_DEFAULT_TENANT_ID ?? DEFAULT_TENANT_ID,
+    defaultSsoUserStatus: parseSsoJitUserStatus(
+      source.GATEWAY_SSO_JIT_DEFAULT_STATUS
+    ),
     authLockoutThreshold: parsePositiveInteger(
       source.GATEWAY_AUTH_LOCKOUT_THRESHOLD,
       DEFAULT_AUTH_LOCKOUT_THRESHOLD,

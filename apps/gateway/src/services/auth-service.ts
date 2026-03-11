@@ -1,12 +1,14 @@
 import type {
   AuthErrorCode,
   AuthUser,
+  AuthUserStatus,
   InvitationAcceptRequest,
   InvitationAcceptResponse,
   LoginRequest,
   LoginResponse,
   RegisterRequest,
   RegisterResponse,
+  SsoCallbackResponse,
 } from '@agentifui/shared/auth';
 import { validatePassword } from '@agentifui/shared/auth';
 import {
@@ -16,6 +18,8 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto';
+
+type SsoJitUserStatus = Extract<AuthUserStatus, 'pending' | 'active'>;
 
 type StoredUser = AuthUser & {
   passwordHash: string;
@@ -38,6 +42,7 @@ type StoredInvitation = {
 
 type AuthServiceOptions = {
   defaultTenantId: string;
+  defaultSsoUserStatus: SsoJitUserStatus;
   lockoutThreshold: number;
   lockoutDurationMs: number;
 };
@@ -310,6 +315,56 @@ export function createAuthService(options: AuthServiceOptions) {
     };
   }
 
+  function loginWithSso(input: {
+    email: string;
+    providerId: string;
+    displayName?: string;
+  }): AuthResult<SsoCallbackResponse['data']> {
+    const email = normalizeEmail(input.email);
+    const now = new Date().toISOString();
+    const existingUser = users.get(email);
+
+    if (existingUser) {
+      existingUser.lastLoginAt = now;
+
+      return {
+        ok: true,
+        data: {
+          sessionToken: randomUUID(),
+          providerId: input.providerId,
+          createdViaJit: false,
+          user: toAuthUser(existingUser),
+        },
+      };
+    }
+
+    const user: StoredUser = {
+      id: randomUUID(),
+      tenantId: options.defaultTenantId,
+      email,
+      displayName:
+        input.displayName?.trim() || email.split('@')[0] || 'AgentifUI User',
+      status: options.defaultSsoUserStatus,
+      createdAt: now,
+      lastLoginAt: now,
+      passwordHash: hashPassword(randomUUID()),
+      failedLoginCount: 0,
+      lockedUntil: null,
+    };
+
+    users.set(email, user);
+
+    return {
+      ok: true,
+      data: {
+        sessionToken: randomUUID(),
+        providerId: input.providerId,
+        createdViaJit: true,
+        user: toAuthUser(user),
+      },
+    };
+  }
+
   function clear() {
     users.clear();
     invitations.clear();
@@ -375,6 +430,7 @@ export function createAuthService(options: AuthServiceOptions) {
     register,
     acceptInvitation,
     login,
+    loginWithSso,
     clear,
     seedPendingUser,
     seedInvitation,

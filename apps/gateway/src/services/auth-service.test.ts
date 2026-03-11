@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { createAuthService } from './auth-service.js';
 
-function createTestService() {
+function createTestService(overrides: Partial<Parameters<typeof createAuthService>[0]> = {}) {
   return createAuthService({
     defaultTenantId: 'tenant-test',
+    defaultSsoUserStatus: 'pending',
     lockoutThreshold: 5,
     lockoutDurationMs: 1800000,
+    ...overrides,
   });
 }
 
@@ -178,6 +180,59 @@ describe('auth service', () => {
       ok: false,
       code: 'AUTH_INVITE_LINK_EXPIRED',
       statusCode: 410,
+    });
+  });
+
+  it('creates a pending jit user through sso login by default', () => {
+    const service = createTestService();
+
+    const result = service.loginWithSso({
+      email: 'jit@iflabx.com',
+      providerId: 'iflabx-sso',
+      displayName: 'JIT User',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        providerId: 'iflabx-sso',
+        createdViaJit: true,
+        user: {
+          tenantId: 'tenant-test',
+          email: 'jit@iflabx.com',
+          displayName: 'JIT User',
+          status: 'pending',
+        },
+      },
+    });
+  });
+
+  it('reuses an existing sso user on the next callback', () => {
+    const service = createTestService({
+      defaultSsoUserStatus: 'active',
+    });
+
+    service.loginWithSso({
+      email: 'jit@iflabx.com',
+      providerId: 'iflabx-sso',
+      displayName: 'JIT User',
+    });
+
+    const result = service.loginWithSso({
+      email: 'jit@iflabx.com',
+      providerId: 'iflabx-sso',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        providerId: 'iflabx-sso',
+        createdViaJit: false,
+        user: {
+          email: 'jit@iflabx.com',
+          status: 'active',
+        },
+      },
     });
   });
 });
