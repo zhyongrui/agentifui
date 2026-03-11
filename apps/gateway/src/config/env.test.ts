@@ -10,6 +10,9 @@ describe('parseGatewayEnv', () => {
       port: 4000,
       corsOrigin: true,
       ssoDomainMap: {},
+      defaultTenantId: 'dev-tenant',
+      authLockoutThreshold: 5,
+      authLockoutDurationMs: 1800000,
     });
   });
 
@@ -21,6 +24,9 @@ describe('parseGatewayEnv', () => {
         GATEWAY_PORT: '4100',
         GATEWAY_CORS_ORIGIN: 'http://localhost:3000',
         GATEWAY_SSO_DOMAINS: 'iflabx.com=iflabx-sso, agentifui.com=agentifui-saml',
+        GATEWAY_DEFAULT_TENANT_ID: 'tenant-a',
+        GATEWAY_AUTH_LOCKOUT_THRESHOLD: '3',
+        GATEWAY_AUTH_LOCKOUT_DURATION_MS: '60000',
       })
     ).toEqual({
       nodeEnv: 'production',
@@ -31,6 +37,9 @@ describe('parseGatewayEnv', () => {
         'iflabx.com': 'iflabx-sso',
         'agentifui.com': 'agentifui-saml',
       },
+      defaultTenantId: 'tenant-a',
+      authLockoutThreshold: 3,
+      authLockoutDurationMs: 60000,
     });
   });
 
@@ -40,5 +49,15 @@ describe('parseGatewayEnv', () => {
         GATEWAY_PORT: 'invalid',
       })
     ).toThrowError('Invalid GATEWAY_PORT value: invalid');
+  });
+
+  it('rejects invalid auth lockout values', () => {
+    expect(() =>
+      parseGatewayEnv({
+        GATEWAY_AUTH_LOCKOUT_THRESHOLD: '0',
+      })
+    ).toThrowError(
+      'Invalid GATEWAY_AUTH_LOCKOUT_THRESHOLD value: 0'
+    );
   });
 });

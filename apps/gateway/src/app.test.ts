@@ -8,6 +8,9 @@ const env = {
   port: 4000,
   corsOrigin: true,
   ssoDomainMap: {},
+  defaultTenantId: 'test-tenant',
+  authLockoutThreshold: 5,
+  authLockoutDurationMs: 1800000,
 };
 
 const app = await buildApp(env, { logger: false });

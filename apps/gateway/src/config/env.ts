@@ -4,10 +4,16 @@ export type GatewayEnv = {
   port: number;
   corsOrigin: boolean | string;
   ssoDomainMap: Record<string, string>;
+  defaultTenantId: string;
+  authLockoutThreshold: number;
+  authLockoutDurationMs: number;
 };
 
 const DEFAULT_GATEWAY_HOST = '0.0.0.0';
 const DEFAULT_GATEWAY_PORT = 4000;
+const DEFAULT_TENANT_ID = 'dev-tenant';
+const DEFAULT_AUTH_LOCKOUT_THRESHOLD = 5;
+const DEFAULT_AUTH_LOCKOUT_DURATION_MS = 30 * 60 * 1000;
 
 function parsePort(value: string | undefined): number {
   if (!value) {
@@ -21,6 +27,24 @@ function parsePort(value: string | undefined): number {
   }
 
   return port;
+}
+
+function parsePositiveInteger(
+  value: string | undefined,
+  defaultValue: number,
+  label: string
+): number {
+  if (!value) {
+    return defaultValue;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${label} value: ${value}`);
+  }
+
+  return parsed;
 }
 
 function parseNodeEnv(value: string | undefined): GatewayEnv['nodeEnv'] {
@@ -63,5 +87,16 @@ export function parseGatewayEnv(source: NodeJS.ProcessEnv): GatewayEnv {
         ? source.GATEWAY_CORS_ORIGIN
         : true,
     ssoDomainMap: parseSsoDomainMap(source.GATEWAY_SSO_DOMAINS),
+    defaultTenantId: source.GATEWAY_DEFAULT_TENANT_ID ?? DEFAULT_TENANT_ID,
+    authLockoutThreshold: parsePositiveInteger(
+      source.GATEWAY_AUTH_LOCKOUT_THRESHOLD,
+      DEFAULT_AUTH_LOCKOUT_THRESHOLD,
+      'GATEWAY_AUTH_LOCKOUT_THRESHOLD'
+    ),
+    authLockoutDurationMs: parsePositiveInteger(
+      source.GATEWAY_AUTH_LOCKOUT_DURATION_MS,
+      DEFAULT_AUTH_LOCKOUT_DURATION_MS,
+      'GATEWAY_AUTH_LOCKOUT_DURATION_MS'
+    ),
   };
 }

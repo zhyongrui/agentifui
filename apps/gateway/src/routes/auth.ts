@@ -1,7 +1,12 @@
 import type {
   AuthErrorResponse,
+  InvitationAcceptRequest,
+  InvitationAcceptResponse,
   LoginRequest,
+  LoginResponse,
+  LogoutResponse,
   RegisterRequest,
+  RegisterResponse,
   SsoDiscoveryRequest,
   SsoDiscoveryResponse,
 } from '@agentifui/shared/auth';
@@ -9,6 +14,7 @@ import { validatePassword } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
 
 import type { GatewayEnv } from '../config/env.js';
+import type { AuthService } from '../services/auth-service.js';
 
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -35,7 +41,8 @@ function getEmailDomain(email: string): string {
 
 export async function registerAuthRoutes(
   app: FastifyInstance,
-  env: GatewayEnv
+  env: GatewayEnv,
+  authService: AuthService
 ) {
   app.post('/auth/sso/discovery', async (request, reply) => {
     const body = (request.body ?? {}) as Partial<SsoDiscoveryRequest>;
@@ -86,11 +93,24 @@ export async function registerAuthRoutes(
       );
     }
 
-    reply.code(501);
-    return buildErrorResponse(
-      'AUTH_NOT_IMPLEMENTED',
-      'Registration persistence will be implemented in the next slice iteration.'
-    );
+    const result = authService.register({
+      email: body.email,
+      password: body.password,
+      displayName: body.displayName,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: RegisterResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    reply.code(201);
+    return response;
   });
 
   app.post('/auth/login', async (request, reply) => {
@@ -104,28 +124,74 @@ export async function registerAuthRoutes(
       );
     }
 
-    reply.code(501);
-    return buildErrorResponse(
-      'AUTH_NOT_IMPLEMENTED',
-      'Credential verification will be implemented in the next slice iteration.'
-    );
+    const result = authService.login({
+      email: body.email,
+      password: body.password,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: LoginResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
   });
 
   app.post('/auth/logout', async () => {
-    return {
+    const response: LogoutResponse = {
       ok: true,
       data: {
         loggedOut: true,
       },
     };
+
+    return response;
   });
 
-  app.post('/auth/invitations/accept', async (_request, reply) => {
-    reply.code(501);
-    return buildErrorResponse(
-      'AUTH_NOT_IMPLEMENTED',
-      'Invitation activation will be implemented in the next slice iteration.'
-    );
+  app.post('/auth/invitations/accept', async (request, reply) => {
+    const body = (request.body ?? {}) as Partial<InvitationAcceptRequest>;
+
+    if (!body.token || !body.password) {
+      reply.code(400);
+      return buildErrorResponse(
+        'AUTH_INVALID_PAYLOAD',
+        'Invitation activation requires a token and password.'
+      );
+    }
+
+    const validation = validatePassword(body.password);
+
+    if (!validation.isValid) {
+      reply.code(400);
+      return buildErrorResponse(
+        'AUTH_PASSWORD_TOO_WEAK',
+        'Password does not satisfy the current password policy.',
+        validation
+      );
+    }
+
+    const result = authService.acceptInvitation({
+      token: body.token,
+      password: body.password,
+      displayName: body.displayName,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: InvitationAcceptResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
   });
 
   app.post('/auth/mfa/verify', async (_request, reply) => {

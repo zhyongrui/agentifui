@@ -33,6 +33,11 @@ button {
   font: inherit;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .shell {
   min-height: 100vh;
   display: grid;
@@ -98,4 +103,24 @@ button {
 
 .primary:hover {
   background: var(--accent-strong);
+}
+
+.notice {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.notice.error {
+  border: 1px solid rgba(146, 44, 44, 0.18);
+  background: rgba(190, 58, 58, 0.1);
+  color: #7b1d1d;
+}
+
+.notice.success {
+  border: 1px solid rgba(13, 107, 77, 0.18);
+  background: rgba(13, 107, 77, 0.1);
+  color: var(--accent-strong);
 }
