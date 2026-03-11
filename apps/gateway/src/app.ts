@@ -5,6 +5,7 @@ import { registerBasePlugins } from './plugins/base.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerRootRoutes } from './routes/root.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
+import { createAuditService, type AuditService } from './services/audit-service.js';
 import { createAuthService, type AuthService } from './services/auth-service.js';
 import {
   createWorkspaceService,
@@ -14,6 +15,7 @@ import {
 type BuildAppOptions = {
   logger?: boolean;
   authService?: AuthService;
+  auditService?: AuditService;
   workspaceService?: WorkspaceService;
 };
 
@@ -41,11 +43,12 @@ export async function buildApp(
       lockoutThreshold: env.authLockoutThreshold,
       lockoutDurationMs: env.authLockoutDurationMs,
     });
+  const auditService = options.auditService ?? createAuditService();
   const workspaceService = options.workspaceService ?? createWorkspaceService();
 
   await registerBasePlugins(app, env);
   await registerRootRoutes(app, env);
-  await registerAuthRoutes(app, env, authService);
+  await registerAuthRoutes(app, env, authService, auditService);
   await registerWorkspaceRoutes(app, authService, workspaceService);
 
   return app;

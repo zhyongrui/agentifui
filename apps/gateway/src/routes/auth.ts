@@ -1,4 +1,5 @@
 import type {
+  AuthAuditListResponse,
   AuthErrorResponse,
   InvitationAcceptRequest,
   InvitationAcceptResponse,
@@ -16,6 +17,7 @@ import { validatePassword } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
 
 import type { GatewayEnv } from '../config/env.js';
+import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 
 function isValidEmail(value: string): boolean {
@@ -41,10 +43,25 @@ function getEmailDomain(email: string): string {
   return email.split('@')[1]!.toLowerCase();
 }
 
+function readBearerToken(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const [scheme, token] = value.split(' ');
+
+  if (scheme?.toLowerCase() !== 'bearer' || !token) {
+    return null;
+  }
+
+  return token;
+}
+
 export async function registerAuthRoutes(
   app: FastifyInstance,
   env: GatewayEnv,
-  authService: AuthService
+  authService: AuthService,
+  auditService: AuditService
 ) {
   app.post('/auth/sso/discovery', async (request, reply) => {
     const body = (request.body ?? {}) as Partial<SsoDiscoveryRequest>;
@@ -174,8 +191,37 @@ export async function registerAuthRoutes(
 
     if (!result.ok) {
       reply.code(result.statusCode);
+      const actor = authService.getUserByEmail(body.email);
+
+      auditService.recordEvent({
+        tenantId: actor?.tenantId ?? null,
+        actorUserId: actor?.id ?? null,
+        action: 'auth.login.failed',
+        level: 'warning',
+        entityType: 'user',
+        entityId: actor?.id ?? null,
+        ipAddress: request.ip,
+        payload: {
+          email: body.email.trim().toLowerCase(),
+          code: result.code,
+        },
+      });
+
       return buildErrorResponse(result.code, result.message, result.details);
     }
+
+    auditService.recordEvent({
+      tenantId: result.data.user.tenantId,
+      actorUserId: result.data.user.id,
+      action: 'auth.login.succeeded',
+      entityType: 'session',
+      entityId: result.data.sessionToken,
+      ipAddress: request.ip,
+      payload: {
+        email: result.data.user.email,
+        authMethod: 'password',
+      },
+    });
 
     const response: LoginResponse = {
       ok: true,
@@ -185,11 +231,77 @@ export async function registerAuthRoutes(
     return response;
   });
 
-  app.post('/auth/logout', async () => {
+  app.post('/auth/logout', async request => {
+    const sessionToken = readBearerToken(request.headers.authorization);
+    const actor = sessionToken ? authService.getUserBySessionToken(sessionToken) : null;
+
+    if (sessionToken && actor) {
+      auditService.recordEvent({
+        tenantId: actor.tenantId,
+        actorUserId: actor.id,
+        action: 'auth.logout.succeeded',
+        entityType: 'session',
+        entityId: sessionToken,
+        ipAddress: request.ip,
+        payload: {
+          email: actor.email,
+        },
+      });
+    }
+
     const response: LogoutResponse = {
       ok: true,
       data: {
         loggedOut: true,
+      },
+    };
+
+    return response;
+  });
+
+  app.get('/auth/audit-events', async (request, reply) => {
+    const sessionToken = readBearerToken(request.headers.authorization);
+
+    if (!sessionToken) {
+      reply.code(401);
+      return buildErrorResponse(
+        'AUTH_UNAUTHORIZED',
+        'A valid session token is required to query audit events.'
+      );
+    }
+
+    const user = authService.getUserBySessionToken(sessionToken);
+
+    if (!user) {
+      reply.code(401);
+      return buildErrorResponse(
+        'AUTH_UNAUTHORIZED',
+        'The current session is missing or has expired.'
+      );
+    }
+
+    if (user.status !== 'active') {
+      reply.code(403);
+      return buildErrorResponse(
+        'AUTH_FORBIDDEN',
+        'Only active users can query audit events.',
+        {
+          status: user.status,
+        }
+      );
+    }
+
+    const query = (request.query ?? {}) as { limit?: string };
+    const parsedLimit = query.limit ? Number.parseInt(query.limit, 10) : Number.NaN;
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 100) : 20;
+
+    const response: AuthAuditListResponse = {
+      ok: true,
+      data: {
+        events: auditService.listEvents({
+          tenantId: user.tenantId,
+          limit,
+        }),
       },
     };
 

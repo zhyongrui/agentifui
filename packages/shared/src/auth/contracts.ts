@@ -29,6 +29,8 @@ export type SsoCallbackRequest = {
 export type AuthErrorCode =
   | 'AUTH_INVALID_PAYLOAD'
   | 'AUTH_INVALID_EMAIL'
+  | 'AUTH_UNAUTHORIZED'
+  | 'AUTH_FORBIDDEN'
   | 'AUTH_EMAIL_ALREADY_EXISTS'
   | 'AUTH_INVALID_CREDENTIALS'
   | 'AUTH_ACCOUNT_LOCKED'
@@ -50,6 +52,28 @@ export type AuthUser = {
   status: AuthUserStatus;
   createdAt: string;
   lastLoginAt: string | null;
+};
+
+export type AuthAuditLevel = 'info' | 'warning' | 'critical';
+
+export type AuthAuditAction =
+  | 'auth.login.succeeded'
+  | 'auth.login.failed'
+  | 'auth.logout.succeeded';
+
+export type AuthAuditEntityType = 'user' | 'session';
+
+export type AuthAuditEvent = {
+  id: string;
+  tenantId: string | null;
+  actorUserId: string | null;
+  action: AuthAuditAction;
+  level: AuthAuditLevel;
+  entityType: AuthAuditEntityType;
+  entityId: string | null;
+  ipAddress: string | null;
+  payload: Record<string, unknown>;
+  occurredAt: string;
 };
 
 export type AuthErrorResponse = {
@@ -98,4 +122,8 @@ export type SsoCallbackResponse = AuthSuccessResponse<{
 
 export type LogoutResponse = AuthSuccessResponse<{
   loggedOut: true;
+}>;
+
+export type AuthAuditListResponse = AuthSuccessResponse<{
+  events: AuthAuditEvent[];
 }>;

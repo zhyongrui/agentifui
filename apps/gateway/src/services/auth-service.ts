@@ -385,6 +385,12 @@ export function createAuthService(options: AuthServiceOptions) {
     return user ? toAuthUser(user) : null;
   }
 
+  function getUserByEmail(email: string): AuthUser | null {
+    const user = users.get(normalizeEmail(email));
+
+    return user ? toAuthUser(user) : null;
+  }
+
   function clear() {
     users.clear();
     invitations.clear();
@@ -453,6 +459,7 @@ export function createAuthService(options: AuthServiceOptions) {
     login,
     loginWithSso,
     getUserBySessionToken,
+    getUserByEmail,
     clear,
     seedPendingUser,
     seedInvitation,

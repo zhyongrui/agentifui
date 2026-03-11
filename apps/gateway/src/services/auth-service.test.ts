@@ -77,6 +77,10 @@ describe('auth service', () => {
         email: 'developer@iflabx.com',
         status: 'active',
       });
+      expect(service.getUserByEmail('developer@iflabx.com')).toMatchObject({
+        email: 'developer@iflabx.com',
+        status: 'active',
+      });
     }
   });
 
