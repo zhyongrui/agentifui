@@ -1,0 +1,38 @@
+# Development Log
+
+这里记录代码仓库的实际开发过程。
+
+这个目录参考了 `openclawcode` 的按天开发日志方式，但做了适配：
+
+- 设计规范和验收标准仍以 `agentifui-docs` 为准
+- 这里不写产品规划，只写实际实施记录
+- 一天一篇，文件名使用 `YYYY-MM-DD.md`
+- 记录以“已发生并已验证”的事实为主，不写空泛日报
+
+## 推荐写法
+
+每篇日志建议包含这些部分：
+
+1. `Goal`
+2. `Inputs Reviewed`
+3. `Implementation`
+4. `Validation`
+5. `Open Questions` 或 `Notes`
+
+如果当天跨多个切片，可以按切片分段：
+
+- `S1-1 Authentication Base`
+- `M0 Engineering Runway`
+- `S2-1 Gateway Protocol`
+
+## 记录规则
+
+- 写清楚改动落在哪些目录或文件
+- 写清楚为什么做这一步
+- 写清楚本地怎么验证
+- 如果没能完成，也要写清楚阻塞点
+- 不要把开发计划复制进来，计划放 `docs/plans/`
+
+## 当前索引
+
+- [2026-03-11](./2026-03-11.md)

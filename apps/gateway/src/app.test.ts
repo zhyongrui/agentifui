@@ -1,0 +1,47 @@
+import { afterAll, describe, expect, it } from 'vitest';
+
+import { buildApp } from './app.js';
+
+const env = {
+  nodeEnv: 'test' as const,
+  host: '127.0.0.1',
+  port: 4000,
+  corsOrigin: true,
+  ssoDomainMap: {},
+};
+
+const app = await buildApp(env, { logger: false });
+
+afterAll(async () => {
+  await app.close();
+});
+
+describe('gateway app', () => {
+  it('returns a health payload', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/health',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: 'ok',
+      service: 'gateway',
+      slice: 'M0',
+      environment: 'test',
+    });
+  });
+
+  it('returns the root description payload', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      name: 'AgentifUI Gateway',
+      environment: 'test',
+    });
+  });
+});

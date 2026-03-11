@@ -10,3 +10,5 @@ export const schemaModules = [
 ] as const;
 
 export type SchemaModule = (typeof schemaModules)[number];
+
+export * from './schema/index.js';

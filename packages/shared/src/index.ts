@@ -7,3 +7,5 @@ export type HealthResponse = {
   service: 'web' | 'gateway';
   time: string;
 };
+
+export * from './auth/index.js';

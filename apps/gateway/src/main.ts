@@ -1,39 +1,12 @@
-import cors from '@fastify/cors';
-import Fastify from 'fastify';
-
-const port = Number(process.env.GATEWAY_PORT ?? 4000);
-const host = process.env.GATEWAY_HOST ?? '0.0.0.0';
+import { buildApp } from './app.js';
+import { parseGatewayEnv } from './config/env.js';
 
 async function start() {
-  const app = Fastify({
-    logger: {
-      transport:
-        process.env.NODE_ENV === 'development'
-          ? { target: 'pino-pretty' }
-          : undefined,
-    },
-  });
-
-  await app.register(cors, { origin: true });
-
-  app.get('/health', async () => {
-    return {
-      status: 'ok',
-      service: 'gateway',
-      slice: 'S1-1',
-      time: new Date().toISOString(),
-    };
-  });
-
-  app.get('/', async () => {
-    return {
-      name: 'AgentifUI Gateway',
-      message: 'Start implementing auth routes for S1-1 here.',
-    };
-  });
+  const env = parseGatewayEnv(process.env);
+  const app = await buildApp(env);
 
   try {
-    await app.listen({ host, port });
+    await app.listen({ host: env.host, port: env.port });
   } catch (error) {
     app.log.error(error);
     process.exit(1);
