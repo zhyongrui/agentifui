@@ -6,6 +6,7 @@ import type {
   SsoCallbackResponse,
   SsoDiscoveryResponse,
 } from '@agentifui/shared/auth';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
@@ -253,6 +254,10 @@ export default function LoginPage() {
           </>
         )}
       </form>
+
+      <p className="helper-text">
+        No account yet? <Link href="/register">Create one here</Link>.
+      </p>
     </section>
   );
 }

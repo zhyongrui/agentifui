@@ -177,3 +177,15 @@ button:disabled {
 .detail-label {
   color: var(--muted);
 }
+
+.helper-text {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.helper-text a {
+  color: var(--accent);
+  font-weight: 600;
+}
