@@ -1,11 +1,20 @@
 import type {
   AuthAuditListResponse,
   AuthErrorResponse,
+  AuthUser,
   InvitationAcceptRequest,
   InvitationAcceptResponse,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
+  MfaDisableRequest,
+  MfaDisableResponse,
+  MfaEnableRequest,
+  MfaEnableResponse,
+  MfaSetupResponse,
+  MfaStatusResponse,
+  MfaVerifyRequest,
+  MfaVerifyResponse,
   RegisterRequest,
   RegisterResponse,
   SsoCallbackRequest,
@@ -55,6 +64,61 @@ function readBearerToken(value: string | undefined): string | null {
   }
 
   return token;
+}
+
+function requireActiveSession(
+  authService: AuthService,
+  authorization: string | undefined,
+  messages: {
+    unauthorized: string;
+    forbidden: string;
+  }
+):
+  | {
+      ok: true;
+      user: AuthUser;
+      sessionToken: string;
+    }
+  | {
+      ok: false;
+      statusCode: 401 | 403;
+      response: AuthErrorResponse;
+    } {
+  const sessionToken = readBearerToken(authorization);
+
+  if (!sessionToken) {
+    return {
+      ok: false,
+      statusCode: 401,
+      response: buildErrorResponse('AUTH_UNAUTHORIZED', messages.unauthorized),
+    };
+  }
+
+  const user = authService.getUserBySessionToken(sessionToken);
+
+  if (!user) {
+    return {
+      ok: false,
+      statusCode: 401,
+      response: buildErrorResponse('AUTH_UNAUTHORIZED', 'The current session is missing or has expired.'),
+    };
+  }
+
+  if (user.status !== 'active') {
+    return {
+      ok: false,
+      statusCode: 403,
+      response: buildErrorResponse('AUTH_FORBIDDEN', messages.forbidden, {
+        status: user.status,
+      }),
+    };
+  }
+
+  return {
+    ok: true,
+    user,
+    sessionToken,
+  };
 }
 
 export async function registerAuthRoutes(
@@ -121,6 +185,22 @@ export async function registerAuthRoutes(
     if (!result.ok) {
       reply.code(result.statusCode);
       return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    if (result.data.user.status === 'active') {
+      auditService.recordEvent({
+        tenantId: result.data.user.tenantId,
+        actorUserId: result.data.user.id,
+        action: 'auth.login.succeeded',
+        entityType: 'session',
+        entityId: result.data.sessionToken,
+        ipAddress: request.ip,
+        payload: {
+          email: result.data.user.email,
+          authMethod: 'sso',
+          providerId: result.data.providerId,
+        },
+      });
     }
 
     const response: SsoCallbackResponse = {
@@ -191,21 +271,24 @@ export async function registerAuthRoutes(
 
     if (!result.ok) {
       reply.code(result.statusCode);
-      const actor = authService.getUserByEmail(body.email);
 
-      auditService.recordEvent({
-        tenantId: actor?.tenantId ?? null,
-        actorUserId: actor?.id ?? null,
-        action: 'auth.login.failed',
-        level: 'warning',
-        entityType: 'user',
-        entityId: actor?.id ?? null,
-        ipAddress: request.ip,
-        payload: {
-          email: body.email.trim().toLowerCase(),
-          code: result.code,
-        },
-      });
+      if (result.code !== 'AUTH_MFA_REQUIRED') {
+        const actor = authService.getUserByEmail(body.email);
+
+        auditService.recordEvent({
+          tenantId: actor?.tenantId ?? null,
+          actorUserId: actor?.id ?? null,
+          action: 'auth.login.failed',
+          level: 'warning',
+          entityType: 'user',
+          entityId: actor?.id ?? null,
+          ipAddress: request.ip,
+          payload: {
+            email: body.email.trim().toLowerCase(),
+            code: result.code,
+          },
+        });
+      }
 
       return buildErrorResponse(result.code, result.message, result.details);
     }
@@ -259,50 +342,196 @@ export async function registerAuthRoutes(
     return response;
   });
 
-  app.get('/auth/audit-events', async (request, reply) => {
-    const sessionToken = readBearerToken(request.headers.authorization);
+  app.get('/auth/mfa/status', async (request, reply) => {
+    const access = requireActiveSession(authService, request.headers.authorization, {
+      unauthorized: 'A valid session token is required to access MFA settings.',
+      forbidden: 'Only active users can access MFA settings.',
+    });
 
-    if (!sessionToken) {
-      reply.code(401);
-      return buildErrorResponse(
-        'AUTH_UNAUTHORIZED',
-        'A valid session token is required to query audit events.'
-      );
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
     }
 
-    const user = authService.getUserBySessionToken(sessionToken);
+    const status = authService.getMfaStatus(access.user.id);
 
-    if (!user) {
-      reply.code(401);
-      return buildErrorResponse(
-        'AUTH_UNAUTHORIZED',
-        'The current session is missing or has expired.'
-      );
+    if (!status) {
+      reply.code(404);
+      return buildErrorResponse('AUTH_INVALID_PAYLOAD', 'The target user could not be found.');
     }
 
-    if (user.status !== 'active') {
-      reply.code(403);
-      return buildErrorResponse(
-        'AUTH_FORBIDDEN',
-        'Only active users can query audit events.',
-        {
-          status: user.status,
-        }
-      );
-    }
-
-    const query = (request.query ?? {}) as { limit?: string };
-    const parsedLimit = query.limit ? Number.parseInt(query.limit, 10) : Number.NaN;
-    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 100) : 20;
-
-    const response: AuthAuditListResponse = {
+    const response: MfaStatusResponse = {
       ok: true,
-      data: {
-        events: auditService.listEvents({
-          tenantId: user.tenantId,
-          limit,
-        }),
+      data: status,
+    };
+
+    return response;
+  });
+
+  app.post('/auth/mfa/setup', async (request, reply) => {
+    const access = requireActiveSession(authService, request.headers.authorization, {
+      unauthorized: 'A valid session token is required to start MFA setup.',
+      forbidden: 'Only active users can start MFA setup.',
+    });
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const result = authService.startMfaSetup(access.user.id);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: MfaSetupResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.post('/auth/mfa/enable', async (request, reply) => {
+    const access = requireActiveSession(authService, request.headers.authorization, {
+      unauthorized: 'A valid session token is required to enable MFA.',
+      forbidden: 'Only active users can enable MFA.',
+    });
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const body = (request.body ?? {}) as Partial<MfaEnableRequest>;
+
+    if (!body.setupToken || !body.code) {
+      reply.code(400);
+      return buildErrorResponse(
+        'AUTH_INVALID_PAYLOAD',
+        'MFA enable requires a setup token and a TOTP code.'
+      );
+    }
+
+    const result = authService.enableMfa(access.user.id, {
+      setupToken: body.setupToken,
+      code: body.code,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'auth.mfa.enabled',
+      entityType: 'user',
+      entityId: access.user.id,
+      ipAddress: request.ip,
+      payload: {
+        email: access.user.email,
       },
+    });
+
+    const response: MfaEnableResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.post('/auth/mfa/disable', async (request, reply) => {
+    const access = requireActiveSession(authService, request.headers.authorization, {
+      unauthorized: 'A valid session token is required to disable MFA.',
+      forbidden: 'Only active users can disable MFA.',
+    });
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const body = (request.body ?? {}) as Partial<MfaDisableRequest>;
+
+    if (!body.code) {
+      reply.code(400);
+      return buildErrorResponse(
+        'AUTH_INVALID_PAYLOAD',
+        'MFA disable requires the current TOTP code.'
+      );
+    }
+
+    const result = authService.disableMfa(access.user.id, {
+      code: body.code,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'auth.mfa.disabled',
+      entityType: 'user',
+      entityId: access.user.id,
+      ipAddress: request.ip,
+      payload: {
+        email: access.user.email,
+      },
+    });
+
+    const response: MfaDisableResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.post('/auth/mfa/verify', async (request, reply) => {
+    const body = (request.body ?? {}) as Partial<MfaVerifyRequest>;
+
+    if (!body.ticket || !body.code) {
+      reply.code(400);
+      return buildErrorResponse(
+        'AUTH_INVALID_PAYLOAD',
+        'MFA verification requires a ticket and a TOTP code.'
+      );
+    }
+
+    const result = authService.verifyMfa({
+      ticket: body.ticket,
+      code: body.code,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    auditService.recordEvent({
+      tenantId: result.data.user.tenantId,
+      actorUserId: result.data.user.id,
+      action: 'auth.login.succeeded',
+      entityType: 'session',
+      entityId: result.data.sessionToken,
+      ipAddress: request.ip,
+      payload: {
+        email: result.data.user.email,
+        authMethod: 'mfa',
+      },
+    });
+
+    const response: MfaVerifyResponse = {
+      ok: true,
+      data: result.data,
     };
 
     return response;
@@ -349,11 +578,31 @@ export async function registerAuthRoutes(
     return response;
   });
 
-  app.post('/auth/mfa/verify', async (_request, reply) => {
-    reply.code(501);
-    return buildErrorResponse(
-      'AUTH_NOT_IMPLEMENTED',
-      'MFA verification will be implemented in the next slice iteration.'
-    );
+  app.get('/auth/audit-events', async (request, reply) => {
+    const access = requireActiveSession(authService, request.headers.authorization, {
+      unauthorized: 'A valid session token is required to query audit events.',
+      forbidden: 'Only active users can query audit events.',
+    });
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const query = (request.query ?? {}) as { limit?: string };
+    const parsedLimit = query.limit ? Number.parseInt(query.limit, 10) : Number.NaN;
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 100) : 20;
+
+    const response: AuthAuditListResponse = {
+      ok: true,
+      data: {
+        events: auditService.listEvents({
+          tenantId: access.user.tenantId,
+          limit,
+        }),
+      },
+    };
+
+    return response;
   });
 }

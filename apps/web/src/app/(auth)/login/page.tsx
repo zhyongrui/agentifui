@@ -12,7 +12,12 @@ import type { FormEvent } from 'react';
 import { Suspense, useEffect, useState } from 'react';
 
 import { continueWithSso, discoverSso, loginWithPassword } from '../../../lib/auth-client';
-import { getPostAuthRedirect, writeAuthSession } from '../../../lib/auth-session';
+import {
+  clearAuthMfaTicket,
+  getPostAuthRedirect,
+  writeAuthMfaTicket,
+  writeAuthSession,
+} from '../../../lib/auth-session';
 
 type SsoState =
   | {
@@ -38,6 +43,18 @@ function isAuthErrorResponse(
 
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function getMfaTicketFromError(response: AuthErrorResponse): string | null {
+  if (response.error.code !== 'AUTH_MFA_REQUIRED' || !isRecord(response.error.details)) {
+    return null;
+  }
+
+  return typeof response.error.details.ticket === 'string' ? response.error.details.ticket : null;
 }
 
 function LoginPageContent() {
@@ -137,6 +154,18 @@ function LoginPageContent() {
       });
 
       if (isAuthErrorResponse(response)) {
+        const mfaTicket = getMfaTicketFromError(response);
+
+        if (mfaTicket) {
+          writeAuthMfaTicket(window.sessionStorage, {
+            ticket: mfaTicket,
+            email: email.trim().toLowerCase(),
+            createdAt: new Date().toISOString(),
+          });
+          router.push('/auth/mfa');
+          return;
+        }
+
         if (response.error.code === 'AUTH_ACCOUNT_PENDING') {
           router.push('/auth/pending');
           return;
@@ -146,6 +175,7 @@ function LoginPageContent() {
         return;
       }
 
+      clearAuthMfaTicket(window.sessionStorage);
       writeAuthSession(window.sessionStorage, response.data);
       router.push(getPostAuthRedirect(response.data.user.status));
     } catch {
@@ -170,10 +200,23 @@ function LoginPageContent() {
       });
 
       if (isAuthErrorResponse(response)) {
+        const mfaTicket = getMfaTicketFromError(response);
+
+        if (mfaTicket) {
+          writeAuthMfaTicket(window.sessionStorage, {
+            ticket: mfaTicket,
+            email: email.trim().toLowerCase(),
+            createdAt: new Date().toISOString(),
+          });
+          router.push('/auth/mfa');
+          return;
+        }
+
         setError(response.error.message);
         return;
       }
 
+      clearAuthMfaTicket(window.sessionStorage);
       writeAuthSession(window.sessionStorage, response.data);
       router.push(getPostAuthRedirect(response.data.user.status));
     } catch {

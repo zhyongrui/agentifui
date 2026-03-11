@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createAuthService } from './auth-service.js';
+import { generateTotpCode } from './totp-service.js';
 
 function createTestService(overrides: Partial<Parameters<typeof createAuthService>[0]> = {}) {
   return createAuthService({
@@ -134,6 +135,118 @@ describe('auth service', () => {
       ok: false,
       code: 'AUTH_ACCOUNT_PENDING',
       statusCode: 403,
+    });
+  });
+
+  it('requires an mfa code after a user enables totp', () => {
+    const service = createTestService();
+
+    service.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    const user = service.getUserByEmail('developer@iflabx.com');
+
+    expect(user).not.toBeNull();
+
+    if (!user) {
+      throw new Error('expected user to exist');
+    }
+
+    const setup = service.startMfaSetup(user.id);
+
+    expect(setup.ok).toBe(true);
+
+    if (!setup.ok) {
+      throw new Error('expected mfa setup to succeed');
+    }
+
+    const enable = service.enableMfa(user.id, {
+      setupToken: setup.data.setupToken,
+      code: generateTotpCode(setup.data.manualEntryKey),
+    });
+
+    expect(enable).toMatchObject({
+      ok: true,
+      data: {
+        enabled: true,
+      },
+    });
+
+    const login = service.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login).toMatchObject({
+      ok: false,
+      code: 'AUTH_MFA_REQUIRED',
+      statusCode: 401,
+    });
+
+    if (login.ok) {
+      throw new Error('expected mfa login to require verification');
+    }
+
+    const verify = service.verifyMfa({
+      ticket: (login.details as { ticket: string }).ticket,
+      code: generateTotpCode(setup.data.manualEntryKey),
+    });
+
+    expect(verify.ok).toBe(true);
+
+    if (verify.ok) {
+      expect(verify.data.sessionToken).toEqual(expect.any(String));
+      expect(verify.data.user.lastLoginAt).toEqual(expect.any(String));
+    }
+  });
+
+  it('disables mfa after verifying the current totp code', () => {
+    const service = createTestService();
+
+    service.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    const user = service.getUserByEmail('developer@iflabx.com');
+
+    expect(user).not.toBeNull();
+
+    if (!user) {
+      throw new Error('expected user to exist');
+    }
+
+    const setup = service.startMfaSetup(user.id);
+
+    expect(setup.ok).toBe(true);
+
+    if (!setup.ok) {
+      throw new Error('expected mfa setup to succeed');
+    }
+
+    const enable = service.enableMfa(user.id, {
+      setupToken: setup.data.setupToken,
+      code: generateTotpCode(setup.data.manualEntryKey),
+    });
+
+    expect(enable.ok).toBe(true);
+
+    const disable = service.disableMfa(user.id, {
+      code: generateTotpCode(setup.data.manualEntryKey),
+    });
+
+    expect(disable).toMatchObject({
+      ok: true,
+      data: {
+        enabled: false,
+      },
+    });
+
+    expect(service.getMfaStatus(user.id)).toEqual({
+      enabled: false,
+      enrolledAt: null,
     });
   });
 

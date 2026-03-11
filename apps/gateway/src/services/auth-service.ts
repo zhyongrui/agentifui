@@ -6,6 +6,14 @@ import type {
   InvitationAcceptResponse,
   LoginRequest,
   LoginResponse,
+  MfaDisableRequest,
+  MfaDisableResponse,
+  MfaEnableRequest,
+  MfaEnableResponse,
+  MfaSetupResponse,
+  MfaStatusResponse,
+  MfaVerifyRequest,
+  MfaVerifyResponse,
   RegisterRequest,
   RegisterResponse,
   SsoCallbackResponse,
@@ -19,12 +27,21 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 
+import { createOtpAuthUri, generateTotpSecret, verifyTotpCode } from './totp-service.js';
+
+const MFA_ISSUER = 'AgentifUI';
+const MFA_SETUP_TTL_MS = 10 * 60 * 1000;
+const MFA_TICKET_TTL_MS = 10 * 60 * 1000;
+
 type SsoJitUserStatus = Extract<AuthUserStatus, 'pending' | 'active'>;
 
 type StoredUser = AuthUser & {
   passwordHash: string;
   failedLoginCount: number;
   lockedUntil: string | null;
+  mfaEnabled: boolean;
+  mfaSecret: string | null;
+  mfaEnrolledAt: string | null;
 };
 
 type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
@@ -38,6 +55,19 @@ type StoredInvitation = {
   expiresAt: string;
   acceptedAt: string | null;
   createdAt: string;
+};
+
+type StoredMfaSetup = {
+  email: string;
+  secret: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+type StoredMfaTicket = {
+  email: string;
+  createdAt: string;
+  expiresAt: string;
 };
 
 type AuthServiceOptions = {
@@ -110,6 +140,8 @@ export function createAuthService(options: AuthServiceOptions) {
   const users = new Map<string, StoredUser>();
   const invitations = new Map<string, StoredInvitation>();
   const sessions = new Map<string, string>();
+  const mfaSetups = new Map<string, StoredMfaSetup>();
+  const mfaTickets = new Map<string, StoredMfaTicket>();
 
   function fail<T>(
     statusCode: number,
@@ -126,6 +158,16 @@ export function createAuthService(options: AuthServiceOptions) {
     };
   }
 
+  function findStoredUserById(userId: string): StoredUser | null {
+    for (const user of users.values()) {
+      if (user.id === userId) {
+        return user;
+      }
+    }
+
+    return null;
+  }
+
   function issueSession(user: StoredUser) {
     const sessionToken = randomUUID();
     sessions.set(sessionToken, user.email);
@@ -134,6 +176,18 @@ export function createAuthService(options: AuthServiceOptions) {
       sessionToken,
       user: toAuthUser(user),
     };
+  }
+
+  function issueMfaTicket(user: StoredUser): string {
+    const ticket = randomUUID();
+
+    mfaTickets.set(ticket, {
+      email: user.email,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + MFA_TICKET_TTL_MS).toISOString(),
+    });
+
+    return ticket;
   }
 
   function register(input: RegisterRequest): AuthResult<RegisterResponse['data']> {
@@ -172,6 +226,9 @@ export function createAuthService(options: AuthServiceOptions) {
       passwordHash: hashPassword(input.password),
       failedLoginCount: 0,
       lockedUntil: null,
+      mfaEnabled: false,
+      mfaSecret: null,
+      mfaEnrolledAt: null,
     };
 
     users.set(email, user);
@@ -244,6 +301,9 @@ export function createAuthService(options: AuthServiceOptions) {
       passwordHash: hashPassword(input.password),
       failedLoginCount: 0,
       lockedUntil: null,
+      mfaEnabled: false,
+      mfaSecret: null,
+      mfaEnrolledAt: null,
     };
 
     users.set(email, user);
@@ -315,6 +375,18 @@ export function createAuthService(options: AuthServiceOptions) {
 
     user.failedLoginCount = 0;
     user.lockedUntil = null;
+
+    if (user.mfaEnabled && user.mfaSecret) {
+      return fail(
+        401,
+        'AUTH_MFA_REQUIRED',
+        'This account requires a TOTP verification code to finish signing in.',
+        {
+          ticket: issueMfaTicket(user),
+        }
+      );
+    }
+
     user.lastLoginAt = new Date().toISOString();
 
     return {
@@ -335,6 +407,17 @@ export function createAuthService(options: AuthServiceOptions) {
     const existingUser = users.get(email);
 
     if (existingUser) {
+      if (existingUser.status === 'active' && existingUser.mfaEnabled && existingUser.mfaSecret) {
+        return fail(
+          401,
+          'AUTH_MFA_REQUIRED',
+          'This account requires a TOTP verification code to finish signing in.',
+          {
+            ticket: issueMfaTicket(existingUser),
+          }
+        );
+      }
+
       existingUser.lastLoginAt = now;
 
       return {
@@ -359,6 +442,9 @@ export function createAuthService(options: AuthServiceOptions) {
       passwordHash: hashPassword(randomUUID()),
       failedLoginCount: 0,
       lockedUntil: null,
+      mfaEnabled: false,
+      mfaSecret: null,
+      mfaEnrolledAt: null,
     };
 
     users.set(email, user);
@@ -391,10 +477,177 @@ export function createAuthService(options: AuthServiceOptions) {
     return user ? toAuthUser(user) : null;
   }
 
+  function getMfaStatus(userId: string): MfaStatusResponse['data'] | null {
+    const user = findStoredUserById(userId);
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      enabled: user.mfaEnabled,
+      enrolledAt: user.mfaEnrolledAt,
+    };
+  }
+
+  function startMfaSetup(userId: string): AuthResult<MfaSetupResponse['data']> {
+    const user = findStoredUserById(userId);
+
+    if (!user) {
+      return fail(404, 'AUTH_INVALID_PAYLOAD', 'The target user could not be found.');
+    }
+
+    if (user.mfaEnabled) {
+      return fail(409, 'AUTH_INVALID_PAYLOAD', 'MFA is already enabled for this account.');
+    }
+
+    const setupToken = randomUUID();
+    const secret = generateTotpSecret();
+
+    mfaSetups.set(setupToken, {
+      email: user.email,
+      secret,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + MFA_SETUP_TTL_MS).toISOString(),
+    });
+
+    return {
+      ok: true,
+      data: {
+        setupToken,
+        manualEntryKey: secret,
+        otpauthUri: createOtpAuthUri({
+          issuer: MFA_ISSUER,
+          accountName: user.email,
+          secret,
+        }),
+        issuer: MFA_ISSUER,
+        accountName: user.email,
+      },
+    };
+  }
+
+  function enableMfa(
+    userId: string,
+    input: MfaEnableRequest
+  ): AuthResult<MfaEnableResponse['data']> {
+    const user = findStoredUserById(userId);
+
+    if (!user) {
+      return fail(404, 'AUTH_INVALID_PAYLOAD', 'The target user could not be found.');
+    }
+
+    const setup = mfaSetups.get(input.setupToken);
+
+    if (!setup || setup.email !== user.email) {
+      return fail(
+        400,
+        'AUTH_INVALID_PAYLOAD',
+        'The MFA setup token is invalid or belongs to another account.'
+      );
+    }
+
+    if (Date.now() > Date.parse(setup.expiresAt)) {
+      mfaSetups.delete(input.setupToken);
+
+      return fail(400, 'AUTH_INVALID_PAYLOAD', 'The MFA setup token has expired.');
+    }
+
+    if (!verifyTotpCode(setup.secret, input.code)) {
+      return fail(401, 'AUTH_MFA_INVALID_CODE', 'The provided MFA code is invalid.');
+    }
+
+    const enrolledAt = new Date().toISOString();
+    user.mfaEnabled = true;
+    user.mfaSecret = setup.secret;
+    user.mfaEnrolledAt = enrolledAt;
+    mfaSetups.delete(input.setupToken);
+
+    return {
+      ok: true,
+      data: {
+        enabled: true,
+        enrolledAt,
+      },
+    };
+  }
+
+  function disableMfa(
+    userId: string,
+    input: MfaDisableRequest
+  ): AuthResult<MfaDisableResponse['data']> {
+    const user = findStoredUserById(userId);
+
+    if (!user) {
+      return fail(404, 'AUTH_INVALID_PAYLOAD', 'The target user could not be found.');
+    }
+
+    if (!user.mfaEnabled || !user.mfaSecret) {
+      return fail(400, 'AUTH_INVALID_PAYLOAD', 'MFA is not enabled for this account.');
+    }
+
+    if (!verifyTotpCode(user.mfaSecret, input.code)) {
+      return fail(401, 'AUTH_MFA_INVALID_CODE', 'The provided MFA code is invalid.');
+    }
+
+    user.mfaEnabled = false;
+    user.mfaSecret = null;
+    user.mfaEnrolledAt = null;
+
+    for (const [ticket, storedTicket] of mfaTickets.entries()) {
+      if (storedTicket.email === user.email) {
+        mfaTickets.delete(ticket);
+      }
+    }
+
+    return {
+      ok: true,
+      data: {
+        enabled: false,
+      },
+    };
+  }
+
+  function verifyMfa(input: MfaVerifyRequest): AuthResult<MfaVerifyResponse['data']> {
+    const ticket = mfaTickets.get(input.ticket);
+
+    if (!ticket) {
+      return fail(400, 'AUTH_INVALID_PAYLOAD', 'The MFA verification ticket is invalid.');
+    }
+
+    if (Date.now() > Date.parse(ticket.expiresAt)) {
+      mfaTickets.delete(input.ticket);
+      return fail(400, 'AUTH_INVALID_PAYLOAD', 'The MFA verification ticket has expired.');
+    }
+
+    const user = users.get(ticket.email);
+
+    if (!user || !user.mfaEnabled || !user.mfaSecret) {
+      mfaTickets.delete(input.ticket);
+      return fail(400, 'AUTH_INVALID_PAYLOAD', 'MFA is not enabled for this account.');
+    }
+
+    if (!verifyTotpCode(user.mfaSecret, input.code)) {
+      return fail(401, 'AUTH_MFA_INVALID_CODE', 'The provided MFA code is invalid.');
+    }
+
+    mfaTickets.delete(input.ticket);
+    user.lastLoginAt = new Date().toISOString();
+
+    return {
+      ok: true,
+      data: {
+        ...issueSession(user),
+      },
+    };
+  }
+
   function clear() {
     users.clear();
     invitations.clear();
     sessions.clear();
+    mfaSetups.clear();
+    mfaTickets.clear();
   }
 
   function seedPendingUser(input: RegisterRequest) {
@@ -460,6 +713,11 @@ export function createAuthService(options: AuthServiceOptions) {
     loginWithSso,
     getUserBySessionToken,
     getUserByEmail,
+    getMfaStatus,
+    startMfaSetup,
+    enableMfa,
+    disableMfa,
+    verifyMfa,
     clear,
     seedPendingUser,
     seedInvitation,

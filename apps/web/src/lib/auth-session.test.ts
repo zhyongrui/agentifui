@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AUTH_MFA_TICKET_KEY,
   AUTH_SESSION_KEY,
   canAccessProtectedPath,
+  clearAuthMfaTicket,
   getPostAuthRedirect,
   getProtectedRedirect,
+  parseAuthMfaTicket,
   parseAuthSession,
+  readAuthMfaTicket,
   readAuthSession,
+  writeAuthMfaTicket,
   writeAuthSession,
 } from './auth-session.js';
 
@@ -84,5 +89,31 @@ describe('auth session helpers', () => {
   it('rejects malformed session payloads', () => {
     expect(parseAuthSession('{"invalid":true}')).toBeNull();
     expect(parseAuthSession('not-json')).toBeNull();
+  });
+
+  it('reads and clears pending mfa tickets from storage', () => {
+    const storage = createStorage();
+
+    writeAuthMfaTicket(storage, {
+      ticket: 'mfa-ticket-1',
+      email: 'active@iflabx.com',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+
+    expect(storage.getItem(AUTH_MFA_TICKET_KEY)).toContain('mfa-ticket-1');
+    expect(readAuthMfaTicket(storage)).toEqual({
+      ticket: 'mfa-ticket-1',
+      email: 'active@iflabx.com',
+      createdAt: '2026-03-11T00:00:00.000Z',
+    });
+
+    clearAuthMfaTicket(storage);
+
+    expect(readAuthMfaTicket(storage)).toBeNull();
+  });
+
+  it('rejects malformed mfa ticket payloads', () => {
+    expect(parseAuthMfaTicket('{"invalid":true}')).toBeNull();
+    expect(parseAuthMfaTicket('not-json')).toBeNull();
   });
 });

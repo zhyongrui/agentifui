@@ -39,6 +39,7 @@ export type AuthErrorCode =
   | 'AUTH_INVITE_LINK_EXPIRED'
   | 'AUTH_SSO_NOT_CONFIGURED'
   | 'AUTH_MFA_REQUIRED'
+  | 'AUTH_MFA_INVALID_CODE'
   | 'AUTH_ACCOUNT_PENDING'
   | 'AUTH_NOT_IMPLEMENTED';
 
@@ -59,7 +60,9 @@ export type AuthAuditLevel = 'info' | 'warning' | 'critical';
 export type AuthAuditAction =
   | 'auth.login.succeeded'
   | 'auth.login.failed'
-  | 'auth.logout.succeeded';
+  | 'auth.logout.succeeded'
+  | 'auth.mfa.enabled'
+  | 'auth.mfa.disabled';
 
 export type AuthAuditEntityType = 'user' | 'session';
 
@@ -126,4 +129,45 @@ export type LogoutResponse = AuthSuccessResponse<{
 
 export type AuthAuditListResponse = AuthSuccessResponse<{
   events: AuthAuditEvent[];
+}>;
+
+export type MfaStatusResponse = AuthSuccessResponse<{
+  enabled: boolean;
+  enrolledAt: string | null;
+}>;
+
+export type MfaSetupResponse = AuthSuccessResponse<{
+  setupToken: string;
+  manualEntryKey: string;
+  otpauthUri: string;
+  issuer: string;
+  accountName: string;
+}>;
+
+export type MfaEnableRequest = {
+  setupToken: string;
+  code: string;
+};
+
+export type MfaEnableResponse = AuthSuccessResponse<{
+  enabled: true;
+  enrolledAt: string;
+}>;
+
+export type MfaDisableRequest = {
+  code: string;
+};
+
+export type MfaDisableResponse = AuthSuccessResponse<{
+  enabled: false;
+}>;
+
+export type MfaVerifyRequest = {
+  ticket: string;
+  code: string;
+};
+
+export type MfaVerifyResponse = AuthSuccessResponse<{
+  sessionToken: string;
+  user: AuthUser;
 }>;

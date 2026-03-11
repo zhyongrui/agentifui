@@ -1,15 +1,31 @@
-import type { AuthUserStatus, LoginResponse, SsoCallbackResponse } from '@agentifui/shared/auth';
+import type {
+  AuthUserStatus,
+  LoginResponse,
+  MfaVerifyResponse,
+  SsoCallbackResponse,
+} from '@agentifui/shared/auth';
 
 export const AUTH_SESSION_KEY = 'agentifui.session';
+export const AUTH_MFA_TICKET_KEY = 'agentifui.mfa.ticket';
 
 export type AuthSession = {
   sessionToken: string;
   user: LoginResponse['data']['user'];
 };
 
+export type AuthMfaTicket = {
+  ticket: string;
+  email: string;
+  createdAt: string;
+};
+
 export type ProtectedPath = '/apps' | '/settings/profile' | '/settings/security';
 
-type SessionPayload = LoginResponse['data'] | SsoCallbackResponse['data'] | AuthSession;
+type SessionPayload =
+  | LoginResponse['data']
+  | MfaVerifyResponse['data']
+  | SsoCallbackResponse['data']
+  | AuthSession;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -127,4 +143,49 @@ export function writeAuthSession(
 
 export function clearAuthSession(storage: Pick<Storage, 'removeItem'>) {
   storage.removeItem(AUTH_SESSION_KEY);
+}
+
+export function parseAuthMfaTicket(raw: string | null): AuthMfaTicket | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    if (
+      typeof parsed.ticket !== 'string' ||
+      typeof parsed.email !== 'string' ||
+      typeof parsed.createdAt !== 'string'
+    ) {
+      return null;
+    }
+
+    return {
+      ticket: parsed.ticket,
+      email: parsed.email,
+      createdAt: parsed.createdAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function readAuthMfaTicket(storage: Pick<Storage, 'getItem'>): AuthMfaTicket | null {
+  return parseAuthMfaTicket(storage.getItem(AUTH_MFA_TICKET_KEY));
+}
+
+export function writeAuthMfaTicket(
+  storage: Pick<Storage, 'setItem'>,
+  payload: AuthMfaTicket
+) {
+  storage.setItem(AUTH_MFA_TICKET_KEY, JSON.stringify(payload));
+}
+
+export function clearAuthMfaTicket(storage: Pick<Storage, 'removeItem'>) {
+  storage.removeItem(AUTH_MFA_TICKET_KEY);
 }

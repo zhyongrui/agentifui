@@ -191,6 +191,32 @@ button:disabled {
   font-weight: 600;
 }
 
+.security-card {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.security-card h2 {
+  margin: 0;
+}
+
+.security-code-block {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.security-code-block code {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .shell-main {
   place-items: start center;
   padding-block: 40px;
