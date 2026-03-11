@@ -73,6 +73,10 @@ describe('auth service', () => {
     if (result.ok) {
       expect(result.data.sessionToken).toEqual(expect.any(String));
       expect(result.data.user.lastLoginAt).toEqual(expect.any(String));
+      expect(service.getUserBySessionToken(result.data.sessionToken)).toMatchObject({
+        email: 'developer@iflabx.com',
+        status: 'active',
+      });
     }
   });
 

@@ -6,7 +6,7 @@ import type {
 } from '@agentifui/shared/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { FormEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 
 import { acceptInvitation } from '../../../lib/auth-client';
 
@@ -16,7 +16,7 @@ function isAuthErrorResponse(
   return value.ok === false;
 }
 
-export default function InviteAcceptPage() {
+function InviteAcceptPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [token, setToken] = useState('');
@@ -113,5 +113,23 @@ export default function InviteAcceptPage() {
         </form>
       </section>
     </main>
+  );
+}
+
+export default function InviteAcceptPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="shell">
+          <section className="panel">
+            <span className="eyebrow">S1-1</span>
+            <h1>Accept Invitation</h1>
+            <p className="lead">Loading invitation details...</p>
+          </section>
+        </main>
+      }
+    >
+      <InviteAcceptPageContent />
+    </Suspense>
   );
 }

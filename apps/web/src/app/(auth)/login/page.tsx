@@ -9,7 +9,7 @@ import type {
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { FormEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 
 import { continueWithSso, discoverSso, loginWithPassword } from '../../../lib/auth-client';
 import { getPostAuthRedirect, writeAuthSession } from '../../../lib/auth-session';
@@ -40,7 +40,7 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
@@ -259,5 +259,21 @@ export default function LoginPage() {
         No account yet? <Link href="/register">Create one here</Link>.
       </p>
     </section>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <section className="panel">
+          <span className="eyebrow">S1-1</span>
+          <h1>Login</h1>
+          <p className="lead">Loading sign-in options...</p>
+        </section>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
   );
 }

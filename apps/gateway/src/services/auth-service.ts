@@ -109,6 +109,7 @@ function toAuthUser(user: StoredUser): AuthUser {
 export function createAuthService(options: AuthServiceOptions) {
   const users = new Map<string, StoredUser>();
   const invitations = new Map<string, StoredInvitation>();
+  const sessions = new Map<string, string>();
 
   function fail<T>(
     statusCode: number,
@@ -122,6 +123,16 @@ export function createAuthService(options: AuthServiceOptions) {
       code,
       message,
       details,
+    };
+  }
+
+  function issueSession(user: StoredUser) {
+    const sessionToken = randomUUID();
+    sessions.set(sessionToken, user.email);
+
+    return {
+      sessionToken,
+      user: toAuthUser(user),
     };
   }
 
@@ -309,8 +320,7 @@ export function createAuthService(options: AuthServiceOptions) {
     return {
       ok: true,
       data: {
-        sessionToken: randomUUID(),
-        user: toAuthUser(user),
+        ...issueSession(user),
       },
     };
   }
@@ -330,10 +340,9 @@ export function createAuthService(options: AuthServiceOptions) {
       return {
         ok: true,
         data: {
-          sessionToken: randomUUID(),
+          ...issueSession(existingUser),
           providerId: input.providerId,
           createdViaJit: false,
-          user: toAuthUser(existingUser),
         },
       };
     }
@@ -357,17 +366,29 @@ export function createAuthService(options: AuthServiceOptions) {
     return {
       ok: true,
       data: {
-        sessionToken: randomUUID(),
+        ...issueSession(user),
         providerId: input.providerId,
         createdViaJit: true,
-        user: toAuthUser(user),
       },
     };
+  }
+
+  function getUserBySessionToken(sessionToken: string): AuthUser | null {
+    const email = sessions.get(sessionToken);
+
+    if (!email) {
+      return null;
+    }
+
+    const user = users.get(email);
+
+    return user ? toAuthUser(user) : null;
   }
 
   function clear() {
     users.clear();
     invitations.clear();
+    sessions.clear();
   }
 
   function seedPendingUser(input: RegisterRequest) {
@@ -431,6 +452,7 @@ export function createAuthService(options: AuthServiceOptions) {
     acceptInvitation,
     login,
     loginWithSso,
+    getUserBySessionToken,
     clear,
     seedPendingUser,
     seedInvitation,

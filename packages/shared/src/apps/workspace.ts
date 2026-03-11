@@ -5,7 +5,7 @@ import type {
   QuotaUsage,
   WorkspaceApp,
   WorkspaceSections,
-} from './contracts';
+} from './contracts.js';
 
 type BuildWorkspaceSectionsArgs = {
   apps: WorkspaceApp[];
@@ -102,8 +102,9 @@ export function listQuotaAlerts(usages: QuotaUsage[]): QuotaUsage[] {
   return usages
     .filter(usage => getQuotaSeverity(usage) !== 'healthy')
     .sort((left, right) => {
-      const severityDiff =
-        severityPriority[getQuotaSeverity(right)] - severityPriority[getQuotaSeverity(left)];
+      const rightSeverity = severityPriority[getQuotaSeverity(right)] ?? 0;
+      const leftSeverity = severityPriority[getQuotaSeverity(left)] ?? 0;
+      const severityDiff = rightSeverity - leftSeverity;
 
       if (severityDiff !== 0) {
         return severityDiff;

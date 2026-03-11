@@ -5,17 +5,17 @@ import {
   evaluateAppLaunch,
   getQuotaSeverity,
   listQuotaAlerts,
-  listVisibleApps,
   type AppLaunchGuard,
   type QuotaServiceState,
   type QuotaUsage,
   type WorkspaceApp,
+  type WorkspaceCatalog,
   type WorkspaceGroup,
 } from '@agentifui/shared/apps';
+import { useRouter } from 'next/navigation';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 
 import {
-  createAppsWorkspaceFixture,
   readStoredGroupId,
   readStoredIds,
   recordRecentApp,
@@ -27,6 +27,8 @@ import {
   writeStoredGroupId,
   writeStoredIds,
 } from '../../../lib/apps-workspace';
+import { fetchWorkspaceCatalog } from '../../../lib/apps-client';
+import { clearAuthSession } from '../../../lib/auth-session';
 import { useProtectedSession } from '../../../lib/use-protected-session';
 
 type Notice = {
@@ -225,33 +227,94 @@ function WorkspaceSection({
 }
 
 export default function AppsPage() {
+  const router = useRouter();
   const { session, isLoading } = useProtectedSession('/apps');
+  const [workspace, setWorkspace] = useState<WorkspaceCatalog | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [activeGroupId, setActiveGroupId] = useState('');
   const [search, setSearch] = useState('');
-  const [quotaServiceState, setQuotaServiceState] = useState<QuotaServiceState>('available');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [hasLoadedWorkspaceState, setHasLoadedWorkspaceState] = useState(false);
   const deferredSearch = useDeferredValue(search);
-  const fixture = useMemo(
-    () => (session ? createAppsWorkspaceFixture(session) : null),
-    [session?.sessionToken, session?.user.id, session?.user.tenantId]
-  );
   const groupsById = useMemo(
-    () => new Map((fixture?.groups ?? []).map(group => [group.id, group])),
-    [fixture]
+    () => new Map((workspace?.groups ?? []).map(group => [group.id, group])),
+    [workspace]
   );
-  const activeGroup = fixture
+  const activeGroup = workspace
     ? groupsById.get(
         activeGroupId
-          ? resolveActiveGroupId(activeGroupId, fixture.memberGroupIds, fixture.initialActiveGroupId)
-          : fixture.initialActiveGroupId
-      ) ?? fixture.groups[0]
+          ? resolveActiveGroupId(
+              activeGroupId,
+              workspace.memberGroupIds,
+              workspace.defaultActiveGroupId
+            )
+          : workspace.defaultActiveGroupId
+      ) ?? workspace.groups[0]
     : null;
 
   useEffect(() => {
-    if (!fixture) {
+    if (!session) {
+      setWorkspace(null);
+      setWorkspaceError(null);
+      setNotice(null);
+      return;
+    }
+
+    let isCancelled = false;
+
+    setIsWorkspaceLoading(true);
+    setWorkspaceError(null);
+
+    fetchWorkspaceCatalog(session.sessionToken)
+      .then(result => {
+        if (isCancelled) {
+          return;
+        }
+
+        if (!result.ok) {
+          setWorkspace(null);
+
+          if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+            clearAuthSession(window.sessionStorage);
+            router.replace('/login');
+            return;
+          }
+
+          if (result.error.code === 'WORKSPACE_FORBIDDEN') {
+            router.replace('/auth/pending');
+            return;
+          }
+
+          setWorkspaceError(result.error.message);
+          return;
+        }
+
+        setWorkspace(result.data);
+      })
+      .catch(() => {
+        if (isCancelled) {
+          return;
+        }
+
+        setWorkspace(null);
+        setWorkspaceError('Apps workspace 加载失败，请稍后重试。');
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsWorkspaceLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [router, session]);
+
+  useEffect(() => {
+    if (!workspace) {
       setHasLoadedWorkspaceState(false);
       return;
     }
@@ -263,15 +326,15 @@ export default function AppsPage() {
     setActiveGroupId(
       resolveActiveGroupId(
         readStoredGroupId(storage, WORKSPACE_ACTIVE_GROUP_KEY),
-        fixture.memberGroupIds,
-        fixture.initialActiveGroupId
+        workspace.memberGroupIds,
+        workspace.defaultActiveGroupId
       )
     );
     setHasLoadedWorkspaceState(true);
-  }, [fixture]);
+  }, [workspace]);
 
   useEffect(() => {
-    if (!fixture || !hasLoadedWorkspaceState) {
+    if (!workspace || !hasLoadedWorkspaceState) {
       return;
     }
 
@@ -282,28 +345,39 @@ export default function AppsPage() {
     writeStoredGroupId(
       storage,
       WORKSPACE_ACTIVE_GROUP_KEY,
-      resolveActiveGroupId(activeGroupId, fixture.memberGroupIds, fixture.initialActiveGroupId)
+      resolveActiveGroupId(
+        activeGroupId,
+        workspace.memberGroupIds,
+        workspace.defaultActiveGroupId
+      )
     );
-  }, [activeGroupId, favoriteIds, fixture, hasLoadedWorkspaceState, recentIds]);
+  }, [activeGroupId, favoriteIds, hasLoadedWorkspaceState, recentIds, workspace]);
 
   if (isLoading) {
     return <p className="lead">Checking your session...</p>;
   }
 
-  if (!session || !fixture || !activeGroup) {
+  if (isWorkspaceLoading) {
+    return <p className="lead">Loading apps workspace...</p>;
+  }
+
+  if (workspaceError) {
+    return <div className="notice error">{workspaceError}</div>;
+  }
+
+  if (!session || !workspace || !activeGroup) {
     return null;
   }
 
   const currentActiveGroup = activeGroup;
   const quotaUsages =
-    fixture.quotaUsagesByGroupId[currentActiveGroup.id] ??
-    fixture.quotaUsagesByGroupId[fixture.initialActiveGroupId] ??
+    workspace.quotaUsagesByGroupId[currentActiveGroup.id] ??
+    workspace.quotaUsagesByGroupId[workspace.defaultActiveGroupId] ??
     [];
   const quotaAlerts = listQuotaAlerts(quotaUsages);
-  const visibleApps = listVisibleApps(fixture.apps, fixture.memberGroupIds);
   const sections = buildWorkspaceSections({
-    apps: fixture.apps,
-    memberGroupIds: fixture.memberGroupIds,
+    apps: workspace.apps,
+    memberGroupIds: workspace.memberGroupIds,
     favoriteIds,
     recentIds,
     search: deferredSearch,
@@ -353,15 +427,15 @@ export default function AppsPage() {
           <span className="eyebrow">S1-3 Workspace</span>
           <h1>Apps workspace</h1>
           <p className="lead">
-            欢迎回来，{session.user.displayName}。这里已经从占位页升级为可工作的应用目录切片，包含授权可见性、最近使用、收藏、搜索和配额边界预检。
+            欢迎回来，{session.user.displayName}。这里已经改为由 Gateway 返回真实工作台目录，前端仅保留收藏、最近使用、搜索和当前群组切换等本地交互状态。
           </p>
         </div>
         <div className="workspace-badges">
-          <span className="workspace-badge">{visibleApps.length} 个授权应用</span>
-          <span className="workspace-badge">
-            {fixture.apps.length - visibleApps.length} 个应用因授权未显示
-          </span>
+          <span className="workspace-badge">{workspace.apps.length} 个授权应用</span>
           <span className="workspace-badge">当前群组: {currentActiveGroup.name}</span>
+          <span className="workspace-badge">
+            目录时间: {new Date(workspace.generatedAt).toLocaleString()}
+          </span>
         </div>
       </div>
 
@@ -372,8 +446,8 @@ export default function AppsPage() {
             value={currentActiveGroup.id}
             onChange={event => setActiveGroupId(event.target.value)}
           >
-            {fixture.groups
-              .filter(group => fixture.memberGroupIds.includes(group.id))
+            {workspace.groups
+              .filter(group => workspace.memberGroupIds.includes(group.id))
               .map(group => (
                 <option key={group.id} value={group.id}>
                   {group.name}
@@ -391,28 +465,11 @@ export default function AppsPage() {
             onChange={event => setSearch(event.target.value)}
           />
         </label>
-
-        <div className="field workspace-toggle">
-          <span>Quota mode</span>
-          <button
-            className="secondary"
-            type="button"
-            onClick={() =>
-              setQuotaServiceState(currentState =>
-                currentState === 'available' ? 'degraded' : 'available'
-              )
-            }
-          >
-            {quotaServiceState === 'available'
-              ? '模拟配额服务降级'
-              : '恢复正常配额检查'}
-          </button>
-        </div>
       </div>
 
-      {quotaServiceState === 'degraded' ? (
+      {workspace.quotaServiceState === 'degraded' ? (
         <div className="notice info">
-          配额服务当前被模拟为不可用状态。应用目录仍然可浏览，但新启动会被统一暂停，这一行为对齐 `AC-S1-3-B01`。
+          配额服务当前由 Gateway 标记为降级状态。应用目录仍然可浏览，但新启动会被统一暂停，这一行为对齐 `AC-S1-3-B01`。
         </div>
       ) : null}
 
@@ -459,8 +516,8 @@ export default function AppsPage() {
         favoriteIds={favoriteIds}
         groupsById={groupsById}
         quotaUsages={quotaUsages}
-        quotaServiceState={quotaServiceState}
-        memberGroupIds={fixture.memberGroupIds}
+        quotaServiceState={workspace.quotaServiceState}
+        memberGroupIds={workspace.memberGroupIds}
         onToggleFavorite={handleToggleFavorite}
         onPrimaryAction={handlePrimaryAction}
         emptyMessage="还没有最近使用记录。先从下面的应用目录里打开一个应用。"
@@ -474,8 +531,8 @@ export default function AppsPage() {
         favoriteIds={favoriteIds}
         groupsById={groupsById}
         quotaUsages={quotaUsages}
-        quotaServiceState={quotaServiceState}
-        memberGroupIds={fixture.memberGroupIds}
+        quotaServiceState={workspace.quotaServiceState}
+        memberGroupIds={workspace.memberGroupIds}
         onToggleFavorite={handleToggleFavorite}
         onPrimaryAction={handlePrimaryAction}
         emptyMessage="还没有收藏应用。你可以在任何应用卡片上点击“收藏”。"
@@ -489,8 +546,8 @@ export default function AppsPage() {
         favoriteIds={favoriteIds}
         groupsById={groupsById}
         quotaUsages={quotaUsages}
-        quotaServiceState={quotaServiceState}
-        memberGroupIds={fixture.memberGroupIds}
+        quotaServiceState={workspace.quotaServiceState}
+        memberGroupIds={workspace.memberGroupIds}
         onToggleFavorite={handleToggleFavorite}
         onPrimaryAction={handlePrimaryAction}
         emptyMessage="没有匹配的应用，换个关键词试试。"

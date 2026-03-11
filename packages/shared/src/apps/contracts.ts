@@ -55,3 +55,29 @@ export type AppLaunchGuard = {
   eligibleGroupIds: string[];
   blockingScopes: QuotaUsage[];
 };
+
+export type WorkspaceCatalog = {
+  groups: WorkspaceGroup[];
+  memberGroupIds: string[];
+  defaultActiveGroupId: string;
+  apps: WorkspaceApp[];
+  quotaServiceState: QuotaServiceState;
+  quotaUsagesByGroupId: Record<string, QuotaUsage[]>;
+  generatedAt: string;
+};
+
+export type WorkspaceCatalogResponse = {
+  ok: true;
+  data: WorkspaceCatalog;
+};
+
+export type WorkspaceErrorCode = 'WORKSPACE_UNAUTHORIZED' | 'WORKSPACE_FORBIDDEN';
+
+export type WorkspaceErrorResponse = {
+  ok: false;
+  error: {
+    code: WorkspaceErrorCode;
+    message: string;
+    details?: unknown;
+  };
+};
