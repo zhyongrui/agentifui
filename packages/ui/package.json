@@ -1,0 +1,14 @@
+{
+  "name": "@agentifui/ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'ui lint is not configured yet'"
+  }
+}

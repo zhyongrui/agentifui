@@ -1,0 +1,25 @@
+{
+  "name": "agentifui",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:web": "turbo run dev --filter=@agentifui/web",
+    "dev:gateway": "turbo run dev --filter=@agentifui/gateway",
+    "build": "turbo run build",
+    "type-check": "turbo run type-check",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "@types/node": "^22.17.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.3",
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3"
+  }
+}

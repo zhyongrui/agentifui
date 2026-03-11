@@ -1,0 +1,22 @@
+{
+  "name": "@agentifui/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "type-check": "tsc --noEmit",
+    "lint": "echo 'web lint is not configured yet'"
+  },
+  "dependencies": {
+    "next": "16.0.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7"
+  }
+}
