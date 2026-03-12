@@ -5,6 +5,7 @@ import type {
   WorkspaceConversation,
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceRunStatus,
   WorkspaceRunType,
 } from '@agentifui/shared/apps';
 import { evaluateAppLaunch } from '@agentifui/shared/apps';
@@ -47,6 +48,19 @@ type WorkspaceConversationResult =
     }
   | WorkspaceLookupFailure;
 
+type WorkspaceRunUpdateInput = {
+  conversationId: string;
+  runId: string;
+  status: WorkspaceRunStatus;
+  inputs?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
+  error?: string;
+  elapsedTime?: number;
+  totalTokens?: number;
+  totalSteps?: number;
+  finishedAt?: string | null;
+};
+
 type WorkspaceService = {
   getCatalogForUser(user: AuthUser): WorkspaceCatalog | Promise<WorkspaceCatalog>;
   getPreferencesForUser(user: AuthUser): WorkspacePreferences | Promise<WorkspacePreferences>;
@@ -64,6 +78,10 @@ type WorkspaceService = {
   getConversationForUser(
     user: AuthUser,
     conversationId: string
+  ): WorkspaceConversationResult | Promise<WorkspaceConversationResult>;
+  updateConversationRunForUser(
+    user: AuthUser,
+    input: WorkspaceRunUpdateInput
   ): WorkspaceConversationResult | Promise<WorkspaceConversationResult>;
 };
 
@@ -304,7 +322,34 @@ export function createWorkspaceService(): WorkspaceService {
         data: conversationData,
       };
     },
+    updateConversationRunForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id || conversation.run.id !== input.runId) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      conversation.run.status = input.status;
+      conversation.updatedAt = input.finishedAt ?? new Date().toISOString();
+
+      const { userId, ...conversationData } = conversation;
+
+      return {
+        ok: true,
+        data: conversationData,
+      };
+    },
   };
 }
 
-export type { WorkspaceConversationResult, WorkspaceLaunchResult, WorkspaceService };
+export type {
+  WorkspaceConversationResult,
+  WorkspaceLaunchResult,
+  WorkspaceRunUpdateInput,
+  WorkspaceService,
+};

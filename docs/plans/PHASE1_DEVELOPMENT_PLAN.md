@@ -96,16 +96,23 @@
   - `runs`
   - launch 成功会直接进入 `/chat/[conversationId]`
   - `workspace_app_launches` 已关联 `conversation_id` / `run_id` / `trace_id`
+- `S2-1` 已完成第一版统一网关最小协议
+  - `GET /v1/models`
+  - `POST /v1/chat/completions`
+  - `POST /v1/chat/completions/:taskId/stop`
+  - 统一错误结构与 `X-Trace-ID` 已接入
+  - Web `/chat/[conversationId]` 已可触发真实 completion
 - 生产构建下的 Gateway 启动链路已修复 workspace package ESM 导出问题
 - 已建立真实浏览器 E2E 回归基线
   - `npm run test:e2e` 会自动拉起隔离的 Web/Gateway 进程
-  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异和后台占位页
+  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异、工作台 launch -> chat completion 和后台占位页
   - Linux 环境下会自动准备 Playwright 所需运行库并绕过本地代理干扰
 
 当前未完成：
 
 - `S1-2` Manager 授权边界、Break-glass、授权管理写接口和审计收口
-- `S1-3` 的真实 quota service 与后续消息流 / 历史列表衔接
+- `S1-3` 的真实 quota service 与历史列表衔接
+- `S2-2 / S2-3` 的消息持久化、渐进式流式渲染、文件上传和执行追踪闭环
 - CI 细化
 
 ## 5. 里程碑计划
@@ -434,13 +441,20 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - launchUrl 已改为真实 `/chat/[conversationId]` app surface
   - Gateway 已支持读取单个 workspace conversation
   - Web `/apps` 启动后会直接进入新的 chat shell 页面
+- `R7` `S2-1` 网关协议
+  - 新增 `/v1/models`
+  - 新增 blocking / SSE 双模态 `/v1/chat/completions`
+  - 新增 `/v1/chat/completions/:taskId/stop` soft-stop 协议
+  - 统一错误结构、`X-Trace-ID` 和 workspace session 校验已接入
+  - chat completion 已复用 launch 生成的 `conversation` / `run` / `trace`
+  - Web `/chat/[conversationId]` 已从占位 shell 切到真实 completion 调用
 
 下一个激活项：
 
-- `R7` `S2-1` 网关协议
-  - 定义 `/v1/chat/completions` 最小可调用协议
-  - 统一错误结构和 trace 透传
-  - 让当前 conversation/run 主键真正接到模型调用入口
+- `R8` `S2-2` 对话主链路
+  - 把当前 gateway SSE 输出接到前端渐进式渲染
+  - 开始补 stop UX、消息态和首版 transcript 持久化
+  - 让 chat shell 从 blocking demo 进入真实对话体验
 
 ### 12.2 Rolling Plan
 
@@ -517,7 +531,12 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - launch 会创建真实 `conversation` / `run`
   - 用户会直接进入 `/chat/[conversationId]`
   - 会话页已能读取 app、group、run、trace 基础上下文
-- `S1-3` 仍未完成真实 quota service、消息持久化、流式对话与历史列表衔接。
+- `S2-1` 已完成 `R7`：
+  - Gateway 已暴露 `/v1/models`
+  - `/v1/chat/completions` 已支持 blocking 与 SSE 响应格式
+  - `X-Trace-ID` 已和 launch 创建的 run trace 保持一致
+  - chat page 已能发起真实 completion 并回写 run status
+- `S1-3` / `S2-*` 仍未完成真实 quota service、消息持久化、渐进式流式渲染与历史列表衔接。
 - `S1-2` 已具备第一版角色体系、显式 deny 优先级和用户直授例外授权。
 - `S1-2` 仍未完成 Manager 授权路径、Break-glass 和授权写接口。
 

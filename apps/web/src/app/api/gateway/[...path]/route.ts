@@ -52,13 +52,17 @@ async function proxyGatewayRequest(
   });
 
   const responseHeaders = new Headers();
-  const upstreamContentType = upstreamResponse.headers.get('content-type');
+  const passthroughHeaders = ['content-type', 'cache-control', 'x-trace-id'];
 
-  if (upstreamContentType) {
-    responseHeaders.set('content-type', upstreamContentType);
+  for (const headerName of passthroughHeaders) {
+    const headerValue = upstreamResponse.headers.get(headerName);
+
+    if (headerValue) {
+      responseHeaders.set(headerName, headerValue);
+    }
   }
 
-  return new NextResponse(await upstreamResponse.text(), {
+  return new NextResponse(upstreamResponse.body, {
     status: upstreamResponse.status,
     headers: responseHeaders,
   });

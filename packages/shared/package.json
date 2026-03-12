@@ -17,6 +17,10 @@
     "./apps": {
       "types": "./src/apps/index.ts",
       "default": "./dist/apps/index.js"
+    },
+    "./chat": {
+      "types": "./src/chat/index.ts",
+      "default": "./dist/chat/index.js"
     }
   },
   "scripts": {

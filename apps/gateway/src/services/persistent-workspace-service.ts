@@ -22,6 +22,7 @@ import {
 import type {
   WorkspaceConversationResult,
   WorkspaceLaunchResult,
+  WorkspaceRunUpdateInput,
   WorkspaceService,
 } from './workspace-service.js';
 
@@ -735,6 +736,68 @@ async function readConversationForUser(
   return row ? toWorkspaceConversation(row) : null;
 }
 
+async function updateConversationRunForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceRunUpdateInput
+): Promise<WorkspaceConversation | null> {
+  const finishedAt =
+    input.finishedAt ??
+    (input.status === 'succeeded' || input.status === 'failed' || input.status === 'stopped'
+      ? new Date().toISOString()
+      : null);
+  const nextInputs = input.inputs ?? {};
+  const nextOutputs = input.outputs ?? {};
+  const nextUpdatedAt = finishedAt ?? new Date().toISOString();
+  const errorMessage = input.error ?? null;
+
+  const updated = await database.begin(async transaction => {
+    const sql = transaction as unknown as DatabaseClient;
+    const rows = await sql<{ id: string }[]>`
+      update runs r
+      set status = ${input.status},
+          inputs = r.inputs || ${nextInputs}::jsonb,
+          outputs = r.outputs || ${nextOutputs}::jsonb,
+          error = case
+            when ${errorMessage}::text is null then r.error
+            else ${errorMessage}
+          end,
+          elapsed_time = coalesce(${input.elapsedTime ?? null}::integer, r.elapsed_time),
+          total_tokens = coalesce(${input.totalTokens ?? null}::integer, r.total_tokens),
+          total_steps = coalesce(${input.totalSteps ?? null}::integer, r.total_steps),
+          finished_at = case
+            when ${finishedAt}::timestamptz is null then r.finished_at
+            else ${finishedAt}::timestamptz
+          end
+      from conversations c
+      where r.id = ${input.runId}
+        and r.conversation_id = ${input.conversationId}
+        and c.id = r.conversation_id
+        and c.user_id = ${user.id}
+      returning r.id
+    `;
+
+    if (rows.length === 0) {
+      return false;
+    }
+
+    await sql`
+      update conversations
+      set updated_at = ${nextUpdatedAt}::timestamptz
+      where id = ${input.conversationId}
+        and user_id = ${user.id}
+    `;
+
+    return true;
+  });
+
+  if (!updated) {
+    return null;
+  }
+
+  return readConversationForUser(database, user, input.conversationId);
+}
+
 export function createPersistentWorkspaceService(database: DatabaseClient): WorkspaceService {
   return {
     async getCatalogForUser(user) {
@@ -946,6 +1009,23 @@ export function createPersistentWorkspaceService(database: DatabaseClient): Work
     },
     async getConversationForUser(user, conversationId): Promise<WorkspaceConversationResult> {
       const conversation = await readConversationForUser(database, user, conversationId);
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: conversation,
+      };
+    },
+    async updateConversationRunForUser(user, input): Promise<WorkspaceConversationResult> {
+      const conversation = await updateConversationRunForUser(database, user, input);
 
       if (!conversation) {
         return {

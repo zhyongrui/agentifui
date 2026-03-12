@@ -4,6 +4,7 @@ import type {
   WorkspaceConversationResponse,
   WorkspacePreferencesResponse,
 } from '@agentifui/shared/apps';
+import type { ChatCompletionResponse } from '@agentifui/shared/chat';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
@@ -1121,6 +1122,158 @@ describe.sequential('persistent auth runtime', () => {
             },
           },
         } satisfies WorkspaceConversationResponse);
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'persists chat completion run updates and keeps the trace id stable',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        const register = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer',
+          },
+        });
+
+        expect(register.statusCode).toBe(201);
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+          user: {
+            id: string;
+          };
+        };
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+
+        const completion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            app_id: 'app_policy_watch',
+            conversation_id: launchBody.data.conversationId,
+            messages: [
+              {
+                role: 'user',
+                content: 'Summarize the new policy updates.',
+              },
+            ],
+          },
+        });
+
+        expect(completion.statusCode).toBe(200);
+        expect(completion.headers['x-trace-id']).toBe(launchBody.data.traceId);
+
+        const completionBody = completion.json() as ChatCompletionResponse;
+
+        expect(completionBody).toMatchObject({
+          id: launchBody.data.runId,
+          conversation_id: launchBody.data.conversationId,
+          trace_id: launchBody.data.traceId,
+          metadata: {
+            app_id: 'app_policy_watch',
+            run_id: launchBody.data.runId,
+            active_group_id: 'grp_research',
+          },
+        });
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const [runRow] = await runtimeDatabase<{
+            elapsed_time: number;
+            outputs: Record<string, unknown> | string;
+            status: string;
+            total_tokens: number;
+            trace_id: string;
+          }[]>`
+            select status, trace_id, total_tokens, elapsed_time, outputs
+            from runs
+            where id = ${launchBody.data.runId}
+            limit 1
+          `;
+
+          expect(runRow).toBeDefined();
+
+          if (!runRow) {
+            throw new Error('expected run row to exist');
+          }
+
+          const outputs =
+            typeof runRow.outputs === 'string'
+              ? (JSON.parse(runRow.outputs) as Record<string, unknown>)
+              : runRow.outputs;
+
+          expect(runRow.status).toBe('succeeded');
+          expect(runRow.trace_id).toBe(launchBody.data.traceId);
+          expect(runRow.total_tokens).toBeGreaterThan(0);
+          expect(runRow.elapsed_time).toBeGreaterThanOrEqual(0);
+          expect(outputs).toMatchObject({
+            assistant: {
+              content: expect.stringContaining('Policy Watch is now reachable through the AgentifUI gateway.'),
+              finishReason: 'stop',
+            },
+          });
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
+
+        const conversation = await app.inject({
+          method: 'GET',
+          url: `/workspace/conversations/${launchBody.data.conversationId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(conversation.statusCode).toBe(200);
+        expect((conversation.json() as WorkspaceConversationResponse).data.run.status).toBe(
+          'succeeded'
+        );
       } finally {
         if (!appClosed) {
           await app.close();

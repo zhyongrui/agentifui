@@ -150,7 +150,7 @@ async function expectConversationSurface(page: Page, appName: string) {
   await expect(page.getByRole('heading', { name: appName })).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText('Bootstrap context')).toBeVisible();
+  await expect(page.getByText('Gateway context')).toBeVisible();
 }
 
 async function seedInvitation(email: string) {
@@ -251,6 +251,15 @@ test('register/login/workspace controls work for a normal active user', async ({
   await appCard(page, 'Policy Watch').getByRole('button', { name: '打开应用' }).click();
   await expectConversationSurface(page, 'Policy Watch');
   await expect(page.getByText('Run status')).toBeVisible();
+  await page.getByLabel('Message').fill('Summarize the current policy changes for my group.');
+  await Promise.all([
+    waitForGatewayPost(page, '/v1/chat/completions'),
+    page.getByRole('button', { name: 'Send message' }).click(),
+  ]);
+  await expect(
+    page.getByText('Policy Watch is now reachable through the AgentifUI gateway.')
+  ).toBeVisible();
+  await expect(page.getByText('succeeded')).toBeVisible();
   await page.getByRole('link', { name: 'Back to Apps workspace' }).click();
   await expectAppsWorkspace(page);
   await expect(

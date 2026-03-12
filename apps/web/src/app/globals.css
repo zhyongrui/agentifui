@@ -626,6 +626,21 @@ button:disabled {
   gap: 14px;
 }
 
+.chat-empty-state {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  border: 1px dashed var(--border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.chat-empty-state p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .chat-bubble {
   display: grid;
   gap: 10px;
@@ -647,6 +662,21 @@ button:disabled {
 
 .chat-bubble.assistant {
   background: rgba(255, 255, 255, 0.92);
+}
+
+.chat-composer {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-composer-input {
+  width: 100%;
+  min-height: 128px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  resize: vertical;
 }
 
 @media (max-width: 960px) {

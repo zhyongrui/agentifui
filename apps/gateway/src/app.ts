@@ -10,6 +10,7 @@ import {
 import type { GatewayEnv } from './config/env.js';
 import { registerBasePlugins } from './plugins/base.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerChatRoutes } from './routes/chat.js';
 import { registerRootRoutes } from './routes/root.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { createAuditService, type AuditService } from './services/audit-service.js';
@@ -123,6 +124,7 @@ export async function buildApp(
   await registerRootRoutes(app, env);
   await registerAuthRoutes(app, env, authService, auditService);
   await registerWorkspaceRoutes(app, authService, workspaceService);
+  await registerChatRoutes(app, authService, workspaceService);
 
   return app;
 }

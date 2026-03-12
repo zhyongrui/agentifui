@@ -10,3 +10,4 @@ export type HealthResponse = {
 
 export * from './auth/index.js';
 export * from './apps/index.js';
+export * from './chat/index.js';
