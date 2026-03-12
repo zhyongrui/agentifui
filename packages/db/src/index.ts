@@ -12,7 +12,10 @@ export const schemaModules = [
   'better_auth_accounts',
   'better_auth_sessions',
   'better_auth_verifications',
+  'rbac_roles',
+  'rbac_user_roles',
   'workspace_apps',
+  'workspace_app_access_grants',
   'workspace_group_app_grants',
 ] as const;
 

@@ -6,9 +6,46 @@ import type {
   WorkspaceGroup,
 } from '@agentifui/shared/apps';
 
+type WorkspaceRoleSeed = {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  scope: 'platform' | 'tenant' | 'group' | 'user';
+  isSystem: boolean;
+};
+
 type WorkspaceAppFixture = WorkspaceApp & {
+  grantedRoleIds: string[];
   sortOrder: number;
 };
+
+const WORKSPACE_ROLES: WorkspaceRoleSeed[] = [
+  {
+    id: 'root_admin',
+    name: 'root_admin',
+    displayName: 'Root Admin',
+    description: '平台级紧急运维角色，默认不分配。',
+    scope: 'platform',
+    isSystem: true,
+  },
+  {
+    id: 'tenant_admin',
+    name: 'tenant_admin',
+    displayName: 'Tenant Admin',
+    description: '租户治理和授权配置角色。',
+    scope: 'tenant',
+    isSystem: true,
+  },
+  {
+    id: 'user',
+    name: 'user',
+    displayName: 'User',
+    description: '默认普通使用者角色。',
+    scope: 'user',
+    isSystem: true,
+  },
+];
 
 const WORKSPACE_GROUPS: WorkspaceGroup[] = [
   {
@@ -31,6 +68,7 @@ const WORKSPACE_GROUPS: WorkspaceGroup[] = [
 const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   {
     id: 'app_market_brief',
+    grantedRoleIds: [],
     sortOrder: 10,
     slug: 'market-brief',
     name: 'Market Brief',
@@ -44,6 +82,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   },
   {
     id: 'app_service_copilot',
+    grantedRoleIds: [],
     sortOrder: 20,
     slug: 'service-copilot',
     name: 'Service Copilot',
@@ -57,6 +96,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   },
   {
     id: 'app_release_radar',
+    grantedRoleIds: [],
     sortOrder: 30,
     slug: 'release-radar',
     name: 'Release Radar',
@@ -70,6 +110,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   },
   {
     id: 'app_policy_watch',
+    grantedRoleIds: [],
     sortOrder: 40,
     slug: 'policy-watch',
     name: 'Policy Watch',
@@ -83,6 +124,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   },
   {
     id: 'app_runbook_mentor',
+    grantedRoleIds: [],
     sortOrder: 50,
     slug: 'runbook-mentor',
     name: 'Runbook Mentor',
@@ -96,6 +138,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   },
   {
     id: 'app_audit_lens',
+    grantedRoleIds: [],
     sortOrder: 60,
     slug: 'audit-lens',
     name: 'Audit Lens',
@@ -107,6 +150,20 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
     grantedGroupIds: ['grp_security'],
     launchCost: 30,
   },
+  {
+    id: 'app_tenant_control',
+    grantedRoleIds: ['tenant_admin'],
+    sortOrder: 70,
+    slug: 'tenant-control',
+    name: 'Tenant Control',
+    summary: '租户管理员使用的授权与配置控制台入口。',
+    kind: 'governance',
+    status: 'beta',
+    shortCode: 'TC',
+    tags: ['admin', 'rbac'],
+    grantedGroupIds: [],
+    launchCost: 12,
+  },
 ];
 
 function resolveDefaultMemberGroupIds(email: string): string[] {
@@ -117,6 +174,47 @@ function resolveDefaultMemberGroupIds(email: string): string[] {
   }
 
   return ['grp_product', 'grp_research'];
+}
+
+function resolveDefaultRoleIds(email: string): string[] {
+  const normalizedEmail = email.toLowerCase();
+
+  if (normalizedEmail.startsWith('admin') || normalizedEmail.includes('owner')) {
+    return ['tenant_admin', 'user'];
+  }
+
+  return ['user'];
+}
+
+function toWorkspaceAppFixture(
+  app: WorkspaceAppFixture,
+  memberGroupIds: string[]
+): WorkspaceApp {
+  return {
+    id: app.id,
+    slug: app.slug,
+    name: app.name,
+    summary: app.summary,
+    kind: app.kind,
+    status: app.status,
+    shortCode: app.shortCode,
+    tags: app.tags,
+    grantedGroupIds: app.grantedGroupIds.length > 0 ? app.grantedGroupIds : memberGroupIds,
+    launchCost: app.launchCost,
+  };
+}
+
+function resolveSeededWorkspaceAppsForUser(user: AuthUser): WorkspaceApp[] {
+  const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
+  const roleIds = resolveDefaultRoleIds(user.email);
+
+  return WORKSPACE_APPS.filter(app => {
+    if (app.grantedGroupIds.some(groupId => memberGroupIds.includes(groupId))) {
+      return true;
+    }
+
+    return app.grantedRoleIds.some(roleId => roleIds.includes(roleId));
+  }).map(app => toWorkspaceAppFixture(app, memberGroupIds));
 }
 
 function buildTenantQuota(user: AuthUser): QuotaUsage {
@@ -197,6 +295,9 @@ function buildWorkspaceCatalog(
 export {
   WORKSPACE_APPS,
   WORKSPACE_GROUPS,
+  WORKSPACE_ROLES,
   buildWorkspaceCatalog,
+  resolveDefaultRoleIds,
   resolveDefaultMemberGroupIds,
+  resolveSeededWorkspaceAppsForUser,
 };

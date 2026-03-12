@@ -3,12 +3,21 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./auth": "./src/auth/index.ts",
-    "./apps": "./src/apps/index.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./auth": {
+      "types": "./src/auth/index.ts",
+      "default": "./dist/auth/index.js"
+    },
+    "./apps": {
+      "types": "./src/apps/index.ts",
+      "default": "./dist/apps/index.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

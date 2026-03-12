@@ -26,8 +26,11 @@
 
 - better-auth 已作为网关内部认证内核接管密码校验、会话创建、会话查找和登出撤销，现有 `/auth/*` 合同保持不变
 - `/workspace/apps` 已改为 PostgreSQL-backed 授权目录，不再依赖纯内存授权映射
+- `/workspace/apps` 已支持基于数据库的角色授权、用户直授和显式 `deny` 优先级
+- 默认 `admin*` 邮箱用户会获得 `tenant_admin` 角色，并看到 `Tenant Control` 管理入口
 - 默认工作群组成员关系会在用户首次进入工作台时落库，普通用户与安全用户会看到不同的应用集合
 - Web 端继续通过同源 `/api/gateway/*` 代理访问网关，适配本机和公网预览
+- `@agentifui/db` 与 `@agentifui/shared` 已导出可直接被 Node 运行时消费的 `dist` 入口，`npm run start --workspace @agentifui/gateway` 可用
 
 ## 快速开始
 
@@ -66,6 +69,6 @@ npm run db:reset
 
 ## 建议的下一步
 
-1. 在 `S1-2` 继续落地角色、显式 allow/deny 和用户直授模型，收口真正的 RBAC 判定。
-2. 在 `S1-3` 继续推进真实应用启动链路、最近使用/收藏持久化和真实会话创建。
+1. 在 `S1-3` 推进真实应用启动链路、最近使用/收藏持久化和真实会话创建。
+2. 在 `S1-2` 补 Manager 授权边界、Break-glass 和授权管理写接口。
 3. 在 `S2-1` 启动统一网关协议、Trace ID 和错误结构收口。

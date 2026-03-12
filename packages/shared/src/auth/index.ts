@@ -1,2 +1,2 @@
-export * from './contracts';
-export * from './password-policy';
+export * from './contracts.js';
+export * from './password-policy.js';

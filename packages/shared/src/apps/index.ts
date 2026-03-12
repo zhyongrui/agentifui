@@ -1,2 +1,2 @@
-export * from './contracts';
-export * from './workspace';
+export * from './contracts.js';
+export * from './workspace.js';

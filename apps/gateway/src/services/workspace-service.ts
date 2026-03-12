@@ -2,10 +2,10 @@ import type { AuthUser } from '@agentifui/shared/auth';
 import type { WorkspaceCatalog } from '@agentifui/shared/apps';
 
 import {
-  WORKSPACE_APPS,
   WORKSPACE_GROUPS,
   buildWorkspaceCatalog,
   resolveDefaultMemberGroupIds,
+  resolveSeededWorkspaceAppsForUser,
 } from './workspace-catalog-fixtures.js';
 
 type WorkspaceService = {
@@ -19,9 +19,7 @@ export function createWorkspaceService(): WorkspaceService {
 
       return buildWorkspaceCatalog(user, {
         groups: WORKSPACE_GROUPS.filter(group => memberGroupIds.includes(group.id)),
-        apps: WORKSPACE_APPS.filter(app =>
-          app.grantedGroupIds.some(groupId => memberGroupIds.includes(groupId))
-        ),
+        apps: resolveSeededWorkspaceAppsForUser(user),
         memberGroupIds,
       });
     },
