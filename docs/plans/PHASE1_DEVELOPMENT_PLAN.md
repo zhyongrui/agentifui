@@ -87,6 +87,10 @@
   - role allow / user allow / explicit deny 优先级
   - 过期用户授权自动失效
 - 生产构建下的 Gateway 启动链路已修复 workspace package ESM 导出问题
+- 已建立真实浏览器 E2E 回归基线
+  - `npm run test:e2e` 会自动拉起隔离的 Web/Gateway 进程
+  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异和后台占位页
+  - Linux 环境下会自动准备 Playwright 所需运行库并绕过本地代理干扰
 
 当前未完成：
 

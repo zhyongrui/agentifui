@@ -69,4 +69,51 @@ describe('apps client', () => {
       },
     });
   });
+
+  it('normalizes stringified app tags returned by the gateway', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            groups: [],
+            memberGroupIds: [],
+            defaultActiveGroupId: 'grp_product',
+            apps: [
+              {
+                id: 'app_market_brief',
+                slug: 'market-brief',
+                name: 'Market Brief',
+                summary: 'summary',
+                kind: 'analysis',
+                status: 'ready',
+                shortCode: 'MB',
+                tags: '["research","daily"]',
+                grantedGroupIds: ['grp_product'],
+                launchCost: 40,
+              },
+            ],
+            quotaServiceState: 'available',
+            quotaUsagesByGroupId: {},
+            generatedAt: '2026-03-11T00:00:00.000Z',
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceCatalog('session-123');
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        apps: [
+          {
+            id: 'app_market_brief',
+            tags: ['research', 'daily'],
+          },
+        ],
+      },
+    });
+  });
 });

@@ -30,6 +30,7 @@
 - 默认 `admin*` 邮箱用户会获得 `tenant_admin` 角色，并看到 `Tenant Control` 管理入口
 - 默认工作群组成员关系会在用户首次进入工作台时落库，普通用户与安全用户会看到不同的应用集合
 - Web 端继续通过同源 `/api/gateway/*` 代理访问网关，适配本机和公网预览
+- Playwright 浏览器回归已覆盖注册、邮箱密码登录、SSO pending、邀请激活、MFA、RBAC 工作台差异和后台占位页
 - `@agentifui/db` 与 `@agentifui/shared` 已导出可直接被 Node 运行时消费的 `dist` 入口，`npm run start --workspace @agentifui/gateway` 可用
 
 ## 快速开始
@@ -56,6 +57,20 @@ DATABASE_URL=postgresql://agentifui:agentifui@localhost:5432/agentifui
 
 ```bash
 npm test
+npm run test:e2e
+```
+
+`npm run test:e2e` 会自动：
+
+- 重建 monorepo
+- 重置本地 PostgreSQL 测试数据
+- 在隔离端口启动 Gateway(`4111`) 和 Web(`3111`)
+- 在 Ubuntu/Debian 环境下将 Playwright 所需的最小运行库准备到 `.cache/playwright-runtime-libs`
+
+如果你希望本地手工体验 `iflabx.com` 的 SSO 入口，启动 Gateway 时补上：
+
+```bash
+GATEWAY_SSO_DOMAINS=iflabx.com=iflabx-sso
 ```
 
 数据库脚本：

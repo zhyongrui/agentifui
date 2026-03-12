@@ -453,17 +453,22 @@ describe.sequential('persistent auth runtime', () => {
         });
 
         expect(developerWorkspace.statusCode).toBe(200);
-        expect(developerWorkspace.json().data.memberGroupIds).toEqual([
+        const developerWorkspaceBody = developerWorkspace.json() as WorkspaceCatalogResponse;
+
+        expect(developerWorkspaceBody.data.memberGroupIds).toEqual([
           'grp_product',
           'grp_research',
         ]);
-        expect(developerWorkspace.json().data.apps.map((workspaceApp: { id: string }) => workspaceApp.id)).toEqual([
+        expect(
+          developerWorkspaceBody.data.apps.map((workspaceApp: { id: string }) => workspaceApp.id)
+        ).toEqual([
           'app_market_brief',
           'app_service_copilot',
           'app_release_radar',
           'app_policy_watch',
           'app_runbook_mentor',
         ]);
+        expect(developerWorkspaceBody.data.apps[0]?.tags).toEqual(['research', 'daily']);
 
         expect(securityWorkspace.statusCode).toBe(200);
         expect(securityWorkspace.json().data.memberGroupIds).toEqual(['grp_security']);

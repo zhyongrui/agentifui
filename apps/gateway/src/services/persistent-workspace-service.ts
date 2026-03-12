@@ -28,7 +28,7 @@ type PersistedWorkspaceAppRow = {
   slug: string;
   status: WorkspaceApp['status'];
   summary: string;
-  tags: string[];
+  tags: string[] | string;
 };
 
 type AccessGrantRow = {
@@ -369,6 +369,22 @@ function toWorkspaceGroup(row: GroupRow): WorkspaceGroup {
   };
 }
 
+function normalizeStringArray(value: string[] | string): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === 'string');
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function toWorkspaceApp(row: PersistedWorkspaceAppRow, grantedGroupIds: string[]): WorkspaceApp {
   return {
     id: row.id,
@@ -378,7 +394,7 @@ function toWorkspaceApp(row: PersistedWorkspaceAppRow, grantedGroupIds: string[]
     kind: row.kind,
     status: row.status,
     shortCode: row.short_code,
-    tags: row.tags,
+    tags: normalizeStringArray(row.tags),
     grantedGroupIds,
     launchCost: row.launch_cost,
   };

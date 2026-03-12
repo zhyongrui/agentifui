@@ -20,9 +20,11 @@
     "type-check": "turbo run type-check",
     "lint": "turbo run lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "node scripts/run-e2e.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^22.17.0",
     "drizzle-kit": "https://registry.npmjs.org/drizzle-kit/-/drizzle-kit-0.31.6.tgz",
     "prettier": "^3.6.2",

@@ -76,7 +76,7 @@ function LoginPageContent() {
   useEffect(() => {
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+    if (!normalizedEmail || !isValidEmail(normalizedEmail) || password.trim().length > 0) {
       setSsoState({
         status: 'idle',
         providerId: null,
@@ -140,7 +140,7 @@ function LoginPageContent() {
       isCancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [email]);
+  }, [email, password]);
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
