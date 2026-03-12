@@ -1,4 +1,4 @@
-import type { WorkspaceAppLaunchResponse } from '@agentifui/shared/apps';
+import type { WorkspaceAppLaunchResponse, WorkspaceConversationResponse } from '@agentifui/shared/apps';
 import type {
   ChatCompletionResponse,
   ChatCompletionStopResponse,
@@ -240,6 +240,36 @@ describe('chat routes', () => {
           active_group_id: 'grp_research',
         },
       } satisfies ChatCompletionResponse);
+
+      const conversationResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversationResponse.statusCode).toBe(200);
+      expect((conversationResponse.json() as WorkspaceConversationResponse).data).toMatchObject({
+        id: conversationId,
+        messages: [
+          {
+            role: 'user',
+            content: 'Summarize the current policy changes for my group.',
+            status: 'completed',
+          },
+          {
+            role: 'assistant',
+            content: expect.stringContaining(
+              'Policy Watch is now reachable through the AgentifUI gateway.'
+            ),
+            status: 'completed',
+          },
+        ],
+        run: {
+          status: 'succeeded',
+        },
+      });
     } finally {
       await app.close();
     }
@@ -385,6 +415,150 @@ describe('chat routes', () => {
       } satisfies ChatCompletionStopResponse);
     } finally {
       await app.close();
+    }
+  });
+
+  it('hard-stops an active streaming response and persists stopped state', async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Developer',
+    });
+
+    const login = authService.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected active login to succeed');
+    }
+
+    let baseUrl: string | null = null;
+
+    try {
+      const launch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_research',
+        },
+      });
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+      const runId = launchBody.data.runId;
+
+      if (!conversationId || !runId) {
+        throw new Error('expected launch payload to include conversation and run ids');
+      }
+
+      baseUrl = await app.listen({
+        host: '127.0.0.1',
+        port: 0,
+      });
+
+      const streamResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          app_id: 'app_policy_watch',
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: 'user',
+              content: 'Start a response that I will stop.',
+            },
+          ],
+          stream: true,
+        }),
+      });
+
+      expect(streamResponse.status).toBe(200);
+
+      const reader = streamResponse.body?.getReader();
+
+      expect(reader).toBeDefined();
+
+      if (!reader) {
+        throw new Error('expected stream reader to exist');
+      }
+
+      const firstChunk = await reader.read();
+
+      expect(firstChunk.done).toBe(false);
+      expect(new TextDecoder().decode(firstChunk.value)).toContain('chat.completion.chunk');
+
+      const stopResponse = await fetch(`${baseUrl}/v1/chat/completions/${runId}/stop`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(stopResponse.status).toBe(200);
+      expect((await stopResponse.json()) as ChatCompletionStopResponse).toEqual({
+        result: 'success',
+        stop_type: 'hard',
+      });
+
+      let streamBody = new TextDecoder().decode(firstChunk.value);
+
+      while (true) {
+        const nextChunk = await reader.read();
+
+        if (nextChunk.done) {
+          break;
+        }
+
+        streamBody += new TextDecoder().decode(nextChunk.value);
+      }
+
+      expect(streamBody).toContain('data: [DONE]');
+
+      const conversationResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversationResponse.statusCode).toBe(200);
+      expect((conversationResponse.json() as WorkspaceConversationResponse).data).toMatchObject({
+        id: conversationId,
+        run: {
+          status: 'stopped',
+        },
+        messages: [
+          {
+            role: 'user',
+            content: 'Start a response that I will stop.',
+            status: 'completed',
+          },
+          {
+            role: 'assistant',
+            status: 'stopped',
+          },
+        ],
+      });
+    } finally {
+      if (baseUrl) {
+        await app.close();
+      } else {
+        await app.close();
+      }
     }
   });
 });

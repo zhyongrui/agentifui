@@ -3,6 +3,7 @@ import type {
   WorkspaceAppLaunch,
   WorkspaceCatalog,
   WorkspaceConversation,
+  WorkspaceConversationMessage,
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
   WorkspaceRunStatus,
@@ -54,6 +55,7 @@ type WorkspaceRunUpdateInput = {
   status: WorkspaceRunStatus;
   inputs?: Record<string, unknown>;
   outputs?: Record<string, unknown>;
+  messageHistory?: WorkspaceConversationMessage[];
   error?: string;
   elapsedTime?: number;
   totalTokens?: number;
@@ -267,10 +269,11 @@ export function createWorkspaceService(): WorkspaceService {
           status: app.status,
           shortCode: app.shortCode,
         },
-        activeGroup: attributedGroup,
-        run: {
-          id: runId,
-          type: resolveRunType(app.kind),
+      activeGroup: attributedGroup,
+      messages: [],
+      run: {
+        id: runId,
+        type: resolveRunType(app.kind),
           status: 'pending',
           traceId,
           createdAt: launchedAt,
@@ -335,6 +338,9 @@ export function createWorkspaceService(): WorkspaceService {
       }
 
       conversation.run.status = input.status;
+      if (input.messageHistory) {
+        conversation.messages = input.messageHistory;
+      }
       conversation.updatedAt = input.finishedAt ?? new Date().toISOString();
 
       const { userId, ...conversationData } = conversation;

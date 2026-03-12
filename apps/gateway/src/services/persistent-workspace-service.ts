@@ -4,6 +4,7 @@ import {
   evaluateAppLaunch,
   type WorkspaceApp,
   type WorkspaceConversation,
+  type WorkspaceConversationMessage,
   type WorkspaceGroup,
   type WorkspacePreferences,
   type WorkspacePreferencesUpdateRequest,
@@ -81,6 +82,7 @@ type ConversationRow = {
   app_slug: string;
   app_status: WorkspaceApp['status'];
   app_summary: string;
+  conversation_inputs: Record<string, unknown> | string;
   created_at: Date | string;
   id: string;
   launch_id: string | null;
@@ -447,6 +449,26 @@ function dedupeIds(value: string[]) {
   return [...new Set(value)];
 }
 
+function normalizeJsonRecord(value: Record<string, unknown> | string | null | undefined) {
+  if (!value) {
+    return {};
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+
+      return typeof parsed === 'object' && parsed !== null
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return value;
+}
+
 function recordRecentApp(currentIds: string[], appId: string, limit = 4) {
   return [appId, ...currentIds.filter(currentId => currentId !== appId)].slice(0, limit);
 }
@@ -478,6 +500,59 @@ function buildEmptyPreferences(): WorkspacePreferences {
     defaultActiveGroupId: null,
     updatedAt: null,
   };
+}
+
+function toWorkspaceConversationMessages(
+  value: Record<string, unknown> | string | null | undefined
+): WorkspaceConversationMessage[] {
+  const rawMessageHistory = normalizeJsonRecord(value).messageHistory;
+  const messageHistory =
+    typeof rawMessageHistory === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(rawMessageHistory) as unknown;
+          } catch {
+            return [];
+          }
+        })()
+      : rawMessageHistory;
+
+  if (!Array.isArray(messageHistory)) {
+    return [];
+  }
+
+  return messageHistory.flatMap(entry => {
+    if (typeof entry !== 'object' || entry === null) {
+      return [];
+    }
+
+    const message = entry as Record<string, unknown>;
+
+    if (
+      (message.role !== 'user' && message.role !== 'assistant') ||
+      typeof message.id !== 'string' ||
+      typeof message.content !== 'string' ||
+      typeof message.status !== 'string' ||
+      typeof message.createdAt !== 'string'
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        status:
+          message.status === 'streaming' ||
+          message.status === 'stopped' ||
+          message.status === 'failed'
+            ? message.status
+            : 'completed',
+        createdAt: message.createdAt,
+      },
+    ];
+  });
 }
 
 function toWorkspaceApp(row: PersistedWorkspaceAppRow, grantedGroupIds: string[]): WorkspaceApp {
@@ -534,6 +609,7 @@ function toWorkspaceConversation(row: ConversationRow): WorkspaceConversation {
       name: row.active_group_name ?? 'Unknown group',
       description: row.active_group_description ?? '',
     },
+    messages: toWorkspaceConversationMessages(row.conversation_inputs),
     run: {
       id: row.run_id,
       type: row.run_type,
@@ -704,6 +780,7 @@ async function readConversationForUser(
       c.id,
       c.title,
       c.status,
+      c.inputs as conversation_inputs,
       c.created_at,
       c.updated_at,
       l.id as launch_id,
@@ -750,6 +827,8 @@ async function updateConversationRunForUser(
   const nextOutputs = input.outputs ?? {};
   const nextUpdatedAt = finishedAt ?? new Date().toISOString();
   const errorMessage = input.error ?? null;
+  const nextMessageHistory = input.messageHistory ?? [];
+  const shouldUpdateMessageHistory = input.messageHistory !== undefined;
 
   const updated = await database.begin(async transaction => {
     const sql = transaction as unknown as DatabaseClient;
@@ -781,12 +860,27 @@ async function updateConversationRunForUser(
       return false;
     }
 
-    await sql`
-      update conversations
-      set updated_at = ${nextUpdatedAt}::timestamptz
-      where id = ${input.conversationId}
-        and user_id = ${user.id}
-    `;
+    if (shouldUpdateMessageHistory) {
+      await sql`
+        update conversations
+        set updated_at = ${nextUpdatedAt}::timestamptz,
+            inputs = jsonb_set(
+              coalesce(inputs, '{}'::jsonb),
+              '{messageHistory}',
+              ${nextMessageHistory}::jsonb,
+              true
+            )
+        where id = ${input.conversationId}
+          and user_id = ${user.id}
+      `;
+    } else {
+      await sql`
+        update conversations
+        set updated_at = ${nextUpdatedAt}::timestamptz
+        where id = ${input.conversationId}
+          and user_id = ${user.id}
+      `;
+    }
 
     return true;
   });
@@ -899,7 +993,7 @@ export function createPersistentWorkspaceService(database: DatabaseClient): Work
             ${attributedGroup.id},
             ${app.name},
             'active',
-            '{}'::jsonb,
+            '{"messageHistory":[]}'::jsonb,
             ${launchedAt}::timestamptz,
             ${launchedAt}::timestamptz
           )

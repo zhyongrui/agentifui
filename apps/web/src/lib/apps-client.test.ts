@@ -267,6 +267,7 @@ describe('apps client', () => {
               name: 'Product Studio',
               description: 'desc',
             },
+            messages: [],
             run: {
               id: 'run-123',
               type: 'agent',

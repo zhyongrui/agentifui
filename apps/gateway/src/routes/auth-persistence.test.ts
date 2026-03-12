@@ -1113,6 +1113,7 @@ describe.sequential('persistent auth runtime', () => {
               name: 'Research Lab',
               description: '负责分析洞察、策略研究和知识整理。',
             },
+            messages: [],
             run: {
               id: runId,
               type: 'agent',
@@ -1271,9 +1272,25 @@ describe.sequential('persistent auth runtime', () => {
         });
 
         expect(conversation.statusCode).toBe(200);
-        expect((conversation.json() as WorkspaceConversationResponse).data.run.status).toBe(
-          'succeeded'
-        );
+        expect((conversation.json() as WorkspaceConversationResponse).data).toMatchObject({
+          run: {
+            status: 'succeeded',
+          },
+          messages: [
+            {
+              role: 'user',
+              content: 'Summarize the new policy updates.',
+              status: 'completed',
+            },
+            {
+              role: 'assistant',
+              content: expect.stringContaining(
+                'Policy Watch is now reachable through the AgentifUI gateway.'
+              ),
+              status: 'completed',
+            },
+          ],
+        });
       } finally {
         if (!appClosed) {
           await app.close();

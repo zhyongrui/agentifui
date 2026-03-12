@@ -260,6 +260,18 @@ test('register/login/workspace controls work for a normal active user', async ({
     page.getByText('Policy Watch is now reachable through the AgentifUI gateway.')
   ).toBeVisible();
   await expect(page.getByText('succeeded')).toBeVisible();
+
+  await page.getByLabel('Message').fill('Start another response and I will stop it.');
+  await Promise.all([
+    waitForGatewayPost(page, '/v1/chat/completions'),
+    page.getByRole('button', { name: 'Send message' }).click(),
+  ]);
+  await expect(page.getByRole('button', { name: 'Stop response' })).toBeVisible();
+  await Promise.all([
+    waitForGatewayPost(page, '/v1/chat/completions/run_'),
+    page.getByRole('button', { name: 'Stop response' }).click(),
+  ]);
+  await expect(page.getByText('stopped')).toBeVisible();
   await page.getByRole('link', { name: 'Back to Apps workspace' }).click();
   await expectAppsWorkspace(page);
   await expect(

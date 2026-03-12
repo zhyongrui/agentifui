@@ -1,28 +1,46 @@
 'use client';
 
-import type { WorkspaceConversation } from '@agentifui/shared/apps';
+import type {
+  WorkspaceConversation,
+  WorkspaceConversationMessage,
+} from '@agentifui/shared/apps';
 import type { ChatCompletionMessage, ChatGatewayErrorResponse } from '@agentifui/shared/chat';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 
 import { MainSectionNav } from '../../../../components/main-section-nav';
 import { fetchWorkspaceConversation } from '../../../../lib/apps-client';
 import { clearAuthSession } from '../../../../lib/auth-session';
-import { createChatCompletion } from '../../../../lib/chat-client';
+import { stopChatCompletion, streamChatCompletion } from '../../../../lib/chat-client';
 import { useProtectedSession } from '../../../../lib/use-protected-session';
 
-type ConversationMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-};
-
-function toGatewayMessages(messages: ConversationMessage[]): ChatCompletionMessage[] {
+function toGatewayMessages(messages: WorkspaceConversationMessage[]): ChatCompletionMessage[] {
   return messages.map(message => ({
     role: message.role,
     content: message.content,
   }));
+}
+
+function isGatewayErrorResponse(error: unknown): error is ChatGatewayErrorResponse {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'error' in error &&
+    typeof (error as { error?: unknown }).error === 'object'
+  );
+}
+
+function buildLocalMessage(
+  input: Pick<WorkspaceConversationMessage, 'role' | 'content' | 'status'>
+): WorkspaceConversationMessage {
+  return {
+    id: `local_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    role: input.role,
+    content: input.content,
+    status: input.status,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 export default function ConversationPage() {
@@ -32,11 +50,14 @@ export default function ConversationPage() {
   const [conversation, setConversation] = useState<WorkspaceConversation | null>(null);
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [isConversationLoading, setIsConversationLoading] = useState(false);
-  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [messages, setMessages] = useState<WorkspaceConversationMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [composerError, setComposerError] = useState<string | null>(null);
-  const [isSending, setIsSending] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
+  const activeAssistantMessageIdRef = useRef<string | null>(null);
+  const stopRequestedRef = useRef(false);
   const conversationId =
     typeof params?.conversationId === 'string' ? params.conversationId.trim() : '';
 
@@ -44,6 +65,7 @@ export default function ConversationPage() {
     sessionToken: string,
     options: {
       withSpinner: boolean;
+      syncMessages: boolean;
     }
   ) {
     if (options.withSpinner) {
@@ -80,6 +102,10 @@ export default function ConversationPage() {
 
       setConversation(result.data);
       setLastTraceId(result.data.run.traceId);
+
+      if (options.syncMessages) {
+        setMessages(result.data.messages);
+      }
     } catch {
       setConversation(null);
       setConversationError('Conversation bootstrap failed. Please retry from the apps workspace.');
@@ -95,6 +121,8 @@ export default function ConversationPage() {
     setDraft('');
     setComposerError(null);
     setLastTraceId(null);
+    activeAssistantMessageIdRef.current = null;
+    stopRequestedRef.current = false;
   }, [conversationId]);
 
   useEffect(() => {
@@ -140,6 +168,7 @@ export default function ConversationPage() {
 
         setConversation(result.data);
         setLastTraceId(result.data.run.traceId);
+        setMessages(result.data.messages);
       })
       .catch(() => {
         if (!isCancelled) {
@@ -163,79 +192,170 @@ export default function ConversationPage() {
 
     const nextDraft = draft.trim();
 
-    if (!session || !conversation || !nextDraft || isSending) {
+    if (!session || !conversation || !nextDraft || isStreaming) {
       return;
     }
 
-    const previousMessages = messages;
-    const userMessage: ConversationMessage = {
-      id: `user-${Date.now()}`,
+    const userMessage = buildLocalMessage({
       role: 'user',
       content: nextDraft,
-    };
-    const nextMessages = [...previousMessages, userMessage];
+      status: 'completed',
+    });
+    const assistantMessage = buildLocalMessage({
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    });
+    const nextMessages = [...messages, userMessage];
 
+    activeAssistantMessageIdRef.current = assistantMessage.id;
+    stopRequestedRef.current = false;
     setComposerError(null);
-    setMessages(nextMessages);
     setDraft('');
-    setIsSending(true);
+    setIsStreaming(true);
+    setIsStopping(false);
+    setMessages([...nextMessages, assistantMessage]);
+    setConversation(currentConversation =>
+      currentConversation
+        ? {
+            ...currentConversation,
+            run: {
+              ...currentConversation.run,
+              status: 'running',
+            },
+          }
+        : currentConversation
+    );
 
     try {
-      const result = await createChatCompletion(
+      await streamChatCompletion(
         session.sessionToken,
         {
           app_id: conversation.app.id,
           conversation_id: conversation.id,
           messages: toGatewayMessages(nextMessages),
-          stream: false,
+        },
+        {
+          onMetadata: metadata => {
+            setLastTraceId(metadata.traceId);
+          },
+          onChunk: chunk => {
+            if (chunk.trace_id) {
+              setLastTraceId(chunk.trace_id);
+            }
+
+            const delta = chunk.choices[0]?.delta;
+            const finishReason = chunk.choices[0]?.finish_reason;
+
+            if (delta?.content) {
+              setMessages(currentMessages =>
+                currentMessages.map(message =>
+                  message.id === activeAssistantMessageIdRef.current
+                    ? {
+                        ...message,
+                        content: `${message.content}${delta.content ?? ''}`,
+                        status: 'streaming',
+                      }
+                    : message
+                )
+              );
+            }
+
+            if (finishReason) {
+              setMessages(currentMessages =>
+                currentMessages.map(message =>
+                  message.id === activeAssistantMessageIdRef.current
+                    ? {
+                        ...message,
+                        status: stopRequestedRef.current ? 'stopped' : 'completed',
+                      }
+                    : message
+                )
+              );
+            }
+          },
         },
         {
           activeGroupId: conversation.activeGroup.id,
         }
       );
 
-      if ('error' in result) {
-        const gatewayError = result as ChatGatewayErrorResponse;
-
-        setMessages(previousMessages);
-        setDraft(nextDraft);
-
-        if (gatewayError.error.code === 'invalid_token') {
+      await loadConversation(session.sessionToken, {
+        withSpinner: false,
+        syncMessages: true,
+      });
+    } catch (error) {
+      if (isGatewayErrorResponse(error)) {
+        if (error.error.code === 'invalid_token') {
           clearAuthSession(window.sessionStorage);
           router.replace('/login');
           return;
         }
 
-        if (gatewayError.error.code === 'conversation_not_found') {
-          setConversationError('This conversation is no longer available. Return to the apps workspace and relaunch it.');
+        if (error.error.code === 'conversation_not_found') {
+          setConversationError(
+            'This conversation is no longer available. Return to the apps workspace and relaunch it.'
+          );
           return;
         }
 
-        setComposerError(gatewayError.error.message);
-        return;
+        setComposerError(error.error.message);
+      } else {
+        setComposerError('The chat gateway stream failed. Please retry.');
       }
 
-      const assistantContent = result.choices[0]?.message.content?.trim() || 'The gateway returned an empty assistant message.';
-
-      setMessages([
-        ...nextMessages,
-        {
-          id: result.id,
-          role: 'assistant',
-          content: assistantContent,
-        },
-      ]);
-      setLastTraceId(result.trace_id);
-
-      await loadConversation(session.sessionToken, {
-        withSpinner: false,
-      });
-    } catch {
-      setMessages(previousMessages);
-      setDraft(nextDraft);
-      setComposerError('The chat gateway request failed. Please retry.');
+      setMessages(currentMessages =>
+        currentMessages
+          .filter(message => message.id !== activeAssistantMessageIdRef.current)
+          .map(message =>
+            message.id === activeAssistantMessageIdRef.current
+              ? {
+                  ...message,
+                  status: 'failed',
+                }
+              : message
+          )
+      );
+      setConversation(currentConversation =>
+        currentConversation
+          ? {
+              ...currentConversation,
+              run: {
+                ...currentConversation.run,
+                status: 'failed',
+              },
+            }
+          : currentConversation
+      );
     } finally {
-      setIsSending(false);
+      activeAssistantMessageIdRef.current = null;
+      stopRequestedRef.current = false;
+      setIsStreaming(false);
+      setIsStopping(false);
+    }
+  }
+
+  async function handleStop() {
+    if (!session || !conversation || !isStreaming || isStopping) {
+      return;
+    }
+
+    setComposerError(null);
+    setIsStopping(true);
+    stopRequestedRef.current = true;
+
+    try {
+      const result = await stopChatCompletion(session.sessionToken, conversation.run.id);
+
+      if ('error' in result) {
+        setComposerError(result.error.message);
+        stopRequestedRef.current = false;
+      }
+    } catch {
+      setComposerError('The stop request failed. Please retry.');
+      stopRequestedRef.current = false;
+    } finally {
+      setIsStopping(false);
     }
   }
 
@@ -271,11 +391,11 @@ export default function ConversationPage() {
 
       <header className="chat-header">
         <div>
-          <span className="eyebrow">R7 Gateway Protocol</span>
+          <span className="eyebrow">R8 Streaming Chat</span>
           <h1>{conversation.title}</h1>
           <p className="lead">
-            The workspace launch shell is now wired into `/v1/chat/completions`. This page uses
-            blocking completions today and leaves SSE rendering for the next UI slice.
+            The conversation surface now consumes the gateway SSE stream directly, exposes a stop
+            action and restores transcript history from persisted workspace state.
           </p>
         </div>
         <div className="workspace-badges">
@@ -290,8 +410,8 @@ export default function ConversationPage() {
           <div>
             <h2>Gateway context</h2>
             <p>
-              The gateway now validates the workspace session, resolves the persisted conversation,
-              returns an OpenAI-compatible payload and keeps the trace id stable.
+              Streaming updates now arrive incrementally from `/v1/chat/completions`, and the
+              restored transcript comes from the persisted workspace conversation payload.
             </p>
           </div>
           <span className={`status-chip status-${conversation.app.status}`}>
@@ -316,9 +436,9 @@ export default function ConversationPage() {
             <p>Type: {conversation.run.type}</p>
           </article>
           <article className="chat-meta-card">
-            <span>Launch source</span>
-            <strong>{conversation.launchId ?? 'n/a'}</strong>
-            <p>Created at {new Date(conversation.createdAt).toLocaleString()}</p>
+            <span>Transcript</span>
+            <strong>{messages.length} messages</strong>
+            <p>History is rehydrated from the workspace conversation response.</p>
           </article>
         </div>
       </section>
@@ -328,8 +448,8 @@ export default function ConversationPage() {
           <div>
             <h2>Conversation</h2>
             <p>
-              Send a prompt to exercise the new gateway path. The current transcript is local UI
-              state; message persistence lands in the next execution slice.
+              Send a prompt to stream an assistant response. Refreshing the page now reloads the
+              transcript from the persisted conversation record.
             </p>
           </div>
         </div>
@@ -345,10 +465,15 @@ export default function ConversationPage() {
           <div className="chat-placeholder">
             {messages.map(message => (
               <article key={message.id} className={`chat-bubble ${message.role}`}>
-                <span className="chat-bubble-label">
-                  {message.role === 'user' ? session.user.displayName : conversation.app.name}
-                </span>
-                <p>{message.content}</p>
+                <div className="chat-bubble-meta">
+                  <span className="chat-bubble-label">
+                    {message.role === 'user' ? session.user.displayName : conversation.app.name}
+                  </span>
+                  <span className={`chat-bubble-status status-${message.status}`}>
+                    {message.status}
+                  </span>
+                </div>
+                <p>{message.content || (message.status === 'streaming' ? 'Streaming...' : '')}</p>
               </article>
             ))}
           </div>
@@ -365,12 +490,26 @@ export default function ConversationPage() {
             placeholder={`Ask ${conversation.app.name} to work on something concrete...`}
             value={draft}
             onChange={event => setDraft(event.target.value)}
-            disabled={isSending}
+            disabled={isStreaming}
           />
           <div className="actions">
-            <button className="primary" type="submit" disabled={isSending || draft.trim().length === 0}>
-              {isSending ? 'Sending...' : 'Send message'}
+            <button
+              className="primary"
+              type="submit"
+              disabled={isStreaming || draft.trim().length === 0}
+            >
+              {isStreaming ? 'Streaming...' : 'Send message'}
             </button>
+            {isStreaming ? (
+              <button
+                className="secondary"
+                type="button"
+                onClick={handleStop}
+                disabled={isStopping}
+              >
+                {isStopping ? 'Stopping...' : 'Stop response'}
+              </button>
+            ) : null}
           </div>
         </form>
       </section>

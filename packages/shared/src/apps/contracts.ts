@@ -104,6 +104,20 @@ export type WorkspaceRunType = 'workflow' | 'agent' | 'generation';
 
 export type WorkspaceRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'stopped';
 
+export type WorkspaceConversationMessageStatus =
+  | 'completed'
+  | 'streaming'
+  | 'stopped'
+  | 'failed';
+
+export type WorkspaceConversationMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  status: WorkspaceConversationMessageStatus;
+  createdAt: string;
+};
+
 export type WorkspaceAppLaunch = {
   id: string;
   status: WorkspaceAppLaunchStatus;
@@ -136,6 +150,7 @@ export type WorkspaceConversation = {
     'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode'
   >;
   activeGroup: WorkspaceGroup;
+  messages: WorkspaceConversationMessage[];
   run: {
     id: string;
     type: WorkspaceRunType;

@@ -650,9 +650,25 @@ button:disabled {
   border: 1px solid var(--border);
 }
 
+.chat-bubble-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-bubble-status {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .chat-bubble p {
   margin: 0;
   line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .chat-bubble.user {
@@ -677,6 +693,22 @@ button:disabled {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.9);
   resize: vertical;
+}
+
+.status-completed {
+  color: var(--accent-strong);
+}
+
+.status-streaming {
+  color: #294a8a;
+}
+
+.status-stopped {
+  color: #9a6112;
+}
+
+.status-failed {
+  color: #7b1d1d;
 }
 
 @media (max-width: 960px) {

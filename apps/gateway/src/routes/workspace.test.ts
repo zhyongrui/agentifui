@@ -416,6 +416,7 @@ describe('workspace routes', () => {
             name: 'Research Lab',
             description: '负责分析洞察、策略研究和知识整理。',
           },
+          messages: [],
           run: {
             id: runId,
             type: 'agent',

@@ -102,17 +102,21 @@
   - `POST /v1/chat/completions/:taskId/stop`
   - 统一错误结构与 `X-Trace-ID` 已接入
   - Web `/chat/[conversationId]` 已可触发真实 completion
+- `S2-2` 已完成首条真实流式对话链路
+  - Web `/chat/[conversationId]` 已接入真实 SSE 渐进式渲染
+  - active stream 已支持 hard-stop
+  - transcript/message status 已持久化回 workspace conversation
 - 生产构建下的 Gateway 启动链路已修复 workspace package ESM 导出问题
 - 已建立真实浏览器 E2E 回归基线
   - `npm run test:e2e` 会自动拉起隔离的 Web/Gateway 进程
-  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异、工作台 launch -> chat completion 和后台占位页
+  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异、工作台 launch -> chat streaming/stop 和后台占位页
   - Linux 环境下会自动准备 Playwright 所需运行库并绕过本地代理干扰
 
 当前未完成：
 
 - `S1-2` Manager 授权边界、Break-glass、授权管理写接口和审计收口
 - `S1-3` 的真实 quota service 与历史列表衔接
-- `S2-2 / S2-3` 的消息持久化、渐进式流式渲染、文件上传和执行追踪闭环
+- `S2-2 / S2-3` 的文件上传、分享、执行追踪闭环和更细粒度运行态回放
 - CI 细化
 
 ## 5. 里程碑计划
@@ -448,13 +452,19 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - 统一错误结构、`X-Trace-ID` 和 workspace session 校验已接入
   - chat completion 已复用 launch 生成的 `conversation` / `run` / `trace`
   - Web `/chat/[conversationId]` 已从占位 shell 切到真实 completion 调用
+- `R8` `S2-2` 对话主链路
+  - Gateway SSE 已接到前端渐进式渲染
+  - active stream stop 已从 soft-stop 进入真实 hard-stop
+  - `conversation.inputs.messageHistory` 已持久化 transcript 与消息状态
+  - Web `/chat/[conversationId]` 已支持 streaming / stop / restored transcript
+  - 浏览器回归已覆盖“发送第二条消息并主动停止”
 
 下一个激活项：
 
-- `R8` `S2-2` 对话主链路
-  - 把当前 gateway SSE 输出接到前端渐进式渲染
-  - 开始补 stop UX、消息态和首版 transcript 持久化
-  - 让 chat shell 从 blocking demo 进入真实对话体验
+- `R9` `S2-3` Run 追踪
+  - 让 workspace conversation 的运行态可以被查询、轮询和回放
+  - 补齐 run timeline / usage / output 的回源接口
+  - 为后续文件上传、分享和多会话恢复提供稳定持久化边界
 
 ### 12.2 Rolling Plan
 

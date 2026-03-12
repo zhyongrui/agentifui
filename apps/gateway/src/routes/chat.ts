@@ -1,4 +1,8 @@
-import type { WorkspaceConversation } from '@agentifui/shared/apps';
+import type {
+  WorkspaceConversation,
+  WorkspaceConversationMessage,
+  WorkspaceConversationMessageStatus,
+} from '@agentifui/shared/apps';
 import type { AuthUser } from '@agentifui/shared/auth';
 import type {
   ChatCompletionChunk,
@@ -14,6 +18,7 @@ import type {
 } from '@agentifui/shared/chat';
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 
 import type { AuthService } from '../services/auth-service.js';
 import type { WorkspaceService } from '../services/workspace-service.js';
@@ -29,8 +34,19 @@ type ActiveSessionResult =
       response: ChatGatewayErrorResponse;
     };
 
+type ActiveStreamState = {
+  stopRequested: boolean;
+};
+
+const STREAM_CHUNK_DELAY_MS = 80;
+const activeStreams = new Map<string, ActiveStreamState>();
+
 function buildTraceId() {
   return randomUUID().replace(/-/g, '');
+}
+
+function buildConversationMessageId() {
+  return `msg_${randomUUID()}`;
 }
 
 function readBearerToken(value: string | undefined): string | null {
@@ -209,6 +225,49 @@ function chunkText(text: string, size = 32) {
   }
 
   return chunks.length > 0 ? chunks : [''];
+}
+
+function sleep(durationMs: number) {
+  return new Promise(resolve => {
+    setTimeout(resolve, durationMs);
+  });
+}
+
+function buildPersistedHistory(
+  messages: ChatCompletionMessage[],
+  assistantMessage?: {
+    content: string;
+    status: WorkspaceConversationMessageStatus;
+  }
+): WorkspaceConversationMessage[] {
+  const baseTime = Date.now();
+  const transcript: WorkspaceConversationMessage[] = messages.flatMap((message, index) => {
+    if (message.role !== 'user' && message.role !== 'assistant') {
+      return [];
+    }
+
+    return [
+      {
+        id: buildConversationMessageId(),
+        role: message.role,
+        content: extractMessageText(message),
+        status: 'completed',
+        createdAt: new Date(baseTime + index).toISOString(),
+      } satisfies WorkspaceConversationMessage,
+    ];
+  });
+
+  if (assistantMessage && assistantMessage.content.trim().length > 0) {
+    transcript.push({
+      id: buildConversationMessageId(),
+      role: 'assistant',
+      content: assistantMessage.content,
+      status: assistantMessage.status,
+      createdAt: new Date(baseTime + transcript.length).toISOString(),
+    });
+  }
+
+  return transcript;
 }
 
 function buildAssistantText(
@@ -390,78 +449,211 @@ async function resolveConversation(
   };
 }
 
-function buildStreamingPayload(input: {
+function buildMetadataEvent(input: {
+  conversation: WorkspaceConversation;
+}): string {
+  return `event: agentif.metadata\ndata: ${JSON.stringify({
+    conversation_id: input.conversation.id,
+    trace_id: input.conversation.run.traceId,
+  })}\n\n`;
+}
+
+function buildChunkEvent(chunk: ChatCompletionChunk) {
+  return `data: ${JSON.stringify(chunk)}\n\n`;
+}
+
+function buildStreamingChunk(input: {
+  id: string;
+  created: number;
+  model: string;
+  conversationId: string;
+  traceId: string;
+  content?: string;
+  finishReason?: ChatCompletionChunk['choices'][0]['finish_reason'];
+  includeRole?: boolean;
+  usage?: ChatCompletionChunk['usage'];
+}): ChatCompletionChunk {
+  return {
+    id: input.id,
+    object: 'chat.completion.chunk',
+    created: input.created,
+    model: input.model,
+    conversation_id: input.conversationId,
+    trace_id: input.traceId,
+    choices: [
+      {
+        index: 0,
+        delta: {
+          ...(input.includeRole ? { role: 'assistant' as const } : {}),
+          ...(input.content ? { content: input.content } : {}),
+        },
+        finish_reason: input.finishReason ?? null,
+      },
+    ],
+    ...(input.usage ? { usage: input.usage } : {}),
+  };
+}
+
+function buildBlockingResponse(input: {
   conversation: WorkspaceConversation;
   created: number;
   model: string;
   promptTokens: number;
   completionTokens: number;
   assistantText: string;
-}): string {
-  const chunks: ChatCompletionChunk[] = [
-    {
-      id: input.conversation.run.id,
-      object: 'chat.completion.chunk',
-      created: input.created,
-      model: input.model,
-      conversation_id: input.conversation.id,
-      trace_id: input.conversation.run.traceId,
-      choices: [
-        {
-          index: 0,
-          delta: {
-            role: 'assistant',
-          },
-          finish_reason: null,
+}): ChatCompletionResponse {
+  return {
+    id: input.conversation.run.id,
+    object: 'chat.completion',
+    created: input.created,
+    model: input.model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: input.assistantText,
         },
-      ],
-    },
-    ...chunkText(input.assistantText).map<ChatCompletionChunk>(content => ({
-      id: input.conversation.run.id,
-      object: 'chat.completion.chunk' as const,
-      created: input.created,
-      model: input.model,
-      conversation_id: input.conversation.id,
-      trace_id: input.conversation.run.traceId,
-      choices: [
-        {
-          index: 0 as const,
-          delta: {
-            content,
-          },
-          finish_reason: null,
-        },
-      ],
-    })),
-    {
-      id: input.conversation.run.id,
-      object: 'chat.completion.chunk',
-      created: input.created,
-      model: input.model,
-      conversation_id: input.conversation.id,
-      trace_id: input.conversation.run.traceId,
-      choices: [
-        {
-          index: 0,
-          delta: {},
-          finish_reason: 'stop',
-        },
-      ],
-      usage: {
-        prompt_tokens: input.promptTokens,
-        completion_tokens: input.completionTokens,
-        total_tokens: input.promptTokens + input.completionTokens,
+        finish_reason: 'stop',
       },
+    ],
+    usage: {
+      prompt_tokens: input.promptTokens,
+      completion_tokens: input.completionTokens,
+      total_tokens: input.promptTokens + input.completionTokens,
     },
-  ];
-
-  const metadataEvent = `event: agentif.metadata\ndata: ${JSON.stringify({
     conversation_id: input.conversation.id,
     trace_id: input.conversation.run.traceId,
-  })}\n\n`;
-  const dataEvents = chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('');
+    metadata: {
+      app_id: input.conversation.app.id,
+      run_id: input.conversation.run.id,
+      active_group_id: input.conversation.activeGroup.id,
+    },
+  };
+}
 
-  return `${metadataEvent}${dataEvents}data: [DONE]\n\n`;
+async function* streamCompletionEvents(input: {
+  conversation: WorkspaceConversation;
+  created: number;
+  model: string;
+  promptTokens: number;
+  assistantText: string;
+  messages: ChatCompletionMessage[];
+  startedAt: number;
+  user: AuthUser;
+  workspaceService: WorkspaceService;
+}) {
+  const streamState = activeStreams.get(input.conversation.run.id);
+  let assistantContent = '';
+  let finalized = false;
+
+  try {
+    yield buildMetadataEvent({
+      conversation: input.conversation,
+    });
+    yield buildChunkEvent(
+      buildStreamingChunk({
+        id: input.conversation.run.id,
+        created: input.created,
+        model: input.model,
+        conversationId: input.conversation.id,
+        traceId: input.conversation.run.traceId,
+        includeRole: true,
+      })
+    );
+
+    for (const contentChunk of chunkText(input.assistantText)) {
+      if (streamState?.stopRequested) {
+        break;
+      }
+
+      assistantContent += contentChunk;
+      yield buildChunkEvent(
+        buildStreamingChunk({
+          id: input.conversation.run.id,
+          created: input.created,
+          model: input.model,
+          conversationId: input.conversation.id,
+          traceId: input.conversation.run.traceId,
+          content: contentChunk,
+        })
+      );
+
+      await sleep(STREAM_CHUNK_DELAY_MS);
+    }
+
+    const wasStopped = Boolean(streamState?.stopRequested);
+    const completionTokens = estimateTokens(assistantContent);
+    const updateResult = await input.workspaceService.updateConversationRunForUser(input.user, {
+      conversationId: input.conversation.id,
+      runId: input.conversation.run.id,
+      status: wasStopped ? 'stopped' : 'succeeded',
+      messageHistory: buildPersistedHistory(input.messages, {
+        content: assistantContent,
+        status: wasStopped ? 'stopped' : 'completed',
+      }),
+      outputs: {
+        assistant: {
+          content: assistantContent,
+          finishReason: 'stop',
+          status: wasStopped ? 'stopped' : 'completed',
+        },
+      },
+      elapsedTime: Date.now() - input.startedAt,
+      totalTokens: input.promptTokens + completionTokens,
+      totalSteps: 1,
+      finishedAt: new Date().toISOString(),
+    });
+
+    finalized = true;
+
+    const finalChunk = buildStreamingChunk({
+      id: input.conversation.run.id,
+      created: input.created,
+      model: input.model,
+      conversationId: input.conversation.id,
+      traceId: input.conversation.run.traceId,
+      finishReason: 'stop',
+      usage: {
+        prompt_tokens: input.promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: input.promptTokens + completionTokens,
+      },
+    });
+
+    yield buildChunkEvent(finalChunk);
+    yield 'data: [DONE]\n\n';
+
+    if (!updateResult.ok) {
+      return;
+    }
+  } finally {
+    activeStreams.delete(input.conversation.run.id);
+
+    if (!finalized) {
+      await input.workspaceService.updateConversationRunForUser(input.user, {
+        conversationId: input.conversation.id,
+        runId: input.conversation.run.id,
+        status: streamState?.stopRequested ? 'stopped' : 'failed',
+        messageHistory: buildPersistedHistory(input.messages, {
+          content: assistantContent,
+          status: streamState?.stopRequested ? 'stopped' : 'failed',
+        }),
+        outputs: {
+          assistant: {
+            content: assistantContent,
+            finishReason: 'stop',
+            status: streamState?.stopRequested ? 'stopped' : 'failed',
+          },
+        },
+        error: streamState?.stopRequested ? undefined : 'The streaming response ended unexpectedly.',
+        elapsedTime: Date.now() - input.startedAt,
+        totalTokens: input.promptTokens + estimateTokens(assistantContent),
+        totalSteps: 1,
+        finishedAt: new Date().toISOString(),
+      });
+    }
+  }
 }
 
 export async function registerChatRoutes(
@@ -609,7 +801,7 @@ export async function registerChatRoutes(
 
     reply.header('X-Trace-ID', traceId);
 
-    await workspaceService.updateConversationRunForUser(access.user, {
+    const runningResult = await workspaceService.updateConversationRunForUser(access.user, {
       conversationId: conversation.id,
       runId: conversation.run.id,
       status: 'running',
@@ -623,14 +815,54 @@ export async function registerChatRoutes(
       totalSteps: 1,
     });
 
+    if (!runningResult.ok) {
+      reply.code(500);
+      return buildErrorResponse(traceId, {
+        type: 'internal_error',
+        code: 'provider_error',
+        message: 'The conversation run could not be marked as running.',
+      });
+    }
+
+    if (body.stream) {
+      activeStreams.set(runningResult.data.run.id, {
+        stopRequested: false,
+      });
+
+      reply.header('content-type', 'text/event-stream; charset=utf-8');
+      reply.header('cache-control', 'no-cache');
+      reply.header('connection', 'keep-alive');
+
+      return reply.send(
+        Readable.from(
+          streamCompletionEvents({
+            conversation: runningResult.data,
+            created,
+            model,
+            promptTokens,
+            assistantText,
+            messages: body.messages,
+            startedAt,
+            user: access.user,
+            workspaceService,
+          })
+        )
+      );
+    }
+
     const updateResult = await workspaceService.updateConversationRunForUser(access.user, {
       conversationId: conversation.id,
       runId: conversation.run.id,
       status: 'succeeded',
+      messageHistory: buildPersistedHistory(body.messages, {
+        content: assistantText,
+        status: 'completed',
+      }),
       outputs: {
         assistant: {
           content: assistantText,
           finishReason: 'stop',
+          status: 'completed',
         },
       },
       elapsedTime: Date.now() - startedAt,
@@ -648,50 +880,14 @@ export async function registerChatRoutes(
       });
     }
 
-    if (body.stream) {
-      reply.header('content-type', 'text/event-stream; charset=utf-8');
-      reply.header('cache-control', 'no-cache');
-
-      return buildStreamingPayload({
-        conversation: updateResult.data,
-        created,
-        model,
-        promptTokens,
-        completionTokens,
-        assistantText,
-      });
-    }
-
-    const response: ChatCompletionResponse = {
-      id: updateResult.data.run.id,
-      object: 'chat.completion',
+    return buildBlockingResponse({
+      conversation: updateResult.data,
       created,
       model,
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: 'assistant',
-            content: assistantText,
-          },
-          finish_reason: 'stop',
-        },
-      ],
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: promptTokens + completionTokens,
-      },
-      conversation_id: updateResult.data.id,
-      trace_id: traceId,
-      metadata: {
-        app_id: updateResult.data.app.id,
-        run_id: updateResult.data.run.id,
-        active_group_id: updateResult.data.activeGroup.id,
-      },
-    };
-
-    return response;
+      promptTokens,
+      completionTokens,
+      assistantText,
+    });
   });
 
   app.post('/v1/chat/completions/:taskId/stop', async (request, reply) => {
@@ -719,9 +915,16 @@ export async function registerChatRoutes(
       });
     }
 
+    const taskId = params.taskId.trim();
+    const streamState = activeStreams.get(taskId);
+
+    if (streamState) {
+      streamState.stopRequested = true;
+    }
+
     const response: ChatCompletionStopResponse = {
       result: 'success',
-      stop_type: 'soft',
+      stop_type: streamState ? 'hard' : 'soft',
     };
 
     return response;
