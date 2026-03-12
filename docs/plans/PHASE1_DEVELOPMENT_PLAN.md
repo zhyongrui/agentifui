@@ -564,6 +564,160 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 - `/api/gateway/*` 反代到本地 Gateway 进程
 - 将临时 tunnel 从“测试 workaround”升级为“正式入口配置文档”
 
+### 12.7 详细任务板
+
+从这一节开始，把剩余 Phase 1 工作拆成“可以直接逐轮执行”的任务板。后续每一轮开发默认从当前激活队列中顺序取任务，而不是重新临时规划。
+
+#### R11-A `S3-2` 审计查询与 run-aware 视图
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R11-A1 | 扩展共享审计合同 | 支持 action、level、actor、entity、时间范围、traceId、runId 查询参数 | shared 合同与前后端类型统一 |
+| R11-A2 | 扩展 `/admin/audit` 查询参数 | 让后台审计页不再只有固定列表 | gateway route 支持 query 校验 |
+| R11-A3 | 持久化审计过滤读模型 | 在 PostgreSQL 中按租户、动作、时间、trace、run 查询 | persistent admin service 返回过滤结果 |
+| R11-A4 | countsByAction 与过滤结果联动 | 让 action 汇总和列表使用同一过滤条件 | 统计与列表口径一致 |
+| R11-A5 | 将 run/trace 维度映射进审计读面 | 让管理员从 audit 直接看到 run 关联 | 审计 DTO 含 `traceId` / `runId` / `conversationId` |
+| R11-A6 | 后台审计页增加过滤表单 | 支持 action、level、actor、traceId 过滤 | Web `/admin/audit` 可交互过滤 |
+| R11-A7 | 后台审计页增加 run 链接 | 从 audit 直接跳或定位到 run 详情 | 浏览器中可见 run-aware 入口 |
+| R11-A8 | 审计页增加结果为空和错误状态 | 让过滤后的 UX 完整 | 空状态和错误状态可验证 |
+| R11-A9 | 增加 route 测试 | 保证 query 校验、鉴权、过滤结果正确 | admin route tests 覆盖新增参数 |
+| R11-A10 | 增加持久化测试 | 用真实 DB 验证 trace/run 过滤 | auth-persistence 或新测试通过 |
+| R11-A11 | 增加前端 client/page 测试 | 保证过滤请求和回显稳定 | Web 测试通过 |
+| R11-A12 | 增加浏览器回归 | 管理员能在浏览器里筛出指定审计事件 | Playwright 覆盖通过 |
+
+#### R11-B `S3-2` 审计导出与合规交付
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R11-B1 | 设计审计导出合同 | 支持 JSON/CSV 导出元数据 | shared 合同冻结 |
+| R11-B2 | 增加导出接口 | 后台可请求导出租户审计数据 | gateway route 可返回导出文件或 signed metadata |
+| R11-B3 | 实现 CSV 序列化 | 满足人工审查与归档需求 | CSV 字段顺序和 escaping 通过测试 |
+| R11-B4 | 实现 JSON 导出 | 满足系统对接与二次分析 | JSON 导出结构稳定 |
+| R11-B5 | 限制导出范围 | 只允许 tenant_admin / root_admin 导出当前租户数据 | 鉴权与越权测试通过 |
+| R11-B6 | 支持过滤后导出 | 导出结果复用当前 audit filter | 页面过滤和导出参数一致 |
+| R11-B7 | 后台审计页增加导出按钮 | 从 UI 触发导出 | 浏览器可下载导出结果 |
+| R11-B8 | 补导出集成测试 | 验证 JSON/CSV 结果内容 | route / persistence tests 通过 |
+
+#### R11-C `S3-2` PII 标记与敏感信息处理
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R11-C1 | 定义 PII 标记合同 | 对 payload 字段进行风险标记 | shared 合同新增 PII 元数据 |
+| R11-C2 | 实现基础 PII 检测器 | 检测 email、phone、token、secret-like 文本 | 单测覆盖规则 |
+| R11-C3 | 在审计 payload 上应用检测 | 标注 payload 中的敏感字段 | audit DTO 返回字段级标记 |
+| R11-C4 | 后台审计页显示敏感标记 | 管理员能快速识别风险数据 | UI 显示 PII badge / block |
+| R11-C5 | 可选的 payload mask 视图 | 默认隐藏高风险字段，支持显式展开 | 页面交互稳定 |
+| R11-C6 | 导出链路遵守 mask 规则 | 导出时可选择 masked/raw 模式 | 导出测试通过 |
+| R11-C7 | 补端到端测试 | 浏览器里能看到 PII 标记与展开行为 | Playwright 通过 |
+
+#### R11-D `S3-2` 审计覆盖补全
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R11-D1 | 补 workspace preferences 审计 | 收藏、默认群组变更可审计 | 事件写入且可查询 |
+| R11-D2 | 补 app launch 审计 | app 启动进入 audit 视图 | launch 事件带 app/group/trace |
+| R11-D3 | 补 run stop 审计 | 主动停止生成进入 audit | stop 事件可按 run 查询 |
+| R11-D4 | 补 admin read access 审计 | 后台敏感页面访问有最小审计 | `/admin/*` 访问记录可见 |
+| R11-D5 | 补 direct grant 失败审计 | 冲突、无权限、未找到等有 warning 级审计 | 错误链路有测试 |
+| R11-D6 | 统一 action 命名表 | 限制 action 字符串继续发散 | 文档与合同统一 |
+
+#### R12-A `S2` 文件上传主链路
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R12-A1 | 设计上传合同 | chat/workspace 可接文件元数据 | shared 合同冻结 |
+| R12-A2 | 建立上传存储抽象 | 支持本地文件系统或对象存储适配 | gateway service 抽象完成 |
+| R12-A3 | 增加上传接口 | 支持单文件上传和元数据返回 | route + 持久化测试通过 |
+| R12-A4 | 会话中挂接附件 | transcript / conversation 可引用上传文件 | conversation DTO 含附件 |
+| R12-A5 | 前端 composer 支持附件 | Web 聊天框可选择并发送附件 | 浏览器可上传 |
+| R12-A6 | run / audit 挂接附件引用 | 后续回放和审计可追踪附件 | run snapshot 可见附件 |
+| R12-A7 | 上传大小与类型限制 | 避免任意文件写入 | 校验测试通过 |
+| R12-A8 | 上传失败恢复 UX | 网络失败与校验失败有明确提示 | 前端交互稳定 |
+
+#### R12-B `S2` 分享与协作
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R12-B1 | 设计 conversation share 合同 | 支持只读分享或组内分享 | shared 合同冻结 |
+| R12-B2 | 增加分享记录持久化 | conversation share 进入 DB | schema + migration 完成 |
+| R12-B3 | 增加创建/撤销分享接口 | 后台或聊天页可控制分享 | route 测试通过 |
+| R12-B4 | Web 聊天页增加分享面板 | 用户可以创建分享链接 | 页面交互可用 |
+| R12-B5 | 受分享访问边界 | 被分享用户只能读授权内容 | 鉴权测试通过 |
+| R12-B6 | 审计分享事件 | 创建、访问、撤销都写审计 | audit 中可查 |
+
+#### R12-C `S2` 执行时间线与历史回源
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R12-C1 | 设计 timeline DTO | 把 run 分解成阶段性事件 | shared 合同冻结 |
+| R12-C2 | 持久化 run timeline | completion、stop、error、rehydrate 写时间线 | DB / service 完成 |
+| R12-C3 | 增加 conversation history 列表 | `/chat` 不只靠单 conversation 深链 | Web 有历史列表 |
+| R12-C4 | 增加最近会话查询接口 | 按用户读取最近 conversation | workspace route 支持 |
+| R12-C5 | 聊天页显示 timeline | run 内部阶段可视化 | UI 可查看时间线 |
+| R12-C6 | 时间线与 replay 联动 | 选中 run 时 timeline 刷新 | 浏览器通过 |
+| R12-C7 | 历史搜索/筛选 | 按 app、group、时间查找 conversation | 页面过滤可用 |
+
+#### R12-D `S1-3` quota 与历史状态收口
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R12-D1 | 设计真实 quota 读模型 | 不再依赖 fixture-like quota | quota DTO 来源真实化 |
+| R12-D2 | quota 持久化表或聚合视图 | 用户、群组、租户三层额度统一 | DB 方案确定并落地 |
+| R12-D3 | app launch 扣减与拒绝 | 启动链路接入真实 quota 判断 | launch 行为与 quota 联动 |
+| R12-D4 | chat completion 扣减 | run 结束后更新 quota 使用量 | completion 测试通过 |
+| R12-D5 | quota 告警展示 | `/apps` 与 `/chat` 显示真实 quota 提示 | 浏览器验证通过 |
+| R12-D6 | quota 审计 | 超额、拒绝、重置进入 audit | 审计链路可查 |
+
+#### R13-A `S3-3` 平台管理与租户生命周期
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R13-A1 | 设计平台管理合同 | 平台级 admin 与 tenant admin 分层 | shared 合同冻结 |
+| R13-A2 | 平台租户列表接口 | 读取租户、状态、创建时间、负责人 | route + tests 完成 |
+| R13-A3 | 新租户创建流程 | 后台可创建 tenant 与默认资源 | 持久化创建通过 |
+| R13-A4 | tenant suspend / reactivate | 平台可控制租户可用性 | 鉴权和行为测试通过 |
+| R13-A5 | 平台审计页 | 平台级别查看多租户高风险事件 | UI 可用 |
+| R13-A6 | root_admin 边界强化 | root_admin 与 tenant_admin 差异固化 | 权限测试通过 |
+
+#### R13-B `S3-3` 稳定公网入口与部署硬化
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R13-B1 | 正式反向代理配置文档 | 不再依赖临时 tunnel | nginx 配置落文档 |
+| R13-B2 | `/api/gateway` 正式反代 | Web 与 Gateway 公网同域工作 | 部署验证通过 |
+| R13-B3 | HTTPS / 证书续期说明 | 公网入口满足基本安全要求 | 文档与验证完成 |
+| R13-B4 | 进程管理方案 | systemd / pm2 / container 之一固定 | 可重复启动 |
+| R13-B5 | 环境变量模板收口 | 开发、测试、生产环境模板完整 | `.env` 文档完备 |
+| R13-B6 | 公网浏览器回归脚本 | 稳定发布前可重复手测 | 手测脚本落地 |
+
+#### R13-C `S3-3` CI、观测与发布质量门槛
+
+| 编号 | 任务 | 目标 | 完成定义 |
+|------|------|------|----------|
+| R13-C1 | CI 拆分 type/unit/e2e | 降低回归风险 | CI pipeline 可运行 |
+| R13-C2 | 数据库迁移校验 | 每次 PR 自动验证迁移可执行 | CI 覆盖 DB migrate/reset |
+| R13-C3 | 构建产物检查 | Web/Gateway 生产构建进入 CI | build job 稳定 |
+| R13-C4 | 基础 metrics/log 方案 | gateway 关键路径有可观察性 | 日志字段和指标约定固定 |
+| R13-C5 | 失败告警与 smoke 脚本 | 发布后能快速确认系统可用 | smoke 脚本可重复执行 |
+| R13-C6 | 发布 checklist | 发布前后步骤固定 | 文档可直接执行 |
+
+### 12.8 当前激活队列
+
+当前默认按下面顺序执行，不再每轮重新定义优先级：
+
+1. `R11-A1` 扩展共享审计合同
+2. `R11-A2` 扩展 `/admin/audit` 查询参数
+3. `R11-A3` 持久化审计过滤读模型
+4. `R11-A5` 将 run/trace 维度映射进审计读面
+5. `R11-A6` 后台审计页增加过滤表单
+6. `R11-A9` / `R11-A10` / `R11-A11` / `R11-A12` 测试与浏览器回归
+
+如果 `R11-A` 被环境阻塞，则按下面的降级顺序切换：
+
+1. `R11-D` 审计覆盖补全
+2. `R12-C` 执行时间线与历史回源
+3. `R12-D` quota 与历史状态收口
+
 ## 13. 2026-03-12 进度快照
 
 当前 `S1-1` / `S1-3` 的推进结论：
