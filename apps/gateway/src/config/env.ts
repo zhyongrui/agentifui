@@ -7,6 +7,7 @@ export type GatewayEnv = {
   host: string;
   port: number;
   corsOrigin: boolean | string;
+  databaseUrl?: string;
   ssoDomainMap: Record<string, string>;
   defaultTenantId: string;
   defaultSsoUserStatus: SsoJitUserStatus;
@@ -104,6 +105,7 @@ export function parseGatewayEnv(source: NodeJS.ProcessEnv): GatewayEnv {
       source.GATEWAY_CORS_ORIGIN && source.GATEWAY_CORS_ORIGIN !== 'true'
         ? source.GATEWAY_CORS_ORIGIN
         : true,
+    databaseUrl: source.DATABASE_URL?.trim() || undefined,
     ssoDomainMap: parseSsoDomainMap(source.GATEWAY_SSO_DOMAINS),
     defaultTenantId: source.GATEWAY_DEFAULT_TENANT_ID ?? DEFAULT_TENANT_ID,
     defaultSsoUserStatus: parseSsoJitUserStatus(

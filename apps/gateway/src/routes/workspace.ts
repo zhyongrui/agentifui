@@ -49,7 +49,7 @@ export async function registerWorkspaceRoutes(
       );
     }
 
-    const user = authService.getUserBySessionToken(sessionToken);
+    const user = await authService.getUserBySessionToken(sessionToken);
 
     if (!user) {
       reply.code(401);

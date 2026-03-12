@@ -33,6 +33,7 @@ const MFA_ISSUER = 'AgentifUI';
 const MFA_SETUP_TTL_MS = 10 * 60 * 1000;
 const MFA_TICKET_TTL_MS = 10 * 60 * 1000;
 
+type Awaitable<T> = T | Promise<T>;
 type SsoJitUserStatus = Extract<AuthUserStatus, 'pending' | 'active'>;
 
 type StoredUser = AuthUser & {
@@ -92,6 +93,76 @@ type AuthFailure = {
 
 type AuthResult<T> = AuthSuccess<T> | AuthFailure;
 
+type SeedInvitationResult = {
+  ok: true;
+  data: {
+    invitationId: string;
+    token: string;
+    email: string;
+    expiresAt: string;
+  };
+};
+
+type AuthService = {
+  register(input: RegisterRequest): Awaitable<AuthResult<RegisterResponse['data']>>;
+  acceptInvitation(
+    input: InvitationAcceptRequest
+  ): Awaitable<AuthResult<InvitationAcceptResponse['data']>>;
+  login(input: LoginRequest): Awaitable<AuthResult<LoginResponse['data']>>;
+  loginWithSso(input: {
+    email: string;
+    providerId: string;
+    displayName?: string;
+  }): Awaitable<AuthResult<SsoCallbackResponse['data']>>;
+  revokeSession(sessionToken: string): Awaitable<boolean>;
+  getUserBySessionToken(sessionToken: string): Awaitable<AuthUser | null>;
+  getUserByEmail(email: string): Awaitable<AuthUser | null>;
+  getMfaStatus(userId: string): Awaitable<MfaStatusResponse['data'] | null>;
+  startMfaSetup(userId: string): Awaitable<AuthResult<MfaSetupResponse['data']>>;
+  enableMfa(
+    userId: string,
+    input: MfaEnableRequest
+  ): Awaitable<AuthResult<MfaEnableResponse['data']>>;
+  disableMfa(
+    userId: string,
+    input: MfaDisableRequest
+  ): Awaitable<AuthResult<MfaDisableResponse['data']>>;
+  verifyMfa(input: MfaVerifyRequest): Awaitable<AuthResult<MfaVerifyResponse['data']>>;
+  clear(): Awaitable<void>;
+  seedPendingUser(input: RegisterRequest): Awaitable<AuthResult<RegisterResponse['data']>>;
+  seedInvitation(input: {
+    email: string;
+    tenantId?: string;
+    expiresAt?: string;
+  }): Awaitable<SeedInvitationResult>;
+};
+
+type InMemoryAuthService = {
+  register(input: RegisterRequest): AuthResult<RegisterResponse['data']>;
+  acceptInvitation(input: InvitationAcceptRequest): AuthResult<InvitationAcceptResponse['data']>;
+  login(input: LoginRequest): AuthResult<LoginResponse['data']>;
+  loginWithSso(input: {
+    email: string;
+    providerId: string;
+    displayName?: string;
+  }): AuthResult<SsoCallbackResponse['data']>;
+  revokeSession(sessionToken: string): boolean;
+  getUserBySessionToken(sessionToken: string): AuthUser | null;
+  getUserByEmail(email: string): AuthUser | null;
+  getMfaStatus(userId: string): MfaStatusResponse['data'] | null;
+  startMfaSetup(userId: string): AuthResult<MfaSetupResponse['data']>;
+  enableMfa(userId: string, input: MfaEnableRequest): AuthResult<MfaEnableResponse['data']>;
+  disableMfa(userId: string, input: MfaDisableRequest): AuthResult<MfaDisableResponse['data']>;
+  verifyMfa(input: MfaVerifyRequest): AuthResult<MfaVerifyResponse['data']>;
+  clear(): void;
+  seedPendingUser(input: RegisterRequest): AuthResult<RegisterResponse['data']>;
+  seedInvitation(input: {
+    email: string;
+    tenantId?: string;
+    expiresAt?: string;
+  }): SeedInvitationResult;
+};
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -136,7 +207,7 @@ function toAuthUser(user: StoredUser): AuthUser {
   };
 }
 
-export function createAuthService(options: AuthServiceOptions) {
+export function createAuthService(options: AuthServiceOptions): InMemoryAuthService {
   const users = new Map<string, StoredUser>();
   const invitations = new Map<string, StoredInvitation>();
   const sessions = new Map<string, string>();
@@ -477,6 +548,10 @@ export function createAuthService(options: AuthServiceOptions) {
     return user ? toAuthUser(user) : null;
   }
 
+  function revokeSession(sessionToken: string): boolean {
+    return sessions.delete(sessionToken);
+  }
+
   function getMfaStatus(userId: string): MfaStatusResponse['data'] | null {
     const user = findStoredUserById(userId);
 
@@ -650,7 +725,7 @@ export function createAuthService(options: AuthServiceOptions) {
     mfaTickets.clear();
   }
 
-  function seedPendingUser(input: RegisterRequest) {
+  function seedPendingUser(input: RegisterRequest): AuthResult<RegisterResponse['data']> {
     const result = register(input);
 
     if (!result.ok) {
@@ -660,7 +735,11 @@ export function createAuthService(options: AuthServiceOptions) {
     const user = users.get(normalizeEmail(input.email));
 
     if (!user) {
-      return fail(500, 'AUTH_NOT_IMPLEMENTED', 'Unable to seed pending user.');
+      return fail<RegisterResponse['data']>(
+        500,
+        'AUTH_NOT_IMPLEMENTED',
+        'Unable to seed pending user.'
+      );
     }
 
     user.status = 'pending';
@@ -711,6 +790,7 @@ export function createAuthService(options: AuthServiceOptions) {
     acceptInvitation,
     login,
     loginWithSso,
+    revokeSession,
     getUserBySessionToken,
     getUserByEmail,
     getMfaStatus,
@@ -724,4 +804,12 @@ export function createAuthService(options: AuthServiceOptions) {
   };
 }
 
-export type AuthService = ReturnType<typeof createAuthService>;
+export type {
+  AuthFailure,
+  AuthResult,
+  AuthService,
+  AuthServiceOptions,
+  AuthSuccess,
+  InMemoryAuthService,
+  SeedInvitationResult,
+};

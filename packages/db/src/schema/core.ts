@@ -1,5 +1,6 @@
 import {
   boolean,
+  integer,
   index,
   jsonb,
   pgEnum,
@@ -7,7 +8,6 @@ import {
   text,
   timestamp,
   uniqueIndex,
-  uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
 
@@ -34,7 +34,7 @@ export const auditLevelEnum = pgEnum('audit_level', ['info', 'warning', 'critica
 export const tenants = pgTable(
   'tenants',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
+    id: varchar('id', { length: 120 }).primaryKey(),
     slug: varchar('slug', { length: 64 }).notNull(),
     name: varchar('name', { length: 120 }).notNull(),
     status: tenantStatusEnum('status').notNull().default('active'),
@@ -50,8 +50,8 @@ export const tenants = pgTable(
 export const groups = pgTable(
   'groups',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id')
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
       .notNull()
       .references(() => tenants.id),
     slug: varchar('slug', { length: 64 }).notNull(),
@@ -72,14 +72,16 @@ export const groups = pgTable(
 export const users = pgTable(
   'users',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id')
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
       .notNull()
       .references(() => tenants.id),
     email: varchar('email', { length: 255 }).notNull(),
     displayName: varchar('display_name', { length: 120 }).notNull(),
     status: userStatusEnum('status').notNull().default('pending'),
     passwordHash: text('password_hash'),
+    failedLoginCount: integer('failed_login_count').notNull().default(0),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
     isEmailVerified: boolean('is_email_verified').notNull().default(false),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -97,14 +99,14 @@ export const users = pgTable(
 export const groupMembers = pgTable(
   'group_members',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id')
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
       .notNull()
       .references(() => tenants.id),
-    groupId: uuid('group_id')
+    groupId: varchar('group_id', { length: 120 })
       .notNull()
       .references(() => groups.id),
-    userId: uuid('user_id')
+    userId: varchar('user_id', { length: 120 })
       .notNull()
       .references(() => users.id),
     role: groupMemberRoleEnum('role').notNull().default('member'),

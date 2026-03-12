@@ -121,7 +121,7 @@ describe('auth audit routes', () => {
   });
 
   it('records successful login and logout events', async () => {
-    const { app } = await createTestApp();
+    const { app, authService } = await createTestApp();
 
     try {
       await app.inject({
@@ -158,11 +158,22 @@ describe('auth audit routes', () => {
 
       expect(logoutResponse.statusCode).toBe(200);
 
+      const auditReaderSession = authService.login({
+        email: 'developer@iflabx.com',
+        password: 'Secure123',
+      });
+
+      expect(auditReaderSession.ok).toBe(true);
+
+      if (!auditReaderSession.ok) {
+        throw new Error('expected audit reader session to exist');
+      }
+
       const auditResponse = await app.inject({
         method: 'GET',
         url: '/auth/audit-events',
         headers: {
-          authorization: `Bearer ${sessionToken}`,
+          authorization: `Bearer ${auditReaderSession.data.sessionToken}`,
         },
       });
 

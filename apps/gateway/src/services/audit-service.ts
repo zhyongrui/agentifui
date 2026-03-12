@@ -6,6 +6,8 @@ import type {
 } from '@agentifui/shared/auth';
 import { randomUUID } from 'node:crypto';
 
+type Awaitable<T> = T | Promise<T>;
+
 type RecordAuditEventInput = {
   tenantId?: string | null;
   actorUserId?: string | null;
@@ -25,9 +27,9 @@ type ListAuditEventsInput = {
 };
 
 type AuditService = {
-  recordEvent(input: RecordAuditEventInput): AuthAuditEvent;
-  listEvents(input?: ListAuditEventsInput): AuthAuditEvent[];
-  clear(): void;
+  recordEvent(input: RecordAuditEventInput): Awaitable<AuthAuditEvent>;
+  listEvents(input?: ListAuditEventsInput): Awaitable<AuthAuditEvent[]>;
+  clear(): Awaitable<void>;
 };
 
 export function createAuditService(): AuditService {
@@ -76,3 +78,4 @@ export function createAuditService(): AuditService {
 }
 
 export type { AuditService };
+export type { ListAuditEventsInput, RecordAuditEventInput };

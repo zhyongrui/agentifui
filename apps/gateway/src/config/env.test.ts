@@ -9,6 +9,7 @@ describe('parseGatewayEnv', () => {
       host: '0.0.0.0',
       port: 4000,
       corsOrigin: true,
+      databaseUrl: undefined,
       ssoDomainMap: {},
       defaultTenantId: 'dev-tenant',
       defaultSsoUserStatus: 'pending',
@@ -24,6 +25,7 @@ describe('parseGatewayEnv', () => {
         GATEWAY_HOST: '127.0.0.1',
         GATEWAY_PORT: '4100',
         GATEWAY_CORS_ORIGIN: 'http://localhost:3000',
+        DATABASE_URL: 'postgresql://agentifui:agentifui@localhost:5432/agentifui',
         GATEWAY_SSO_DOMAINS: 'iflabx.com=iflabx-sso, agentifui.com=agentifui-saml',
         GATEWAY_DEFAULT_TENANT_ID: 'tenant-a',
         GATEWAY_SSO_JIT_DEFAULT_STATUS: 'active',
@@ -35,6 +37,7 @@ describe('parseGatewayEnv', () => {
       host: '127.0.0.1',
       port: 4100,
       corsOrigin: 'http://localhost:3000',
+      databaseUrl: 'postgresql://agentifui:agentifui@localhost:5432/agentifui',
       ssoDomainMap: {
         'iflabx.com': 'iflabx-sso',
         'agentifui.com': 'agentifui-saml',

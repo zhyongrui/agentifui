@@ -15,6 +15,8 @@
     "dev:web": "turbo run dev --filter=@agentifui/web",
     "dev:gateway": "turbo run dev --filter=@agentifui/gateway",
     "build": "turbo run build",
+    "db:migrate": "npm run migrate --workspace @agentifui/db",
+    "db:reset": "npm run reset --workspace @agentifui/db",
     "type-check": "turbo run type-check",
     "lint": "turbo run lint",
     "test": "vitest run",

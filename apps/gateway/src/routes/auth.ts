@@ -66,14 +66,14 @@ function readBearerToken(value: string | undefined): string | null {
   return token;
 }
 
-function requireActiveSession(
+async function requireActiveSession(
   authService: AuthService,
   authorization: string | undefined,
   messages: {
     unauthorized: string;
     forbidden: string;
   }
-):
+): Promise<
   | {
       ok: true;
       user: AuthUser;
@@ -83,7 +83,8 @@ function requireActiveSession(
       ok: false;
       statusCode: 401 | 403;
       response: AuthErrorResponse;
-    } {
+    }
+> {
   const sessionToken = readBearerToken(authorization);
 
   if (!sessionToken) {
@@ -94,7 +95,7 @@ function requireActiveSession(
     };
   }
 
-  const user = authService.getUserBySessionToken(sessionToken);
+  const user = await authService.getUserBySessionToken(sessionToken);
 
   if (!user) {
     return {
@@ -176,7 +177,7 @@ export async function registerAuthRoutes(
       );
     }
 
-    const result = authService.loginWithSso({
+    const result = await authService.loginWithSso({
       email: body.email,
       providerId: body.providerId,
       displayName: body.displayName,
@@ -188,7 +189,7 @@ export async function registerAuthRoutes(
     }
 
     if (result.data.user.status === 'active') {
-      auditService.recordEvent({
+      await auditService.recordEvent({
         tenantId: result.data.user.tenantId,
         actorUserId: result.data.user.id,
         action: 'auth.login.succeeded',
@@ -233,7 +234,7 @@ export async function registerAuthRoutes(
       );
     }
 
-    const result = authService.register({
+    const result = await authService.register({
       email: body.email,
       password: body.password,
       displayName: body.displayName,
@@ -264,7 +265,7 @@ export async function registerAuthRoutes(
       );
     }
 
-    const result = authService.login({
+    const result = await authService.login({
       email: body.email,
       password: body.password,
     });
@@ -273,9 +274,9 @@ export async function registerAuthRoutes(
       reply.code(result.statusCode);
 
       if (result.code !== 'AUTH_MFA_REQUIRED') {
-        const actor = authService.getUserByEmail(body.email);
+        const actor = await authService.getUserByEmail(body.email);
 
-        auditService.recordEvent({
+        await auditService.recordEvent({
           tenantId: actor?.tenantId ?? null,
           actorUserId: actor?.id ?? null,
           action: 'auth.login.failed',
@@ -293,7 +294,7 @@ export async function registerAuthRoutes(
       return buildErrorResponse(result.code, result.message, result.details);
     }
 
-    auditService.recordEvent({
+    await auditService.recordEvent({
       tenantId: result.data.user.tenantId,
       actorUserId: result.data.user.id,
       action: 'auth.login.succeeded',
@@ -316,10 +317,12 @@ export async function registerAuthRoutes(
 
   app.post('/auth/logout', async request => {
     const sessionToken = readBearerToken(request.headers.authorization);
-    const actor = sessionToken ? authService.getUserBySessionToken(sessionToken) : null;
+    const actor = sessionToken ? await authService.getUserBySessionToken(sessionToken) : null;
 
     if (sessionToken && actor) {
-      auditService.recordEvent({
+      await authService.revokeSession(sessionToken);
+
+      await auditService.recordEvent({
         tenantId: actor.tenantId,
         actorUserId: actor.id,
         action: 'auth.logout.succeeded',
@@ -343,7 +346,7 @@ export async function registerAuthRoutes(
   });
 
   app.get('/auth/mfa/status', async (request, reply) => {
-    const access = requireActiveSession(authService, request.headers.authorization, {
+    const access = await requireActiveSession(authService, request.headers.authorization, {
       unauthorized: 'A valid session token is required to access MFA settings.',
       forbidden: 'Only active users can access MFA settings.',
     });
@@ -353,7 +356,7 @@ export async function registerAuthRoutes(
       return access.response;
     }
 
-    const status = authService.getMfaStatus(access.user.id);
+    const status = await authService.getMfaStatus(access.user.id);
 
     if (!status) {
       reply.code(404);
@@ -369,7 +372,7 @@ export async function registerAuthRoutes(
   });
 
   app.post('/auth/mfa/setup', async (request, reply) => {
-    const access = requireActiveSession(authService, request.headers.authorization, {
+    const access = await requireActiveSession(authService, request.headers.authorization, {
       unauthorized: 'A valid session token is required to start MFA setup.',
       forbidden: 'Only active users can start MFA setup.',
     });
@@ -379,7 +382,7 @@ export async function registerAuthRoutes(
       return access.response;
     }
 
-    const result = authService.startMfaSetup(access.user.id);
+    const result = await authService.startMfaSetup(access.user.id);
 
     if (!result.ok) {
       reply.code(result.statusCode);
@@ -395,7 +398,7 @@ export async function registerAuthRoutes(
   });
 
   app.post('/auth/mfa/enable', async (request, reply) => {
-    const access = requireActiveSession(authService, request.headers.authorization, {
+    const access = await requireActiveSession(authService, request.headers.authorization, {
       unauthorized: 'A valid session token is required to enable MFA.',
       forbidden: 'Only active users can enable MFA.',
     });
@@ -415,7 +418,7 @@ export async function registerAuthRoutes(
       );
     }
 
-    const result = authService.enableMfa(access.user.id, {
+    const result = await authService.enableMfa(access.user.id, {
       setupToken: body.setupToken,
       code: body.code,
     });
@@ -425,7 +428,7 @@ export async function registerAuthRoutes(
       return buildErrorResponse(result.code, result.message, result.details);
     }
 
-    auditService.recordEvent({
+    await auditService.recordEvent({
       tenantId: access.user.tenantId,
       actorUserId: access.user.id,
       action: 'auth.mfa.enabled',
@@ -446,7 +449,7 @@ export async function registerAuthRoutes(
   });
 
   app.post('/auth/mfa/disable', async (request, reply) => {
-    const access = requireActiveSession(authService, request.headers.authorization, {
+    const access = await requireActiveSession(authService, request.headers.authorization, {
       unauthorized: 'A valid session token is required to disable MFA.',
       forbidden: 'Only active users can disable MFA.',
     });
@@ -466,7 +469,7 @@ export async function registerAuthRoutes(
       );
     }
 
-    const result = authService.disableMfa(access.user.id, {
+    const result = await authService.disableMfa(access.user.id, {
       code: body.code,
     });
 
@@ -475,7 +478,7 @@ export async function registerAuthRoutes(
       return buildErrorResponse(result.code, result.message, result.details);
     }
 
-    auditService.recordEvent({
+    await auditService.recordEvent({
       tenantId: access.user.tenantId,
       actorUserId: access.user.id,
       action: 'auth.mfa.disabled',
@@ -506,7 +509,7 @@ export async function registerAuthRoutes(
       );
     }
 
-    const result = authService.verifyMfa({
+    const result = await authService.verifyMfa({
       ticket: body.ticket,
       code: body.code,
     });
@@ -516,7 +519,7 @@ export async function registerAuthRoutes(
       return buildErrorResponse(result.code, result.message, result.details);
     }
 
-    auditService.recordEvent({
+    await auditService.recordEvent({
       tenantId: result.data.user.tenantId,
       actorUserId: result.data.user.id,
       action: 'auth.login.succeeded',
@@ -559,7 +562,7 @@ export async function registerAuthRoutes(
       );
     }
 
-    const result = authService.acceptInvitation({
+    const result = await authService.acceptInvitation({
       token: body.token,
       password: body.password,
       displayName: body.displayName,
@@ -579,7 +582,7 @@ export async function registerAuthRoutes(
   });
 
   app.get('/auth/audit-events', async (request, reply) => {
-    const access = requireActiveSession(authService, request.headers.authorization, {
+    const access = await requireActiveSession(authService, request.headers.authorization, {
       unauthorized: 'A valid session token is required to query audit events.',
       forbidden: 'Only active users can query audit events.',
     });
@@ -596,7 +599,7 @@ export async function registerAuthRoutes(
     const response: AuthAuditListResponse = {
       ok: true,
       data: {
-        events: auditService.listEvents({
+        events: await auditService.listEvents({
           tenantId: access.user.tenantId,
           limit,
         }),

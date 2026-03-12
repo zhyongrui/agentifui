@@ -11,13 +11,13 @@
 
 ## 当前状态
 
-当前仓库已经完成 `M0` 的第一轮收口，并开始进入 `S1-1` 的认证契约阶段。
+当前仓库已经完成 `M0` 收口，并进入 `S1-1` 的真实认证实现阶段。
 
 - `apps/web`：已具备 `(auth)`、`(main)`、`(admin)` 路由骨架，以及 `pending`、`invite accept`、`security` 占位页
-- `apps/gateway`：已具备插件化入口、环境配置、健康检查和 `/auth/*` 路由骨架
+- `apps/gateway`：已具备插件化入口、环境配置、健康检查，以及 DB-backed 的 `/auth/*` 认证、MFA、邀请和审计链路
 - `packages/shared`：已具备 auth DTO、错误码和密码策略校验
 - `packages/ui`：共享 UI 包占位
-- `packages/db`：已具备 Drizzle 配置和 `S1-1` 初始 schema
+- `packages/db`：已具备 schema、迁移目录、运行时连接封装和 `db:reset` / `db:migrate` 脚本
 - `docs/plans/PHASE1_DEVELOPMENT_PLAN.md`：基于设计文档整理的实施计划
 - `docs/guides/S1-1_KICKOFF.md`：S1-1 开发切入清单
 - `docs/dev-log/`：按天记录的开发日志
@@ -26,7 +26,8 @@
 
 ```bash
 npm install
-cp .env.example .env.local
+cp .env.example .env
+npm run db:reset
 npm run dev
 ```
 
@@ -41,9 +42,15 @@ npm run dev
 npm test
 ```
 
+数据库脚本：
+
+```bash
+npm run db:migrate
+npm run db:reset
+```
+
 ## 建议的下一步
 
-1. 在 `packages/db` 建立 S1-1 所需的租户、群组、用户和邀请相关 schema。
-2. 在 `apps/gateway` 接入 better-auth，并把 `/auth/login`、`/auth/register` 从契约骨架推进到真实持久化逻辑。
-3. 在 `apps/web` 把 `/login`、`/register`、`/auth/pending` 接到真实 auth 接口。
-4. 在此基础上继续补 `JIT`、`MFA`、`邀请激活` 和 `审计事件`。
+1. 在 `apps/gateway` 的持久化认证边界上接入 `better-auth`，收口 `R4-B`。
+2. 在 `S1-2` 开始固化 RBAC 的持久化来源，替换工作台当前的内存授权映射。
+3. 在 `S1-3` 继续推进真实应用启动链路和真实会话创建。
