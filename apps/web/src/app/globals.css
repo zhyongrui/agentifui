@@ -160,6 +160,35 @@ button:disabled {
   gap: 12px;
 }
 
+.page-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.page-nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 14px;
+}
+
+.page-nav-link:hover {
+  background: rgba(255, 255, 255, 1);
+}
+
+.page-nav-link.is-active {
+  border-color: rgba(13, 107, 77, 0.24);
+  background: rgba(13, 107, 77, 0.12);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
 .detail-list {
   display: grid;
   gap: 12px;

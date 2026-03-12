@@ -1,5 +1,6 @@
 'use client';
 
+import { MainSectionNav } from '../../../../components/main-section-nav';
 import { useProtectedSession } from '../../../../lib/use-protected-session';
 
 export default function ProfileSettingsPage() {
@@ -15,6 +16,7 @@ export default function ProfileSettingsPage() {
 
   return (
     <div className="stack page-narrow">
+      {session.user.status === 'active' ? <MainSectionNav showSecurity /> : null}
       <span className="eyebrow">S1-1</span>
       <h1>Profile</h1>
       <p className="lead">这是当前认证切片里唯一允许 `pending` 用户继续访问的主区页面。</p>

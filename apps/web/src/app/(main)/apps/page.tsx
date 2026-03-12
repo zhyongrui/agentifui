@@ -30,6 +30,7 @@ import {
 import { fetchWorkspaceCatalog } from '../../../lib/apps-client';
 import { clearAuthSession } from '../../../lib/auth-session';
 import { useProtectedSession } from '../../../lib/use-protected-session';
+import { MainSectionNav } from '../../../components/main-section-nav';
 
 type Notice = {
   tone: 'info' | 'success' | 'error';
@@ -382,6 +383,7 @@ export default function AppsPage() {
     recentIds,
     search: deferredSearch,
   });
+  const hasAdminPreview = workspace.apps.some(app => app.id === 'app_tenant_control');
 
   function handleToggleFavorite(appId: string) {
     setFavoriteIds(currentIds => toggleFavoriteApp(currentIds, appId));
@@ -422,6 +424,8 @@ export default function AppsPage() {
 
   return (
     <div className="workspace">
+      <MainSectionNav showAdminPreview={hasAdminPreview} showSecurity />
+
       <div className="workspace-header">
         <div className="workspace-title">
           <span className="eyebrow">S1-3 Workspace</span>
@@ -436,6 +440,7 @@ export default function AppsPage() {
           <span className="workspace-badge">
             目录时间: {new Date(workspace.generatedAt).toLocaleString()}
           </span>
+          <span className="workspace-badge">安全入口: Security / MFA</span>
         </div>
       </div>
 

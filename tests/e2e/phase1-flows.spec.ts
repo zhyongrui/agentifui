@@ -211,6 +211,14 @@ test('register/login/workspace controls work for a normal active user', async ({
   });
   await expectAppsWorkspace(page);
   await expect(page.getByText('5 个授权应用')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Security / MFA' })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Security / MFA' }).click();
+  await expect(page).toHaveURL(/\/settings\/security$/);
+  await expect(page.getByRole('heading', { name: 'Security Settings' })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Apps workspace' }).click();
+  await expectAppsWorkspace(page);
 
   await expect(appCard(page, 'Service Copilot')).toBeVisible();
   await expect(appCard(page, 'Policy Watch')).toBeVisible();
@@ -343,9 +351,14 @@ test('mfa setup, mfa login verification, and disable flow work end-to-end', asyn
   }
 
   await page.getByLabel('Current TOTP code').fill(generateTotpCode(manualKey));
-  await page.getByRole('button', { name: 'Confirm enable' }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/auth/mfa/enable'),
+    page.getByRole('button', { name: 'Confirm enable' }).click(),
+  ]);
 
-  await expect(page.getByText('MFA is now enabled for this account.')).toBeVisible();
+  await expect(page.getByText('MFA is now enabled for this account.')).toBeVisible({
+    timeout: 10_000,
+  });
   await expect(page.getByText('Enabled since')).toBeVisible();
 
   await logout(page);
@@ -367,7 +380,10 @@ test('mfa setup, mfa login verification, and disable flow work end-to-end', asyn
 
   await page.goto('/settings/security');
   await page.getByLabel('Current TOTP code').fill(generateTotpCode(manualKey));
-  await page.getByRole('button', { name: 'Disable MFA' }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/auth/mfa/disable'),
+    page.getByRole('button', { name: 'Disable MFA' }).click(),
+  ]);
   await expect(page.getByText('MFA has been disabled for this account.')).toBeVisible();
   await expect(
     page.locator('.detail-row').filter({

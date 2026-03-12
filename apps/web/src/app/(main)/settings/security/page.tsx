@@ -17,6 +17,7 @@ import {
   getMfaStatus,
   startMfaSetup,
 } from '../../../../lib/auth-client';
+import { MainSectionNav } from '../../../../components/main-section-nav';
 import { useProtectedSession } from '../../../../lib/use-protected-session';
 
 type SetupState = {
@@ -233,6 +234,7 @@ export default function SecuritySettingsPage() {
 
   return (
     <div className="stack page-narrow">
+      <MainSectionNav showSecurity />
       <span className="eyebrow">S1-1</span>
       <h1>Security Settings</h1>
       <p className="lead">
