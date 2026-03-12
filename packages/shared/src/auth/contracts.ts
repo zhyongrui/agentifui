@@ -63,10 +63,16 @@ export type AuthAuditAction =
   | 'auth.logout.succeeded'
   | 'auth.mfa.enabled'
   | 'auth.mfa.disabled'
+  | 'workspace.app.launched'
   | 'admin.workspace_grant.created'
   | 'admin.workspace_grant.revoked';
 
-export type AuthAuditEntityType = 'user' | 'session';
+export type AuthAuditEntityType =
+  | 'user'
+  | 'session'
+  | 'workspace_app'
+  | 'conversation'
+  | 'run';
 
 export type AuthAuditEvent = {
   id: string;

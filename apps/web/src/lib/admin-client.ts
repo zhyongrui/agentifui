@@ -3,6 +3,7 @@ import type {
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
   AdminAppsResponse,
+  AdminAuditFilters,
   AdminAuditResponse,
   AdminErrorResponse,
   AdminGroupsResponse,
@@ -51,9 +52,55 @@ export async function fetchAdminApps(
 }
 
 export async function fetchAdminAudit(
-  sessionToken: string
+  sessionToken: string,
+  filters: AdminAuditFilters = {}
 ): Promise<AdminAuditResponse | AdminErrorResponse> {
-  return fetchAdminJson<AdminAuditResponse>('/admin/audit', sessionToken);
+  const params = new URLSearchParams();
+
+  if (filters.action) {
+    params.set('action', filters.action);
+  }
+
+  if (filters.level) {
+    params.set('level', filters.level);
+  }
+
+  if (filters.actorUserId) {
+    params.set('actorUserId', filters.actorUserId);
+  }
+
+  if (filters.entityType) {
+    params.set('entityType', filters.entityType);
+  }
+
+  if (filters.traceId) {
+    params.set('traceId', filters.traceId);
+  }
+
+  if (filters.runId) {
+    params.set('runId', filters.runId);
+  }
+
+  if (filters.conversationId) {
+    params.set('conversationId', filters.conversationId);
+  }
+
+  if (filters.occurredAfter) {
+    params.set('occurredAfter', filters.occurredAfter);
+  }
+
+  if (filters.occurredBefore) {
+    params.set('occurredBefore', filters.occurredBefore);
+  }
+
+  if (typeof filters.limit === 'number') {
+    params.set('limit', String(filters.limit));
+  }
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+
+  return fetchAdminJson<AdminAuditResponse>(`/admin/audit${suffix}`, sessionToken);
 }
 
 export async function createAdminAppGrant(

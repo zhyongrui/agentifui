@@ -4,6 +4,8 @@ import type {
   AdminAppSummary,
   AdminAppUserGrant,
   AdminAuditActionCount,
+  AdminAuditEventSummary,
+  AdminAuditFilters,
   AdminErrorCode,
   AdminGroupSummary,
   AdminUserSummary,
@@ -76,13 +78,14 @@ type AdminService = {
     revokedGrant: AdminAppUserGrant;
   }>;
   listAuditForUser(
-    user: AuthUser
+    user: AuthUser,
+    filters?: AdminAuditFilters
   ): Promise<{
     countsByAction: AdminAuditActionCount[];
-    events: AuthAuditEvent[];
+    events: AdminAuditEventSummary[];
   }> | {
     countsByAction: AdminAuditActionCount[];
-    events: AuthAuditEvent[];
+    events: AdminAuditEventSummary[];
   };
 };
 
@@ -125,7 +128,9 @@ function buildInMemoryAuditEvent(
     occurredAtOffsetMs?: number;
     tenantId: string;
   }
-): AuthAuditEvent {
+): AdminAuditEventSummary {
+  const payload = input.payload;
+
   return {
     id: input.id ?? randomUUID(),
     tenantId: input.tenantId,
@@ -135,8 +140,18 @@ function buildInMemoryAuditEvent(
     entityType: input.entityType,
     entityId: input.entityId,
     ipAddress: '127.0.0.1',
-    payload: input.payload,
+    payload,
     occurredAt: new Date(Date.now() - (input.occurredAtOffsetMs ?? 0)).toISOString(),
+    context: {
+      traceId: typeof payload.traceId === 'string' ? payload.traceId : null,
+      runId: typeof payload.runId === 'string' ? payload.runId : null,
+      conversationId: typeof payload.conversationId === 'string' ? payload.conversationId : null,
+      appId: typeof payload.appId === 'string' ? payload.appId : null,
+      appName: typeof payload.appName === 'string' ? payload.appName : null,
+      activeGroupId: typeof payload.activeGroupId === 'string' ? payload.activeGroupId : null,
+      activeGroupName:
+        typeof payload.activeGroupName === 'string' ? payload.activeGroupName : null,
+    },
   };
 }
 
@@ -214,6 +229,61 @@ function buildAppSummary(
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .map(({ appId: _, ...grant }) => grant),
   };
+}
+
+function normalizeAuditFilters(filters: AdminAuditFilters = {}): AdminAuditFilters {
+  return {
+    action: filters.action?.trim() || null,
+    level: filters.level ?? null,
+    actorUserId: filters.actorUserId?.trim() || null,
+    entityType: filters.entityType ?? null,
+    traceId: filters.traceId?.trim() || null,
+    runId: filters.runId?.trim() || null,
+    conversationId: filters.conversationId?.trim() || null,
+    occurredAfter: filters.occurredAfter?.trim() || null,
+    occurredBefore: filters.occurredBefore?.trim() || null,
+    limit: filters.limit ?? null,
+  };
+}
+
+function matchesAuditFilters(event: AdminAuditEventSummary, filters: AdminAuditFilters) {
+  if (filters.action && event.action !== filters.action) {
+    return false;
+  }
+
+  if (filters.level && event.level !== filters.level) {
+    return false;
+  }
+
+  if (filters.actorUserId && event.actorUserId !== filters.actorUserId) {
+    return false;
+  }
+
+  if (filters.entityType && event.entityType !== filters.entityType) {
+    return false;
+  }
+
+  if (filters.traceId && event.context.traceId !== filters.traceId) {
+    return false;
+  }
+
+  if (filters.runId && event.context.runId !== filters.runId) {
+    return false;
+  }
+
+  if (filters.conversationId && event.context.conversationId !== filters.conversationId) {
+    return false;
+  }
+
+  if (filters.occurredAfter && event.occurredAt < filters.occurredAfter) {
+    return false;
+  }
+
+  if (filters.occurredBefore && event.occurredAt > filters.occurredBefore) {
+    return false;
+  }
+
+  return true;
 }
 
 export function createAdminService(): AdminService {
@@ -407,7 +477,8 @@ export function createAdminService(): AdminService {
         },
       };
     },
-    listAuditForUser(user) {
+    listAuditForUser(user, filters = {}) {
+      const normalizedFilters = normalizeAuditFilters(filters);
       const events = [
         buildInMemoryAuditEvent({
           tenantId: user.tenantId,
@@ -444,24 +515,32 @@ export function createAdminService(): AdminService {
           level: 'warning',
           occurredAtOffsetMs: 50 * 60_000,
         }),
-      ];
+      ].filter(event => matchesAuditFilters(event, normalizedFilters));
+
+      const limit =
+        typeof normalizedFilters.limit === 'number' && normalizedFilters.limit > 0
+          ? normalizedFilters.limit
+          : events.length;
+      const limitedEvents = events.slice(0, limit);
+      const countsByAction = [...events].reduce<AdminAuditActionCount[]>((counts, event) => {
+        const currentCount = counts.find(count => count.action === event.action);
+
+        if (currentCount) {
+          currentCount.count += 1;
+          return counts;
+        }
+
+        counts.push({
+          action: event.action,
+          count: 1,
+        });
+
+        return counts;
+      }, []);
 
       return {
-        countsByAction: [
-          {
-            action: 'auth.login.succeeded',
-            count: 1,
-          },
-          {
-            action: 'auth.mfa.enabled',
-            count: 1,
-          },
-          {
-            action: 'auth.login.failed',
-            count: 1,
-          },
-        ],
-        events,
+        countsByAction,
+        events: limitedEvents,
       };
     },
   };

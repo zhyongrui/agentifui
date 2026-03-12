@@ -553,6 +553,22 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
     })
   ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'admin.workspace_grant.created' })).toBeVisible();
+  await page.getByLabel('Audit action filter').fill('admin.workspace_grant.created');
+  await Promise.all([
+    page.waitForResponse(
+      response =>
+        response.request().method() === 'GET' &&
+        response
+          .url()
+          .includes('/api/gateway/admin/audit?action=admin.workspace_grant.created'),
+      {
+        timeout: 60_000,
+      }
+    ),
+    page.getByRole('button', { name: 'Apply filters' }).click(),
+  ]);
+  await expect(page.getByText('Action: admin.workspace_grant.created')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'admin.workspace_grant.created' })).toBeVisible();
 
   await logout(page);
   await login(page, {

@@ -5,6 +5,8 @@ import type {
   AdminAppSummary,
   AdminAppUserGrant,
   AdminAuditActionCount,
+  AdminAuditEventSummary,
+  AdminAuditFilters,
   AdminErrorCode,
   AdminGroupSummary,
   AdminUserSummary,
@@ -117,7 +119,7 @@ type AuditEventRow = {
   action: string;
   actor_user_id: string | null;
   entity_id: string | null;
-  entity_type: 'session' | 'user';
+  entity_type: 'conversation' | 'run' | 'session' | 'user' | 'workspace_app';
   id: string;
   ip_address: string | null;
   level: 'critical' | 'info' | 'warning';
@@ -207,8 +209,57 @@ async function ensureDefaultRoles(database: DatabaseClient, user: AuthUser) {
   return defaultRoleIds;
 }
 
-function toAuditEvent(row: AuditEventRow): AuthAuditEvent {
+function buildAuditContext(event: AuthAuditEvent): AdminAuditEventSummary['context'] {
+  const payload = normalizeJsonRecord(event.payload);
+
   return {
+    traceId:
+      typeof payload.traceId === 'string'
+        ? payload.traceId
+        : typeof payload.trace_id === 'string'
+          ? payload.trace_id
+          : null,
+    runId:
+      typeof payload.runId === 'string'
+        ? payload.runId
+        : typeof payload.run_id === 'string'
+          ? payload.run_id
+          : null,
+    conversationId:
+      typeof payload.conversationId === 'string'
+        ? payload.conversationId
+        : typeof payload.conversation_id === 'string'
+          ? payload.conversation_id
+          : null,
+    appId:
+      typeof payload.appId === 'string'
+        ? payload.appId
+        : typeof payload.app_id === 'string'
+          ? payload.app_id
+          : null,
+    appName:
+      typeof payload.appName === 'string'
+        ? payload.appName
+        : typeof payload.app_name === 'string'
+          ? payload.app_name
+          : null,
+    activeGroupId:
+      typeof payload.activeGroupId === 'string'
+        ? payload.activeGroupId
+        : typeof payload.active_group_id === 'string'
+          ? payload.active_group_id
+          : null,
+    activeGroupName:
+      typeof payload.activeGroupName === 'string'
+        ? payload.activeGroupName
+        : typeof payload.active_group_name === 'string'
+          ? payload.active_group_name
+          : null,
+  };
+}
+
+function toAuditEvent(row: AuditEventRow): AdminAuditEventSummary {
+  const event: AuthAuditEvent = {
     id: row.id,
     tenantId: row.tenant_id,
     actorUserId: row.actor_user_id,
@@ -220,10 +271,33 @@ function toAuditEvent(row: AuditEventRow): AuthAuditEvent {
     payload: normalizeJsonRecord(row.payload),
     occurredAt: toIso(row.occurred_at)!,
   };
+
+  return {
+    ...event,
+    context: buildAuditContext(event),
+  };
 }
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
+}
+
+function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
+  return {
+    action: filters.action?.trim() || null,
+    level: filters.level ?? null,
+    actorUserId: filters.actorUserId?.trim() || null,
+    entityType: filters.entityType ?? null,
+    traceId: filters.traceId?.trim() || null,
+    runId: filters.runId?.trim() || null,
+    conversationId: filters.conversationId?.trim() || null,
+    occurredAfter: filters.occurredAfter?.trim() || null,
+    occurredBefore: filters.occurredBefore?.trim() || null,
+    limit:
+      typeof filters.limit === 'number' && Number.isInteger(filters.limit) && filters.limit > 0
+        ? filters.limit
+        : 40,
+  };
 }
 
 function toAdminAppUserGrant(row: AppUserGrantRow): AdminAppUserGrant {
@@ -701,40 +775,77 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
         },
       };
     },
-    async listAuditForUser(user) {
-      const [countsByActionRows, events] = await Promise.all([
-        database<AuditCountRow[]>`
-          select action, count(*)::int as count
-          from audit_events
-          where tenant_id = ${user.tenantId}
-          group by action
-          order by count(*) desc, action asc
-        `,
-        database<AuditEventRow[]>`
-          select
-            id,
-            tenant_id,
-            actor_user_id,
-            action,
-            level,
-            entity_type,
-            entity_id,
-            ip_address,
-            payload,
-            occurred_at
-          from audit_events
-          where tenant_id = ${user.tenantId}
-          order by occurred_at desc
-          limit 40
-        `,
-      ]);
+    async listAuditForUser(user, filters = {}) {
+      const normalizedFilters = normalizeAuditFilters(filters);
+      const rows = await database<AuditEventRow[]>`
+        select
+          id,
+          tenant_id,
+          actor_user_id,
+          action,
+          level,
+          entity_type,
+          entity_id,
+          ip_address,
+          payload,
+          occurred_at
+        from audit_events
+        where tenant_id = ${user.tenantId}
+          and (${normalizedFilters.action}::varchar is null or action = ${normalizedFilters.action})
+          and (${normalizedFilters.level}::varchar is null or level = ${normalizedFilters.level})
+          and (${normalizedFilters.actorUserId}::varchar is null or actor_user_id = ${normalizedFilters.actorUserId})
+          and (${normalizedFilters.entityType}::varchar is null or entity_type = ${normalizedFilters.entityType})
+          and (
+            ${normalizedFilters.occurredAfter}::timestamptz is null
+            or occurred_at >= ${normalizedFilters.occurredAfter}::timestamptz
+          )
+          and (
+            ${normalizedFilters.occurredBefore}::timestamptz is null
+            or occurred_at <= ${normalizedFilters.occurredBefore}::timestamptz
+          )
+        order by occurred_at desc
+      `;
+
+      const filteredEvents = rows
+        .map(toAuditEvent)
+        .filter(event => {
+          if (normalizedFilters.traceId && event.context.traceId !== normalizedFilters.traceId) {
+            return false;
+          }
+
+          if (normalizedFilters.runId && event.context.runId !== normalizedFilters.runId) {
+            return false;
+          }
+
+          if (
+            normalizedFilters.conversationId &&
+            event.context.conversationId !== normalizedFilters.conversationId
+          ) {
+            return false;
+          }
+
+          return true;
+        });
+
+      const countsByAction = [...filteredEvents].reduce<Map<string, number>>((counts, event) => {
+        counts.set(event.action, (counts.get(event.action) ?? 0) + 1);
+        return counts;
+      }, new Map<string, number>());
 
       return {
-        countsByAction: countsByActionRows.map(row => ({
-          action: row.action,
-          count: row.count,
-        })),
-        events: events.map(toAuditEvent),
+        countsByAction: [...countsByAction.entries()]
+          .map(([action, count]) => ({
+            action,
+            count,
+          }))
+          .sort((left, right) => {
+            if (right.count !== left.count) {
+              return right.count - left.count;
+            }
+
+            return left.action.localeCompare(right.action);
+          }),
+        events: filteredEvents.slice(0, normalizedFilters.limit),
       };
     },
   };

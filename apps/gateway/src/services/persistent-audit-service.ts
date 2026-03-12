@@ -17,7 +17,7 @@ function toAuditEvent(row: {
   entity_type: string;
   entity_id: string | null;
   ip_address: string | null;
-  payload: Record<string, unknown>;
+  payload: Record<string, unknown> | string;
   occurred_at: Date | string;
 }): AuthAuditEvent {
   return {
@@ -29,12 +29,28 @@ function toAuditEvent(row: {
     entityType: row.entity_type as AuthAuditEvent['entityType'],
     entityId: row.entity_id,
     ipAddress: row.ip_address,
-    payload: row.payload ?? {},
+    payload: normalizeJsonRecord(row.payload),
     occurredAt:
       row.occurred_at instanceof Date
         ? row.occurred_at.toISOString()
         : new Date(row.occurred_at).toISOString(),
   };
+}
+
+function normalizeJsonRecord(value: Record<string, unknown> | string) {
+  if (typeof value !== 'string') {
+    return value ?? {};
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 export function createPersistentAuditService(database: DatabaseClient): AuditService {
@@ -51,7 +67,7 @@ export function createPersistentAuditService(database: DatabaseClient): AuditSer
         entity_type: string;
         entity_id: string | null;
         ip_address: string | null;
-        payload: Record<string, unknown>;
+        payload: Record<string, unknown> | string;
         occurred_at: Date;
       }[]>`
         insert into audit_events (
@@ -75,7 +91,7 @@ export function createPersistentAuditService(database: DatabaseClient): AuditSer
           ${input.entityType},
           ${input.entityId ?? null},
           ${input.ipAddress ?? null},
-          ${JSON.stringify(input.payload ?? {})}::jsonb,
+          ${input.payload ?? {}}::jsonb,
           ${occurredAt}::timestamptz
         )
         returning
@@ -109,7 +125,7 @@ export function createPersistentAuditService(database: DatabaseClient): AuditSer
         entity_type: string;
         entity_id: string | null;
         ip_address: string | null;
-        payload: Record<string, unknown>;
+        payload: Record<string, unknown> | string;
         occurred_at: Date;
       }[]>`
         select

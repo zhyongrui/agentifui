@@ -3,10 +3,10 @@ import type {
   AdminAppSummary,
   AdminAppUserGrant,
   AdminAuditActionCount,
+  AdminAuditEventSummary,
   AdminGroupSummary,
   AdminUserSummary,
 } from '@agentifui/shared/admin';
-import type { AuthAuditEvent } from '@agentifui/shared/auth';
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from '../app.js';
@@ -102,7 +102,7 @@ const auditCounts: AdminAuditActionCount[] = [
   },
 ];
 
-const auditEvents: AuthAuditEvent[] = [
+const auditEvents: AdminAuditEventSummary[] = [
   {
     id: 'audit-1',
     tenantId: 'tenant-dev',
@@ -116,6 +116,15 @@ const auditEvents: AuthAuditEvent[] = [
       email: 'admin@iflabx.com',
     },
     occurredAt: '2026-03-12T00:10:00.000Z',
+    context: {
+      traceId: null,
+      runId: null,
+      conversationId: null,
+      appId: null,
+      appName: null,
+      activeGroupId: null,
+      activeGroupName: null,
+    },
   },
 ];
 
@@ -270,7 +279,147 @@ describe('admin routes', () => {
       expect(groupsResponse.json().data.groups).toEqual(adminGroups);
       expect(appsResponse.json().data.apps).toEqual(adminApps);
       expect(auditResponse.json().data.events).toEqual(auditEvents);
+      expect(auditResponse.json().data.appliedFilters).toEqual({
+        action: null,
+        level: null,
+        actorUserId: null,
+        entityType: null,
+        traceId: null,
+        runId: null,
+        conversationId: null,
+        occurredAfter: null,
+        occurredBefore: null,
+        limit: null,
+      });
+      expect(adminService.listAuditForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@iflabx.com',
+        }),
+        {
+          action: null,
+          level: null,
+          actorUserId: null,
+          entityType: null,
+          traceId: null,
+          runId: null,
+          conversationId: null,
+          occurredAfter: null,
+          occurredBefore: null,
+          limit: null,
+        }
+      );
       expect(adminService.canReadAdminForUser).toHaveBeenCalledTimes(4);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('validates admin audit query parameters before calling the service', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/audit?level=verbose',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'ADMIN_INVALID_PAYLOAD',
+        },
+      });
+      expect(adminService.listAuditForUser).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('parses admin audit filters and passes them to the service', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/audit?action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&limit=12',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(adminService.listAuditForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@iflabx.com',
+        }),
+        {
+          action: 'workspace.app.launched',
+          level: 'info',
+          actorUserId: null,
+          entityType: null,
+          traceId: 'trace-123',
+          runId: 'run-123',
+          conversationId: null,
+          occurredAfter: null,
+          occurredBefore: null,
+          limit: 12,
+        }
+      );
+      expect(response.json().data.appliedFilters).toMatchObject({
+        action: 'workspace.app.launched',
+        level: 'info',
+        traceId: 'trace-123',
+        runId: 'run-123',
+        limit: 12,
+      });
     } finally {
       await app.close();
     }

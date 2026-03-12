@@ -1592,9 +1592,13 @@ describe.sequential('persistent auth runtime', () => {
         });
 
         expect(launch.statusCode).toBe(200);
-        expect((launch.json() as WorkspaceAppLaunchResponse).data.app.id).toBe('app_tenant_control');
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+        expect(launchBody.data.app.id).toBe('app_tenant_control');
+        expect(launchBody.data.runId).toBeTruthy();
+        expect(launchBody.data.traceId).toBeTruthy();
+        expect(launchBody.data.conversationId).toBeTruthy();
 
-        const [usersResponse, groupsResponse, appsResponse, auditResponse] = await Promise.all([
+        const [usersResponse, groupsResponse, appsResponse, auditResponse, filteredAuditResponse] = await Promise.all([
           app.inject({
             method: 'GET',
             url: '/admin/users',
@@ -1623,17 +1627,26 @@ describe.sequential('persistent auth runtime', () => {
               authorization: `Bearer ${adminSessionToken}`,
             },
           }),
+          app.inject({
+            method: 'GET',
+            url: `/admin/audit?action=workspace.app.launched&traceId=${launchBody.data.traceId}`,
+            headers: {
+              authorization: `Bearer ${adminSessionToken}`,
+            },
+          }),
         ]);
 
         expect(usersResponse.statusCode).toBe(200);
         expect(groupsResponse.statusCode).toBe(200);
         expect(appsResponse.statusCode).toBe(200);
         expect(auditResponse.statusCode).toBe(200);
+        expect(filteredAuditResponse.statusCode).toBe(200);
 
         const usersBody = usersResponse.json() as AdminUsersResponse;
         const groupsBody = groupsResponse.json() as AdminGroupsResponse;
         const appsBody = appsResponse.json() as AdminAppsResponse;
         const auditBody = auditResponse.json() as AdminAuditResponse;
+        const filteredAuditBody = filteredAuditResponse.json() as AdminAuditResponse;
 
         expect(usersBody.data.users.map(user => user.email)).toEqual(
           expect.arrayContaining(['admin@iflabx.com', 'developer@iflabx.com'])
@@ -1655,9 +1668,33 @@ describe.sequential('persistent auth runtime', () => {
             expect.objectContaining({
               action: 'auth.login.succeeded',
             }),
+            expect.objectContaining({
+              action: 'workspace.app.launched',
+            }),
           ])
         );
         expect(auditBody.data.events[0]?.occurredAt).toBeTruthy();
+        expect(filteredAuditBody.data.appliedFilters).toMatchObject({
+          action: 'workspace.app.launched',
+          traceId: launchBody.data.traceId,
+        });
+        expect(filteredAuditBody.data.events).toEqual([
+          expect.objectContaining({
+            action: 'workspace.app.launched',
+            entityType: 'run',
+            entityId: launchBody.data.runId,
+            context: expect.objectContaining({
+              traceId: launchBody.data.traceId,
+              runId: launchBody.data.runId,
+              conversationId: launchBody.data.conversationId,
+              appId: 'app_tenant_control',
+              appName: 'Tenant Control',
+            }),
+            payload: expect.objectContaining({
+              activeGroupId: adminWorkspaceBody.data.defaultActiveGroupId,
+            }),
+          }),
+        ]);
 
         const forbiddenResponse = await app.inject({
           method: 'GET',

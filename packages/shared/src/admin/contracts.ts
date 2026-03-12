@@ -1,4 +1,10 @@
-import type { AuthAuditAction, AuthAuditEvent, AuthUserStatus } from '../auth/contracts.js';
+import type {
+  AuthAuditAction,
+  AuthAuditEntityType,
+  AuthAuditEvent,
+  AuthAuditLevel,
+  AuthUserStatus,
+} from '../auth/contracts.js';
 import type { WorkspaceApp, WorkspaceGroup } from '../apps/contracts.js';
 
 export type AdminErrorCode =
@@ -129,11 +135,39 @@ export type AdminAuditActionCount = {
   count: number;
 };
 
+export type AdminAuditFilters = {
+  action?: string | null;
+  level?: AuthAuditLevel | null;
+  actorUserId?: string | null;
+  entityType?: AuthAuditEntityType | null;
+  traceId?: string | null;
+  runId?: string | null;
+  conversationId?: string | null;
+  occurredAfter?: string | null;
+  occurredBefore?: string | null;
+  limit?: number | null;
+};
+
+export type AdminAuditEventContext = {
+  traceId: string | null;
+  runId: string | null;
+  conversationId: string | null;
+  appId: string | null;
+  appName: string | null;
+  activeGroupId: string | null;
+  activeGroupName: string | null;
+};
+
+export type AdminAuditEventSummary = AuthAuditEvent & {
+  context: AdminAuditEventContext;
+};
+
 export type AdminAuditResponse = {
   ok: true;
   data: {
     generatedAt: string;
+    appliedFilters: AdminAuditFilters;
     countsByAction: AdminAuditActionCount[];
-    events: AuthAuditEvent[];
+    events: AdminAuditEventSummary[];
   };
 };

@@ -12,6 +12,7 @@ import type {
 import type { AuthUser } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
 
+import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 import type { WorkspaceService } from '../services/workspace-service.js';
 
@@ -115,7 +116,8 @@ async function requireActiveWorkspaceSession(
 export async function registerWorkspaceRoutes(
   app: FastifyInstance,
   authService: AuthService,
-  workspaceService: WorkspaceService
+  workspaceService: WorkspaceService,
+  auditService: AuditService
 ) {
   app.get('/workspace/apps', async (request, reply) => {
     const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
@@ -217,6 +219,25 @@ export async function registerWorkspaceRoutes(
       ok: true,
       data: result.data,
     };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.app.launched',
+      entityType: result.data.runId ? 'run' : 'workspace_app',
+      entityId: result.data.runId ?? result.data.app.id,
+      ipAddress: request.ip,
+      payload: {
+        launchId: result.data.id,
+        appId: result.data.app.id,
+        appName: result.data.app.name,
+        conversationId: result.data.conversationId,
+        runId: result.data.runId,
+        traceId: result.data.traceId,
+        activeGroupId: result.data.attributedGroup.id,
+        activeGroupName: result.data.attributedGroup.name,
+      },
+    });
 
     return response;
   });

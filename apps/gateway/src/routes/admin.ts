@@ -3,12 +3,13 @@ import type {
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
   AdminAppsResponse,
+  AdminAuditFilters,
   AdminAuditResponse,
   AdminErrorResponse,
   AdminGroupsResponse,
   AdminUsersResponse,
 } from '@agentifui/shared/admin';
-import type { AuthUser } from '@agentifui/shared/auth';
+import type { AuthAuditEntityType, AuthAuditLevel, AuthUser } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
 
 import type { AdminService } from '../services/admin-service.js';
@@ -46,6 +47,141 @@ function readBearerToken(value: string | undefined): string | null {
 
 function isGrantEffect(value: unknown): value is AdminAppGrantCreateRequest['effect'] {
   return value === 'allow' || value === 'deny';
+}
+
+function isAuditLevel(value: unknown): value is AuthAuditLevel {
+  return value === 'critical' || value === 'info' || value === 'warning';
+}
+
+function isAuditEntityType(value: unknown): value is AuthAuditEntityType {
+  return (
+    value === 'conversation' ||
+    value === 'run' ||
+    value === 'session' ||
+    value === 'user' ||
+    value === 'workspace_app'
+  );
+}
+
+function readQueryString(value: unknown) {
+  if (Array.isArray(value)) {
+    return readQueryString(value[0]);
+  }
+
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseAuditFilters(query: Record<string, unknown>):
+  | {
+      ok: true;
+      filters: AdminAuditFilters;
+    }
+  | {
+      ok: false;
+      response: AdminErrorResponse;
+    } {
+  const level = readQueryString(query.level);
+  const entityType = readQueryString(query.entityType);
+  const limit = readQueryString(query.limit);
+  const occurredAfter = readQueryString(query.occurredAfter);
+  const occurredBefore = readQueryString(query.occurredBefore);
+
+  if (level && !isAuditLevel(level)) {
+    return {
+      ok: false,
+      response: buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Audit filters require level to be info, warning or critical.'
+      ),
+    };
+  }
+
+  if (entityType && !isAuditEntityType(entityType)) {
+    return {
+      ok: false,
+      response: buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Audit filters require a supported entity type.'
+      ),
+    };
+  }
+
+  const normalizedLevel = level ? (level as AuthAuditLevel) : null;
+  const normalizedEntityType = entityType ? (entityType as AuthAuditEntityType) : null;
+
+  let parsedLimit: number | null = null;
+
+  if (limit) {
+    parsedLimit = Number.parseInt(limit, 10);
+
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0 || parsedLimit > 200) {
+      return {
+        ok: false,
+        response: buildErrorResponse(
+          'ADMIN_INVALID_PAYLOAD',
+          'Audit filters require limit to be an integer between 1 and 200.'
+        ),
+      };
+    }
+  }
+
+  const parseTimestamp = (
+    value: string,
+    field: 'occurredAfter' | 'occurredBefore'
+  ): null | { error: AdminErrorResponse } | { value: string } => {
+    if (!value) {
+      return null;
+    }
+
+    const timestamp = new Date(value);
+
+    if (Number.isNaN(timestamp.getTime())) {
+      return {
+        error: buildErrorResponse(
+          'ADMIN_INVALID_PAYLOAD',
+          `Audit filters require ${field} to be a valid ISO-8601 timestamp.`
+        ),
+      };
+    }
+
+    return {
+      value: timestamp.toISOString(),
+    };
+  };
+
+  const parsedOccurredAfter = parseTimestamp(occurredAfter, 'occurredAfter');
+
+  if (parsedOccurredAfter && 'error' in parsedOccurredAfter) {
+    return {
+      ok: false,
+      response: parsedOccurredAfter.error,
+    };
+  }
+
+  const parsedOccurredBefore = parseTimestamp(occurredBefore, 'occurredBefore');
+
+  if (parsedOccurredBefore && 'error' in parsedOccurredBefore) {
+    return {
+      ok: false,
+      response: parsedOccurredBefore.error,
+    };
+  }
+
+  return {
+    ok: true,
+    filters: {
+      action: readQueryString(query.action) || null,
+      level: normalizedLevel,
+      actorUserId: readQueryString(query.actorUserId) || null,
+      entityType: normalizedEntityType,
+      traceId: readQueryString(query.traceId) || null,
+      runId: readQueryString(query.runId) || null,
+      conversationId: readQueryString(query.conversationId) || null,
+      occurredAfter: parsedOccurredAfter?.value ?? null,
+      occurredBefore: parsedOccurredBefore?.value ?? null,
+      limit: parsedLimit,
+    },
+  };
 }
 
 async function requireTenantAdminSession(
@@ -209,11 +345,19 @@ export async function registerAdminRoutes(
       return session.response;
     }
 
-    const auditData = await adminService.listAuditForUser(session.user);
+    const parsedFilters = parseAuditFilters((request.query ?? {}) as Record<string, unknown>);
+
+    if (!parsedFilters.ok) {
+      reply.code(400);
+      return parsedFilters.response;
+    }
+
+    const auditData = await adminService.listAuditForUser(session.user, parsedFilters.filters);
     const response: AdminAuditResponse = {
       ok: true,
       data: {
         generatedAt: new Date().toISOString(),
+        appliedFilters: parsedFilters.filters,
         countsByAction: auditData.countsByAction,
         events: auditData.events,
       },

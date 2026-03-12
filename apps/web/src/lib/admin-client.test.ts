@@ -72,6 +72,7 @@ describe('admin client', () => {
           ok: true,
           data: {
             generatedAt: '2026-03-12T00:00:00.000Z',
+            appliedFilters: {},
             countsByAction: [],
             events: [],
           },
@@ -124,6 +125,42 @@ describe('admin client', () => {
         events: [],
       },
     });
+  });
+
+  it('serializes admin audit filters into the same-origin gateway proxy query string', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({
+        ok: true,
+        data: {
+          generatedAt: '2026-03-12T00:00:00.000Z',
+          appliedFilters: {
+            action: 'workspace.app.launched',
+          },
+          countsByAction: [],
+          events: [],
+        },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchAdminAudit('session-123', {
+      action: 'workspace.app.launched',
+      level: 'info',
+      traceId: 'trace-123',
+      runId: 'run-123',
+      limit: 25,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/gateway/admin/audit?action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&limit=25',
+      {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        cache: 'no-store',
+      }
+    );
   });
 
   it('posts and deletes admin app grants through the same-origin gateway proxy', async () => {

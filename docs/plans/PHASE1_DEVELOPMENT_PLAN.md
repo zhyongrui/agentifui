@@ -115,6 +115,10 @@
   - `tenant_admin` 已成为后台读路径的真实鉴权边界
   - Web `/admin/*` 已从占位页切到真实只读数据页
   - 后台可读出用户状态 / MFA / 群组成员关系 / 应用授权 / 审计事件 / 启动活跃度
+- `S3-2` 已完成 `R11-A` 的第一版 run-aware 审计查询
+  - `/admin/audit` 已支持 action、level、actor、entity、traceId、runId、conversationId、时间范围和 limit 过滤
+  - `workspace.app.launched` 已进入审计读面，并带 `traceId` / `runId` / `conversationId` / app / group 上下文
+  - Web `/admin/audit` 已支持交互式过滤，浏览器回归已覆盖 action filter
 - 生产构建下的 Gateway 启动链路已修复 workspace package ESM 导出问题
 - 已建立真实浏览器 E2E 回归基线
   - `npm run test:e2e` 会自动拉起隔离的 Web/Gateway 进程
@@ -127,7 +131,7 @@
 - `S1-3` 的真实 quota service 与历史列表衔接
 - `S2-2 / S2-3` 的文件上传、分享和更细粒度执行时间线
 - `S3-1` 后台写接口、审批流和批量治理动作
-- `S3-2` 审计导出、PII 标记和 run-aware 合规视图
+- `S3-2` 审计导出、PII 标记和剩余事件覆盖
 - 稳定公网接入（`80/443` 反向代理）仍未产品化，当前仅有临时 tunnel 手测方案
 - CI 细化
 
@@ -508,7 +512,7 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 | R9 | `S2-3` Run 追踪 | 让会话、执行和状态追踪闭环 | 运行态可查询、可回放 |
 | R10-A | `S3-1 / S3-2` 后台读模型 | 用真实数据替换 `/admin/*` 占位页，建立只读治理面 | 已完成 |
 | R10-B | `S3-1` 后台写路径 | 补 direct grant 写接口、撤销路径和后台动作审计 | 已完成第一版 direct user grant 治理闭环 |
-| R11 | `S3-2` 审计合规深化 | 补审计导出、PII 标记、run-aware 合规视图 | 审计可查询、可导出、可挂 run |
+| R11 | `S3-2` 审计合规深化 | 补审计导出、PII 标记、剩余 run-aware 合规能力 | 已完成 `R11-A` 查询视图，继续收口导出 / PII / 覆盖 |
 | R12 | `S2` 残余 backlog | 文件上传、分享、细粒度执行时间线与历史衔接 | 对话主链路的残余 AC 收口 |
 | R13 | `S3-3` 平台管理与发布硬化 | 平台管理、稳定公网入口、CI/观测/发布验证 | 达到 Phase 1 发布门槛 |
 
@@ -705,18 +709,18 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 
 当前默认按下面顺序执行，不再每轮重新定义优先级：
 
-1. `R11-A1` 扩展共享审计合同
-2. `R11-A2` 扩展 `/admin/audit` 查询参数
-3. `R11-A3` 持久化审计过滤读模型
-4. `R11-A5` 将 run/trace 维度映射进审计读面
-5. `R11-A6` 后台审计页增加过滤表单
-6. `R11-A9` / `R11-A10` / `R11-A11` / `R11-A12` 测试与浏览器回归
+1. `R11-B1` 设计审计导出合同
+2. `R11-B2` / `R11-B3` / `R11-B4` 导出接口与 CSV/JSON 序列化
+3. `R11-B5` / `R11-B6` 导出鉴权与过滤结果复用
+4. `R11-B7` 后台审计页增加导出按钮
+5. `R11-B8` 导出 route / persistence / browser 回归
+6. `R11-C1` PII 合同与检测器作为下一激活项
 
-如果 `R11-A` 被环境阻塞，则按下面的降级顺序切换：
+如果 `R11-B` 被环境阻塞，则按下面的降级顺序切换：
 
 1. `R11-D` 审计覆盖补全
-2. `R12-C` 执行时间线与历史回源
-3. `R12-D` quota 与历史状态收口
+2. `R11-C` PII 标记与敏感信息处理
+3. `R12-C` 执行时间线与历史回源
 
 ## 13. 2026-03-12 进度快照
 
@@ -770,10 +774,14 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - `/admin/users`、`/admin/groups`、`/admin/apps`、`/admin/audit` 已接真实数据
   - `/admin/apps` 已支持 direct user allow/deny grant 的创建与撤销
   - 浏览器回归已覆盖后台授权写入后 workspace 可见性变化
+- `S3-2` 已完成第一版 run-aware 审计筛选闭环：
+  - `/admin/audit` 已支持 query 校验与过滤
+  - launch 审计已带 `traceId` / `runId` / `conversationId`
+  - `/admin/audit?action=...` 已在浏览器回归中验证
 - 后续治理主线已切到 `R11`：
   - 审计导出
   - PII 标记
-  - 更细的 run-aware 合规视图
+  - 剩余事件覆盖与更细的合规视图
 
 ## 14. 关联文档
 
