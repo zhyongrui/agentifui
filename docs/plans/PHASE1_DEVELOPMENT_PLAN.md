@@ -119,6 +119,16 @@
   - `/admin/audit` 已支持 action、level、actor、entity、traceId、runId、conversationId、时间范围和 limit 过滤
   - `workspace.app.launched` 已进入审计读面，并带 `traceId` / `runId` / `conversationId` / app / group 上下文
   - Web `/admin/audit` 已支持交互式过滤，浏览器回归已覆盖 action filter
+- `S3-2` 已完成 `R11-B` 的第一版审计导出闭环
+  - `/admin/audit/export` 已支持 `json` / `csv` 导出
+  - 导出结果已复用当前 audit filter，并默认在未指定 limit 时使用 `1000`
+  - Web `/admin/audit` 已支持一键触发导出
+  - Next `/api/gateway/*` 代理已补 `content-disposition` 与 `x-agentifui-export-*` 透传，避免浏览器导出链路丢失元数据
+- `S3-2` 已完成 `R11-C` 的第一版 PII 标记与敏感信息处理
+  - 审计 payload 已支持 `masked` / `raw` 两种读模式，并在默认读面隐藏敏感字段
+  - Gateway 审计 DTO 已返回 `payloadInspection`，可标记 email、phone、token、secret-like 字段
+  - Web `/admin/audit` 已显示敏感 badge、字段级匹配摘要，并支持显式切换 raw payload
+  - `/admin/audit/export` 已复用相同的 `payloadMode`，保证页面与导出脱敏口径一致
 - 生产构建下的 Gateway 启动链路已修复 workspace package ESM 导出问题
 - 已建立真实浏览器 E2E 回归基线
   - `npm run test:e2e` 会自动拉起隔离的 Web/Gateway 进程
@@ -131,7 +141,7 @@
 - `S1-3` 的真实 quota service 与历史列表衔接
 - `S2-2 / S2-3` 的文件上传、分享和更细粒度执行时间线
 - `S3-1` 后台写接口、审批流和批量治理动作
-- `S3-2` 审计导出、PII 标记和剩余事件覆盖
+- `S3-2` 剩余事件覆盖、后台访问最小审计和 action 命名收口
 - 稳定公网接入（`80/443` 反向代理）仍未产品化，当前仅有临时 tunnel 手测方案
 - CI 细化
 
@@ -709,18 +719,18 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 
 当前默认按下面顺序执行，不再每轮重新定义优先级：
 
-1. `R11-B1` 设计审计导出合同
-2. `R11-B2` / `R11-B3` / `R11-B4` 导出接口与 CSV/JSON 序列化
-3. `R11-B5` / `R11-B6` 导出鉴权与过滤结果复用
-4. `R11-B7` 后台审计页增加导出按钮
-5. `R11-B8` 导出 route / persistence / browser 回归
-6. `R11-C1` PII 合同与检测器作为下一激活项
+1. `R11-D1` / `R11-D3` workspace preferences 与 run stop 审计补齐
+2. `R11-D4` / `R11-D5` 后台访问和 direct grant 失败审计
+3. `R11-D2` / `R11-D6` app launch 命名表和剩余 action 收口
+4. `R12-A1` / `R12-A4` 文件上传合同、存储抽象与会话附件挂接
+5. `R12-A5` / `R12-A8` Web composer 附件 UX、限制与失败恢复
+6. `R12-B1` / `R12-B4` 分享、协作与会话访问控制
 
-如果 `R11-B` 被环境阻塞，则按下面的降级顺序切换：
+如果 `R11-D` 被环境阻塞，则按下面的降级顺序切换：
 
-1. `R11-D` 审计覆盖补全
-2. `R11-C` PII 标记与敏感信息处理
-3. `R12-C` 执行时间线与历史回源
+1. `R12-A` 文件上传主链路
+2. `R12-C` 执行时间线与历史回源
+3. `R13-B` 稳定公网入口与部署硬化
 
 ## 13. 2026-03-12 进度快照
 

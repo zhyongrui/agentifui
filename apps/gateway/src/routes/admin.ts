@@ -3,7 +3,11 @@ import type {
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
   AdminAppsResponse,
+  AdminAuditExportFormat,
+  AdminAuditExportJsonBundle,
+  AdminAuditExportMetadata,
   AdminAuditFilters,
+  AdminAuditPayloadMode,
   AdminAuditResponse,
   AdminErrorResponse,
   AdminGroupsResponse,
@@ -63,12 +67,98 @@ function isAuditEntityType(value: unknown): value is AuthAuditEntityType {
   );
 }
 
+function isAuditExportFormat(value: unknown): value is AdminAuditExportFormat {
+  return value === 'csv' || value === 'json';
+}
+
+function isAuditPayloadMode(value: unknown): value is AdminAuditPayloadMode {
+  return value === 'masked' || value === 'raw';
+}
+
 function readQueryString(value: unknown) {
   if (Array.isArray(value)) {
     return readQueryString(value[0]);
   }
 
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function buildAuditExportMetadata(
+  format: AdminAuditExportFormat,
+  appliedFilters: AdminAuditFilters,
+  eventCount: number
+): AdminAuditExportMetadata {
+  const exportedAt = new Date().toISOString();
+
+  return {
+    format,
+    filename: `admin-audit-${exportedAt.replace(/[:.]/g, '-')}.${format}`,
+    exportedAt,
+    eventCount,
+    appliedFilters,
+  };
+}
+
+function toCsvCell(value: string | number | null) {
+  const normalized = value === null ? '' : String(value);
+
+  return `"${normalized.replaceAll('"', '""')}"`;
+}
+
+function buildAuditExportCsv(bundle: AdminAuditExportJsonBundle) {
+  const header = [
+    'event_id',
+    'occurred_at',
+    'action',
+    'level',
+    'actor_user_id',
+    'entity_type',
+    'entity_id',
+    'trace_id',
+    'run_id',
+    'conversation_id',
+    'app_id',
+    'app_name',
+    'active_group_id',
+    'active_group_name',
+    'ip_address',
+    'payload_mode',
+    'payload_sensitive',
+    'payload_high_risk_match_count',
+    'payload_match_count',
+    'payload_matches_json',
+    'payload_json',
+  ];
+
+  const rows = bundle.events.map(event =>
+    [
+      event.id,
+      event.occurredAt,
+      event.action,
+      event.level,
+      event.actorUserId,
+      event.entityType,
+      event.entityId,
+      event.context.traceId,
+      event.context.runId,
+      event.context.conversationId,
+      event.context.appId,
+      event.context.appName,
+      event.context.activeGroupId,
+      event.context.activeGroupName,
+      event.ipAddress,
+      event.payloadInspection.mode,
+      event.payloadInspection.containsSensitiveData ? 'true' : 'false',
+      event.payloadInspection.highRiskMatchCount,
+      event.payloadInspection.matches.length,
+      JSON.stringify(event.payloadInspection.matches),
+      JSON.stringify(event.payload),
+    ]
+      .map(toCsvCell)
+      .join(',')
+  );
+
+  return [header.map(toCsvCell).join(','), ...rows].join('\n');
 }
 
 function parseAuditFilters(query: Record<string, unknown>):
@@ -85,6 +175,7 @@ function parseAuditFilters(query: Record<string, unknown>):
   const limit = readQueryString(query.limit);
   const occurredAfter = readQueryString(query.occurredAfter);
   const occurredBefore = readQueryString(query.occurredBefore);
+  const payloadMode = readQueryString(query.payloadMode);
 
   if (level && !isAuditLevel(level)) {
     return {
@@ -106,8 +197,19 @@ function parseAuditFilters(query: Record<string, unknown>):
     };
   }
 
+  if (payloadMode && !isAuditPayloadMode(payloadMode)) {
+    return {
+      ok: false,
+      response: buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Audit filters require payloadMode to be masked or raw.'
+      ),
+    };
+  }
+
   const normalizedLevel = level ? (level as AuthAuditLevel) : null;
   const normalizedEntityType = entityType ? (entityType as AuthAuditEntityType) : null;
+  const normalizedPayloadMode = payloadMode ? (payloadMode as AdminAuditPayloadMode) : null;
 
   let parsedLimit: number | null = null;
 
@@ -179,6 +281,7 @@ function parseAuditFilters(query: Record<string, unknown>):
       conversationId: readQueryString(query.conversationId) || null,
       occurredAfter: parsedOccurredAfter?.value ?? null,
       occurredBefore: parsedOccurredBefore?.value ?? null,
+      payloadMode: normalizedPayloadMode,
       limit: parsedLimit,
     },
   };
@@ -352,18 +455,79 @@ export async function registerAdminRoutes(
       return parsedFilters.response;
     }
 
-    const auditData = await adminService.listAuditForUser(session.user, parsedFilters.filters);
+    const resolvedFilters: AdminAuditFilters = {
+      ...parsedFilters.filters,
+      payloadMode: parsedFilters.filters.payloadMode ?? 'masked',
+    };
+    const auditData = await adminService.listAuditForUser(session.user, resolvedFilters);
     const response: AdminAuditResponse = {
       ok: true,
       data: {
         generatedAt: new Date().toISOString(),
-        appliedFilters: parsedFilters.filters,
+        appliedFilters: resolvedFilters,
         countsByAction: auditData.countsByAction,
         events: auditData.events,
       },
     };
 
     return response;
+  });
+
+  app.get('/admin/audit/export', async (request, reply) => {
+    const session = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const query = (request.query ?? {}) as Record<string, unknown>;
+    const format = readQueryString(query.format);
+
+    if (!isAuditExportFormat(format)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Audit export requires format to be csv or json.'
+      );
+    }
+
+    const parsedFilters = parseAuditFilters(query);
+
+    if (!parsedFilters.ok) {
+      reply.code(400);
+      return parsedFilters.response;
+    }
+
+    const exportFilters: AdminAuditFilters = {
+      ...parsedFilters.filters,
+      payloadMode: parsedFilters.filters.payloadMode ?? 'masked',
+      limit: parsedFilters.filters.limit ?? 1000,
+    };
+    const auditData = await adminService.listAuditForUser(session.user, exportFilters);
+    const metadata = buildAuditExportMetadata(format, exportFilters, auditData.events.length);
+    const bundle: AdminAuditExportJsonBundle = {
+      metadata,
+      events: auditData.events,
+    };
+
+    reply.header('content-disposition', `attachment; filename="${metadata.filename}"`);
+    reply.header('x-agentifui-export-format', metadata.format);
+    reply.header('x-agentifui-export-filename', metadata.filename);
+    reply.header('x-agentifui-exported-at', metadata.exportedAt);
+    reply.header('x-agentifui-export-count', String(metadata.eventCount));
+
+    if (format === 'json') {
+      reply.type('application/json; charset=utf-8');
+      return JSON.stringify(bundle, null, 2);
+    }
+
+    reply.type('text/csv; charset=utf-8');
+    return buildAuditExportCsv(bundle);
   });
 
   app.post('/admin/apps/:appId/grants', async (request, reply) => {

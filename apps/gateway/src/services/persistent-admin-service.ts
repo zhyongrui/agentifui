@@ -7,6 +7,7 @@ import type {
   AdminAuditActionCount,
   AdminAuditEventSummary,
   AdminAuditFilters,
+  AdminAuditPayloadMode,
   AdminErrorCode,
   AdminGroupSummary,
   AdminUserSummary,
@@ -14,6 +15,7 @@ import type {
 import { randomUUID } from 'node:crypto';
 
 import type { AdminService } from './admin-service.js';
+import { inspectAdminAuditPayload } from './admin-audit-pii.js';
 import { resolveDefaultRoleIds } from './workspace-catalog-fixtures.js';
 
 type UserRow = {
@@ -258,7 +260,12 @@ function buildAuditContext(event: AuthAuditEvent): AdminAuditEventSummary['conte
   };
 }
 
-function toAuditEvent(row: AuditEventRow): AdminAuditEventSummary {
+function toAuditEvent(
+  row: AuditEventRow,
+  payloadMode: AdminAuditPayloadMode
+): AdminAuditEventSummary {
+  const normalizedPayload = normalizeJsonRecord(row.payload);
+  const payloadResult = inspectAdminAuditPayload(normalizedPayload, payloadMode);
   const event: AuthAuditEvent = {
     id: row.id,
     tenantId: row.tenant_id,
@@ -268,13 +275,14 @@ function toAuditEvent(row: AuditEventRow): AdminAuditEventSummary {
     entityType: row.entity_type,
     entityId: row.entity_id,
     ipAddress: row.ip_address,
-    payload: normalizeJsonRecord(row.payload),
+    payload: payloadResult.payload,
     occurredAt: toIso(row.occurred_at)!,
   };
 
   return {
     ...event,
     context: buildAuditContext(event),
+    payloadInspection: payloadResult.inspection,
   };
 }
 
@@ -293,6 +301,7 @@ function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
     conversationId: filters.conversationId?.trim() || null,
     occurredAfter: filters.occurredAfter?.trim() || null,
     occurredBefore: filters.occurredBefore?.trim() || null,
+    payloadMode: filters.payloadMode ?? 'masked',
     limit:
       typeof filters.limit === 'number' && Number.isInteger(filters.limit) && filters.limit > 0
         ? filters.limit
@@ -807,7 +816,7 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
       `;
 
       const filteredEvents = rows
-        .map(toAuditEvent)
+        .map(row => toAuditEvent(row, normalizedFilters.payloadMode))
         .filter(event => {
           if (normalizedFilters.traceId && event.context.traceId !== normalizedFilters.traceId) {
             return false;

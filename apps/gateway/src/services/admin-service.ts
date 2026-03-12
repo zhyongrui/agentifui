@@ -6,12 +6,14 @@ import type {
   AdminAuditActionCount,
   AdminAuditEventSummary,
   AdminAuditFilters,
+  AdminAuditPayloadMode,
   AdminErrorCode,
   AdminGroupSummary,
   AdminUserSummary,
 } from '@agentifui/shared/admin';
 import { randomUUID } from 'node:crypto';
 
+import { inspectAdminAuditPayload } from './admin-audit-pii.js';
 import {
   WORKSPACE_APPS,
   WORKSPACE_GROUPS,
@@ -129,7 +131,21 @@ function buildInMemoryAuditEvent(
     tenantId: string;
   }
 ): AdminAuditEventSummary {
-  const payload = input.payload;
+  return buildInMemoryAuditEventWithMode(input, 'masked');
+}
+
+function buildInMemoryAuditEventWithMode(
+  input: Pick<AuthAuditEvent, 'action' | 'entityId' | 'entityType' | 'payload'> & {
+    actorUserId: string | null;
+    id?: string;
+    level?: AuthAuditEvent['level'];
+    occurredAtOffsetMs?: number;
+    tenantId: string;
+  },
+  payloadMode: AdminAuditPayloadMode
+): AdminAuditEventSummary {
+  const payloadResult = inspectAdminAuditPayload(input.payload, payloadMode);
+  const payload = payloadResult.payload;
 
   return {
     id: input.id ?? randomUUID(),
@@ -152,6 +168,7 @@ function buildInMemoryAuditEvent(
       activeGroupName:
         typeof payload.activeGroupName === 'string' ? payload.activeGroupName : null,
     },
+    payloadInspection: payloadResult.inspection,
   };
 }
 
@@ -242,6 +259,7 @@ function normalizeAuditFilters(filters: AdminAuditFilters = {}): AdminAuditFilte
     conversationId: filters.conversationId?.trim() || null,
     occurredAfter: filters.occurredAfter?.trim() || null,
     occurredBefore: filters.occurredBefore?.trim() || null,
+    payloadMode: filters.payloadMode ?? 'masked',
     limit: filters.limit ?? null,
   };
 }
@@ -480,7 +498,7 @@ export function createAdminService(): AdminService {
     listAuditForUser(user, filters = {}) {
       const normalizedFilters = normalizeAuditFilters(filters);
       const events = [
-        buildInMemoryAuditEvent({
+        buildInMemoryAuditEventWithMode({
           tenantId: user.tenantId,
           actorUserId: user.id,
           action: 'auth.login.succeeded',
@@ -491,8 +509,8 @@ export function createAdminService(): AdminService {
             authMethod: 'password',
           },
           occurredAtOffsetMs: 5 * 60_000,
-        }),
-        buildInMemoryAuditEvent({
+        }, normalizedFilters.payloadMode ?? 'masked'),
+        buildInMemoryAuditEventWithMode({
           tenantId: user.tenantId,
           actorUserId: user.id,
           action: 'auth.mfa.enabled',
@@ -502,8 +520,8 @@ export function createAdminService(): AdminService {
             email: user.email,
           },
           occurredAtOffsetMs: 35 * 60_000,
-        }),
-        buildInMemoryAuditEvent({
+        }, normalizedFilters.payloadMode ?? 'masked'),
+        buildInMemoryAuditEventWithMode({
           tenantId: user.tenantId,
           actorUserId: null,
           action: 'auth.login.failed',
@@ -514,7 +532,7 @@ export function createAdminService(): AdminService {
           },
           level: 'warning',
           occurredAtOffsetMs: 50 * 60_000,
-        }),
+        }, normalizedFilters.payloadMode ?? 'masked'),
       ].filter(event => matchesAuditFilters(event, normalizedFilters));
 
       const limit =

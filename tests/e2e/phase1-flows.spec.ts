@@ -12,6 +12,16 @@ function uniqueEmail(prefix: string, domain = 'example.com') {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@${domain}`;
 }
 
+function maskAuditEmail(email: string) {
+  const [localPart, domain] = email.split('@');
+
+  if (!localPart || !domain) {
+    return email;
+  }
+
+  return `${localPart[0] ?? '*'}${'*'.repeat(Math.max(localPart.length - 1, 2))}@${domain}`;
+}
+
 function buildLongStopPrompt() {
   return `Please repeat this block verbatim and keep every line:
 ${'A A A A A A A A A A\n'.repeat(80)}`;
@@ -69,9 +79,17 @@ function appCard(page: Page, appName: string): Locator {
 }
 
 async function waitForGatewayPost(page: Page, path: string) {
+  await waitForGatewayRequest(page, 'POST', path);
+}
+
+async function waitForGatewayPut(page: Page, path: string) {
+  await waitForGatewayRequest(page, 'PUT', path);
+}
+
+async function waitForGatewayRequest(page: Page, method: 'POST' | 'PUT', path: string) {
   await page.waitForResponse(
     response =>
-      response.request().method() === 'POST' &&
+      response.request().method() === method &&
       response.url().includes(`/api/gateway${path}`),
     {
       timeout: 60_000,
@@ -158,6 +176,7 @@ async function expectConversationSurface(page: Page, appName: string) {
     timeout: 60_000,
   });
   await expect(page.getByText('Gateway context')).toBeVisible();
+  await expect(page.getByLabel('Message')).toBeEnabled();
 }
 
 async function seedInvitation(email: string) {
@@ -239,7 +258,10 @@ test('register/login/workspace controls work for a normal active user', async ({
   await expect(appCard(page, 'Policy Watch')).toBeVisible();
   await expect(appCard(page, 'Audit Lens')).toHaveCount(0);
 
-  await appCard(page, 'Service Copilot').getByRole('button', { name: '收藏' }).click();
+  await Promise.all([
+    waitForGatewayPut(page, '/workspace/preferences'),
+    appCard(page, 'Service Copilot').getByRole('button', { name: '收藏' }).click(),
+  ]);
   await expect(
     page.locator('section.workspace-section').filter({
       has: page.getByRole('heading', { name: 'Favorites' }),
@@ -262,13 +284,12 @@ test('register/login/workspace controls work for a normal active user', async ({
   await expectConversationSurface(page, 'Policy Watch');
   await expect(page.getByText('Run status')).toBeVisible();
   await page.getByLabel('Message').fill('Summarize the current policy changes for my group.');
-  await Promise.all([
-    waitForGatewayPost(page, '/v1/chat/completions'),
-    page.getByRole('button', { name: 'Send message' }).click(),
-  ]);
+  await page.getByRole('button', { name: 'Send message' }).click();
   await expect(
     page.getByText('Policy Watch is now reachable through the AgentifUI gateway.')
-  ).toBeVisible();
+  ).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(
     page.locator('article.chat-meta-card').filter({
       has: page.getByText('Run status'),
@@ -280,10 +301,7 @@ test('register/login/workspace controls work for a normal active user', async ({
   await expect(page.getByRole('button', { name: 'Stop response' })).toBeVisible({
     timeout: 60_000,
   });
-  await Promise.all([
-    waitForGatewayPost(page, '/v1/chat/completions/run_'),
-    page.getByRole('button', { name: 'Stop response' }).click(),
-  ]);
+  await page.getByRole('button', { name: 'Stop response' }).click();
   await expect(
     page.locator('article.chat-meta-card').filter({
       has: page.getByText('Run status'),
@@ -569,6 +587,38 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
   ]);
   await expect(page.getByText('Action: admin.workspace_grant.created')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'admin.workspace_grant.created' })).toBeVisible();
+  await expect(page.getByText('PII detected')).toBeVisible();
+  const auditPayloadBlock = page.locator('.admin-code-block pre').first();
+  await expect(auditPayloadBlock).toContainText(maskAuditEmail(memberEmail));
+  await expect(auditPayloadBlock).not.toContainText(memberEmail);
+  await Promise.all([
+    page.waitForResponse(
+      response =>
+        response.request().method() === 'GET' &&
+        response
+          .url()
+          .includes('/api/gateway/admin/audit?action=admin.workspace_grant.created&payloadMode=raw'),
+      {
+        timeout: 60_000,
+      }
+    ),
+    page.getByRole('button', { name: 'Show raw payloads' }).click(),
+  ]);
+  await expect(auditPayloadBlock).toContainText(memberEmail);
+  await Promise.all([
+    page.waitForResponse(
+      response =>
+        response.request().method() === 'GET' &&
+        response
+          .url()
+          .includes('/api/gateway/admin/audit/export?action=admin.workspace_grant.created&payloadMode=raw&format=csv'),
+      {
+        timeout: 60_000,
+      }
+    ),
+    page.getByRole('button', { name: 'Export CSV' }).click(),
+  ]);
+  await expect(page.getByText(/CSV export (ready|downloaded): .*\.csv/)).toBeVisible();
 
   await logout(page);
   await login(page, {

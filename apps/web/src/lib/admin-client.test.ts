@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createAdminAppGrant,
+  exportAdminAudit,
   fetchAdminApps,
   fetchAdminAudit,
   fetchAdminGroups,
@@ -148,11 +149,12 @@ describe('admin client', () => {
       level: 'info',
       traceId: 'trace-123',
       runId: 'run-123',
+      payloadMode: 'raw',
       limit: 25,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/gateway/admin/audit?action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&limit=25',
+      '/api/gateway/admin/audit?action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&payloadMode=raw&limit=25',
       {
         method: 'GET',
         headers: {
@@ -161,6 +163,47 @@ describe('admin client', () => {
         cache: 'no-store',
       }
     );
+  });
+
+  it('downloads admin audit exports through the same-origin gateway proxy', async () => {
+    const blob = new Blob(['event_id,action\n1,workspace.app.launched\n'], {
+      type: 'text/csv',
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      headers: new Headers({
+        'content-type': 'text/csv; charset=utf-8',
+        'x-agentifui-export-format': 'csv',
+        'x-agentifui-export-filename': 'admin-audit-export.csv',
+        'x-agentifui-exported-at': '2026-03-12T00:00:00.000Z',
+        'x-agentifui-export-count': '1',
+      }),
+      blob: async () => blob,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await exportAdminAudit('session-123', 'csv', {
+      action: 'workspace.app.launched',
+      traceId: 'trace-123',
+      payloadMode: 'masked',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/gateway/admin/audit/export?action=workspace.app.launched&traceId=trace-123&payloadMode=masked&format=csv',
+      {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        cache: 'no-store',
+      }
+    );
+    expect(result).toMatchObject({
+      metadata: {
+        format: 'csv',
+        filename: 'admin-audit-export.csv',
+        eventCount: 1,
+      },
+    });
   });
 
   it('posts and deletes admin app grants through the same-origin gateway proxy', async () => {

@@ -52,12 +52,10 @@ async function proxyGatewayRequest(
   });
 
   const responseHeaders = new Headers();
-  const passthroughHeaders = ['content-type', 'cache-control', 'x-trace-id'];
+  const passthroughHeaders = new Set(['content-type', 'cache-control', 'content-disposition', 'x-trace-id']);
 
-  for (const headerName of passthroughHeaders) {
-    const headerValue = upstreamResponse.headers.get(headerName);
-
-    if (headerValue) {
+  for (const [headerName, headerValue] of upstreamResponse.headers.entries()) {
+    if (passthroughHeaders.has(headerName) || headerName.startsWith('x-agentifui-')) {
       responseHeaders.set(headerName, headerValue);
     }
   }

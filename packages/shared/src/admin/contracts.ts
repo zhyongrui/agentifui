@@ -145,6 +145,7 @@ export type AdminAuditFilters = {
   conversationId?: string | null;
   occurredAfter?: string | null;
   occurredBefore?: string | null;
+  payloadMode?: AdminAuditPayloadMode | null;
   limit?: number | null;
 };
 
@@ -158,8 +159,46 @@ export type AdminAuditEventContext = {
   activeGroupName: string | null;
 };
 
+export type AdminAuditPayloadMode = 'masked' | 'raw';
+
+export type AdminAuditPiiDetector = 'email' | 'phone' | 'secret' | 'token';
+
+export type AdminAuditPiiRiskLevel = 'high' | 'moderate';
+
+export type AdminAuditPiiMatch = {
+  path: string;
+  detector: AdminAuditPiiDetector;
+  risk: AdminAuditPiiRiskLevel;
+  valuePreview: string;
+  maskedValue: string;
+};
+
+export type AdminAuditPayloadInspection = {
+  mode: AdminAuditPayloadMode;
+  containsSensitiveData: boolean;
+  moderateMatchCount: number;
+  highRiskMatchCount: number;
+  matches: AdminAuditPiiMatch[];
+};
+
 export type AdminAuditEventSummary = AuthAuditEvent & {
   context: AdminAuditEventContext;
+  payloadInspection: AdminAuditPayloadInspection;
+};
+
+export type AdminAuditExportFormat = 'csv' | 'json';
+
+export type AdminAuditExportMetadata = {
+  format: AdminAuditExportFormat;
+  filename: string;
+  exportedAt: string;
+  eventCount: number;
+  appliedFilters: AdminAuditFilters;
+};
+
+export type AdminAuditExportJsonBundle = {
+  metadata: AdminAuditExportMetadata;
+  events: AdminAuditEventSummary[];
 };
 
 export type AdminAuditResponse = {

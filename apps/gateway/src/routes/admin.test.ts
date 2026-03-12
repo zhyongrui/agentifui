@@ -113,7 +113,7 @@ const auditEvents: AdminAuditEventSummary[] = [
     entityId: 'session-1',
     ipAddress: '127.0.0.1',
     payload: {
-      email: 'admin@iflabx.com',
+      email: 'a****@iflabx.com',
     },
     occurredAt: '2026-03-12T00:10:00.000Z',
     context: {
@@ -124,6 +124,21 @@ const auditEvents: AdminAuditEventSummary[] = [
       appName: null,
       activeGroupId: null,
       activeGroupName: null,
+    },
+    payloadInspection: {
+      mode: 'masked',
+      containsSensitiveData: true,
+      moderateMatchCount: 1,
+      highRiskMatchCount: 0,
+      matches: [
+        {
+          path: 'email',
+          detector: 'email',
+          risk: 'moderate',
+          valuePreview: 'a****@iflabx.com',
+          maskedValue: 'a****@iflabx.com',
+        },
+      ],
     },
   },
 ];
@@ -289,6 +304,7 @@ describe('admin routes', () => {
         conversationId: null,
         occurredAfter: null,
         occurredBefore: null,
+        payloadMode: 'masked',
         limit: null,
       });
       expect(adminService.listAuditForUser).toHaveBeenCalledWith(
@@ -305,6 +321,7 @@ describe('admin routes', () => {
           conversationId: null,
           occurredAfter: null,
           occurredBefore: null,
+          payloadMode: 'masked',
           limit: null,
         }
       );
@@ -389,7 +406,7 @@ describe('admin routes', () => {
     try {
       const response = await app.inject({
         method: 'GET',
-        url: '/admin/audit?action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&limit=12',
+        url: '/admin/audit?action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&payloadMode=raw&limit=12',
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
@@ -410,6 +427,7 @@ describe('admin routes', () => {
           conversationId: null,
           occurredAfter: null,
           occurredBefore: null,
+          payloadMode: 'raw',
           limit: 12,
         }
       );
@@ -418,7 +436,176 @@ describe('admin routes', () => {
         level: 'info',
         traceId: 'trace-123',
         runId: 'run-123',
+        payloadMode: 'raw',
         limit: 12,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('validates admin audit export format before calling the service', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/audit/export?format=xml',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'ADMIN_INVALID_PAYLOAD',
+        },
+      });
+      expect(adminService.listAuditForUser).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('validates admin audit payload mode before calling the service', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/audit?payloadMode=expanded',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'ADMIN_INVALID_PAYLOAD',
+        },
+      });
+      expect(adminService.listAuditForUser).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('exports filtered admin audit events as JSON attachments', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/audit/export?format=json&action=workspace.app.launched',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain('application/json');
+      expect(response.headers['content-disposition']).toContain('attachment; filename=');
+      expect(response.headers['x-agentifui-export-format']).toBe('json');
+      expect(response.headers['x-agentifui-export-count']).toBe('1');
+      expect(adminService.listAuditForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@iflabx.com',
+        }),
+        {
+          action: 'workspace.app.launched',
+          level: null,
+          actorUserId: null,
+          entityType: null,
+          traceId: null,
+          runId: null,
+          conversationId: null,
+          occurredAfter: null,
+          occurredBefore: null,
+          payloadMode: 'masked',
+          limit: 1000,
+        }
+      );
+      expect(JSON.parse(response.body)).toMatchObject({
+        metadata: {
+          format: 'json',
+          eventCount: 1,
+          appliedFilters: {
+            action: 'workspace.app.launched',
+            payloadMode: 'masked',
+            limit: 1000,
+          },
+        },
+        events: auditEvents,
       });
     } finally {
       await app.close();

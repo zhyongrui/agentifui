@@ -1598,49 +1598,58 @@ describe.sequential('persistent auth runtime', () => {
         expect(launchBody.data.traceId).toBeTruthy();
         expect(launchBody.data.conversationId).toBeTruthy();
 
-        const [usersResponse, groupsResponse, appsResponse, auditResponse, filteredAuditResponse] = await Promise.all([
-          app.inject({
-            method: 'GET',
-            url: '/admin/users',
-            headers: {
-              authorization: `Bearer ${adminSessionToken}`,
-            },
-          }),
-          app.inject({
-            method: 'GET',
-            url: '/admin/groups',
-            headers: {
-              authorization: `Bearer ${adminSessionToken}`,
-            },
-          }),
-          app.inject({
-            method: 'GET',
-            url: '/admin/apps',
-            headers: {
-              authorization: `Bearer ${adminSessionToken}`,
-            },
-          }),
-          app.inject({
-            method: 'GET',
-            url: '/admin/audit',
-            headers: {
-              authorization: `Bearer ${adminSessionToken}`,
-            },
-          }),
-          app.inject({
-            method: 'GET',
-            url: `/admin/audit?action=workspace.app.launched&traceId=${launchBody.data.traceId}`,
-            headers: {
-              authorization: `Bearer ${adminSessionToken}`,
-            },
-          }),
-        ]);
+        const [usersResponse, groupsResponse, appsResponse, auditResponse, filteredAuditResponse, exportResponse] =
+          await Promise.all([
+            app.inject({
+              method: 'GET',
+              url: '/admin/users',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/groups',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/apps',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/audit',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: `/admin/audit?action=workspace.app.launched&traceId=${launchBody.data.traceId}`,
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: `/admin/audit/export?format=json&action=workspace.app.launched&traceId=${launchBody.data.traceId}`,
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+          ]);
 
         expect(usersResponse.statusCode).toBe(200);
         expect(groupsResponse.statusCode).toBe(200);
         expect(appsResponse.statusCode).toBe(200);
         expect(auditResponse.statusCode).toBe(200);
         expect(filteredAuditResponse.statusCode).toBe(200);
+        expect(exportResponse.statusCode).toBe(200);
 
         const usersBody = usersResponse.json() as AdminUsersResponse;
         const groupsBody = groupsResponse.json() as AdminGroupsResponse;
@@ -1677,6 +1686,7 @@ describe.sequential('persistent auth runtime', () => {
         expect(filteredAuditBody.data.appliedFilters).toMatchObject({
           action: 'workspace.app.launched',
           traceId: launchBody.data.traceId,
+          payloadMode: 'masked',
         });
         expect(filteredAuditBody.data.events).toEqual([
           expect.objectContaining({
@@ -1693,8 +1703,35 @@ describe.sequential('persistent auth runtime', () => {
             payload: expect.objectContaining({
               activeGroupId: adminWorkspaceBody.data.defaultActiveGroupId,
             }),
+            payloadInspection: expect.objectContaining({
+              mode: 'masked',
+              containsSensitiveData: false,
+            }),
           }),
         ]);
+        expect(exportResponse.headers['content-type']).toContain('application/json');
+        expect(exportResponse.headers['x-agentifui-export-format']).toBe('json');
+        expect(JSON.parse(exportResponse.body)).toMatchObject({
+          metadata: {
+            format: 'json',
+            eventCount: 1,
+            appliedFilters: {
+              action: 'workspace.app.launched',
+              traceId: launchBody.data.traceId,
+              payloadMode: 'masked',
+              limit: 1000,
+            },
+          },
+          events: [
+            expect.objectContaining({
+              action: 'workspace.app.launched',
+              context: expect.objectContaining({
+                traceId: launchBody.data.traceId,
+                runId: launchBody.data.runId,
+              }),
+            }),
+          ],
+        });
 
         const forbiddenResponse = await app.inject({
           method: 'GET',
@@ -1805,7 +1842,13 @@ describe.sequential('persistent auth runtime', () => {
         expect(createGrantResponse.statusCode).toBe(200);
         const createdGrantId = createGrantResponse.json().data.grant.id as string;
 
-        const [developerWorkspaceAfterGrant, adminAppsAfterGrant, adminAuditAfterGrant] =
+        const [
+          developerWorkspaceAfterGrant,
+          adminAppsAfterGrant,
+          adminAuditAfterGrant,
+          adminAuditAfterGrantRaw,
+          adminAuditExportAfterGrant,
+        ] =
           await Promise.all([
             app.inject({
               method: 'GET',
@@ -1824,6 +1867,20 @@ describe.sequential('persistent auth runtime', () => {
             app.inject({
               method: 'GET',
               url: '/admin/audit',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/audit?action=admin.workspace_grant.created&payloadMode=raw',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/audit/export?format=json&action=admin.workspace_grant.created&payloadMode=raw',
               headers: {
                 authorization: `Bearer ${adminSessionToken}`,
               },
@@ -1854,6 +1911,10 @@ describe.sequential('persistent auth runtime', () => {
         });
 
         const auditAfterGrantBody = adminAuditAfterGrant.json() as AdminAuditResponse;
+        const auditAfterGrantRawBody = adminAuditAfterGrantRaw.json() as AdminAuditResponse;
+        expect(adminAuditAfterGrant.statusCode).toBe(200);
+        expect(adminAuditAfterGrantRaw.statusCode).toBe(200);
+        expect(adminAuditExportAfterGrant.statusCode).toBe(200);
         expect(auditAfterGrantBody.data.countsByAction).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
@@ -1867,11 +1928,52 @@ describe.sequential('persistent auth runtime', () => {
               action: 'admin.workspace_grant.created',
               payload: expect.objectContaining({
                 appId: 'app_tenant_control',
-                subjectUserEmail: 'developer@iflabx.com',
+                subjectUserEmail: 'd********@iflabx.com',
+              }),
+              payloadInspection: expect.objectContaining({
+                mode: 'masked',
+                containsSensitiveData: true,
+                moderateMatchCount: 1,
               }),
             }),
           ])
         );
+        expect(auditAfterGrantRawBody.data.appliedFilters).toMatchObject({
+          action: 'admin.workspace_grant.created',
+          payloadMode: 'raw',
+        });
+        expect(auditAfterGrantRawBody.data.events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              action: 'admin.workspace_grant.created',
+              payload: expect.objectContaining({
+                subjectUserEmail: 'developer@iflabx.com',
+              }),
+              payloadInspection: expect.objectContaining({
+                mode: 'raw',
+                containsSensitiveData: true,
+                moderateMatchCount: 1,
+              }),
+            }),
+          ])
+        );
+        expect(JSON.parse(adminAuditExportAfterGrant.body)).toMatchObject({
+          metadata: {
+            appliedFilters: {
+              action: 'admin.workspace_grant.created',
+              payloadMode: 'raw',
+              limit: 1000,
+            },
+          },
+          events: [
+            expect.objectContaining({
+              action: 'admin.workspace_grant.created',
+              payload: expect.objectContaining({
+                subjectUserEmail: 'developer@iflabx.com',
+              }),
+            }),
+          ],
+        });
 
         const revokeGrantResponse = await app.inject({
           method: 'DELETE',
@@ -1937,8 +2039,13 @@ describe.sequential('persistent auth runtime', () => {
               action: 'admin.workspace_grant.revoked',
               payload: expect.objectContaining({
                 appId: 'app_tenant_control',
-                subjectUserEmail: 'developer@iflabx.com',
+                subjectUserEmail: 'd********@iflabx.com',
                 grantId: createdGrantId,
+              }),
+              payloadInspection: expect.objectContaining({
+                mode: 'masked',
+                containsSensitiveData: true,
+                moderateMatchCount: 1,
               }),
             }),
           ])
