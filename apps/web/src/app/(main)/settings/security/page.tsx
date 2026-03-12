@@ -7,6 +7,7 @@ import type {
   MfaSetupResponse,
   MfaStatusResponse,
 } from '@agentifui/shared/auth';
+import QRCode from 'qrcode';
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 
@@ -42,6 +43,7 @@ export default function SecuritySettingsPage() {
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [enrolledAt, setEnrolledAt] = useState<string | null>(null);
   const [setupState, setSetupState] = useState<SetupState | null>(null);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [enableCode, setEnableCode] = useState('');
   const [disableCode, setDisableCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +51,7 @@ export default function SecuritySettingsPage() {
   const [isFetchingStatus, setIsFetchingStatus] = useState(false);
   const [isSubmittingSetup, setIsSubmittingSetup] = useState(false);
   const [isSubmittingDisable, setIsSubmittingDisable] = useState(false);
+  const [isCopyingKey, setIsCopyingKey] = useState(false);
 
   useEffect(() => {
     if (!session) {
@@ -88,6 +91,35 @@ export default function SecuritySettingsPage() {
     };
   }, [session]);
 
+  useEffect(() => {
+    if (!setupState) {
+      setQrCodeDataUrl(null);
+      return;
+    }
+
+    let isCancelled = false;
+
+    QRCode.toDataURL(setupState.otpauthUri, {
+      width: 220,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+    })
+      .then(dataUrl => {
+        if (!isCancelled) {
+          setQrCodeDataUrl(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setQrCodeDataUrl(null);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [setupState]);
+
   if (isLoading) {
     return <p className="lead">Checking your session...</p>;
   }
@@ -97,6 +129,23 @@ export default function SecuritySettingsPage() {
   }
 
   const activeSession = session;
+
+  async function handleCopyManualKey() {
+    if (!setupState || !navigator.clipboard) {
+      return;
+    }
+
+    setIsCopyingKey(true);
+
+    try {
+      await navigator.clipboard.writeText(setupState.manualEntryKey);
+      setNotice('Manual entry key copied. You can paste it into your authenticator app.');
+    } catch {
+      setError('Unable to copy the manual entry key right now.');
+    } finally {
+      setIsCopyingKey(false);
+    }
+  }
 
   async function handleStartSetup() {
     setError(null);
@@ -112,7 +161,7 @@ export default function SecuritySettingsPage() {
       }
 
       setSetupState(response.data);
-      setNotice('MFA setup started. Add the manual key to your authenticator app and confirm with the current code.');
+      setNotice('MFA setup started. Scan the QR code or add the manual key, then confirm with the current 6-digit code.');
     } catch {
       setError('Unable to start MFA setup right now.');
     } finally {
@@ -233,12 +282,41 @@ export default function SecuritySettingsPage() {
             </button>
           ) : (
             <form className="stack" onSubmit={handleEnableMfa}>
-              <div className="security-code-block">
-                <strong>Manual entry key</strong>
-                <code>{setupState.manualEntryKey}</code>
+              <div className="security-setup-grid">
+                <div className="security-qr-card">
+                  <strong>Scan in your authenticator app</strong>
+                  {qrCodeDataUrl ? (
+                    <img
+                      className="security-qr-image"
+                      src={qrCodeDataUrl}
+                      alt="TOTP QR code for authenticator apps"
+                    />
+                  ) : (
+                    <div className="security-qr-placeholder">Generating QR code...</div>
+                  )}
+                  <span className="helper-text">
+                    Google Authenticator, Microsoft Authenticator, 1Password or similar apps are
+                    supported.
+                  </span>
+                </div>
+
+                <div className="security-manual-stack">
+                  <div className="security-code-block">
+                    <strong>Manual entry key</strong>
+                    <code>{setupState.manualEntryKey}</code>
+                  </div>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={handleCopyManualKey}
+                    disabled={isCopyingKey}
+                  >
+                    {isCopyingKey ? 'Copying...' : 'Copy manual key'}
+                  </button>
+                </div>
               </div>
               <div className="security-code-block">
-                <strong>OTPAuth URI</strong>
+                <strong>Advanced setup URI</strong>
                 <code>{setupState.otpauthUri}</code>
               </div>
               <label className="field">
