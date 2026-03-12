@@ -1,5 +1,7 @@
 import type {
+  AdminAppGrantCreateRequest,
   AdminAppSummary,
+  AdminAppUserGrant,
   AdminAuditActionCount,
   AdminGroupSummary,
   AdminUserSummary,
@@ -8,6 +10,7 @@ import type { AuthAuditEvent } from '@agentifui/shared/auth';
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from '../app.js';
+import { createAuditService } from '../services/audit-service.js';
 import { createAuthService } from '../services/auth-service.js';
 
 const testEnv = {
@@ -88,6 +91,7 @@ const adminApps: AdminAppSummary[] = [
     denyGrantCount: 0,
     launchCount: 1,
     lastLaunchedAt: '2026-03-12T00:10:00.000Z',
+    userGrants: [],
   },
 ];
 
@@ -121,6 +125,8 @@ function createAdminService(canReadAdmin = true) {
     listUsersForUser: vi.fn().mockResolvedValue(adminUsers),
     listGroupsForUser: vi.fn().mockResolvedValue(adminGroups),
     listAppsForUser: vi.fn().mockResolvedValue(adminApps),
+    createAppGrantForUser: vi.fn(),
+    revokeAppGrantForUser: vi.fn(),
     listAuditForUser: vi.fn().mockResolvedValue({
       countsByAction: auditCounts,
       events: auditEvents,
@@ -265,6 +271,198 @@ describe('admin routes', () => {
       expect(appsResponse.json().data.apps).toEqual(adminApps);
       expect(auditResponse.json().data.events).toEqual(auditEvents);
       expect(adminService.canReadAdminForUser).toHaveBeenCalledTimes(4);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('validates admin app grant payloads before calling the service', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/admin/apps/app_tenant_control/grants',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          subjectUserEmail: '',
+          effect: 'allow',
+        } satisfies Partial<AdminAppGrantCreateRequest>,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'ADMIN_INVALID_PAYLOAD',
+        },
+      });
+      expect(adminService.createAppGrantForUser).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('creates and revokes direct app grants while recording audit events', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const createdGrant: AdminAppUserGrant = {
+      id: 'grant-1',
+      effect: 'allow',
+      reason: 'Break glass',
+      createdAt: '2026-03-12T00:12:00.000Z',
+      expiresAt: null,
+      createdByUserId: 'user-admin',
+      user: {
+        id: 'user-member',
+        email: 'member@example.com',
+        displayName: 'Member User',
+        status: 'active',
+      },
+    };
+    const adminService = createAdminService(true);
+    adminService.createAppGrantForUser.mockResolvedValue({
+      ok: true,
+      data: {
+        app: {
+          ...adminApps[0],
+          directUserGrantCount: 1,
+          userGrants: [createdGrant],
+        },
+        grant: createdGrant,
+      },
+    });
+    adminService.revokeAppGrantForUser.mockResolvedValue({
+      ok: true,
+      data: {
+        app: adminApps[0],
+        revokedGrantId: 'grant-1',
+        revokedGrant: createdGrant,
+      },
+    });
+    const auditService = createAuditService();
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+      auditService,
+    });
+
+    try {
+      const createResponse = await app.inject({
+        method: 'POST',
+        url: '/admin/apps/app_tenant_control/grants',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          subjectUserEmail: 'member@example.com',
+          effect: 'allow',
+          reason: 'Break glass',
+        } satisfies AdminAppGrantCreateRequest,
+      });
+
+      expect(createResponse.statusCode).toBe(200);
+      expect(createResponse.json()).toMatchObject({
+        ok: true,
+        data: {
+          grant: {
+            id: 'grant-1',
+          },
+        },
+      });
+
+      const revokeResponse = await app.inject({
+        method: 'DELETE',
+        url: '/admin/apps/app_tenant_control/grants/grant-1',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(revokeResponse.statusCode).toBe(200);
+      expect(revokeResponse.json()).toMatchObject({
+        ok: true,
+        data: {
+          revokedGrantId: 'grant-1',
+        },
+      });
+
+      const auditEvents = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(adminService.createAppGrantForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@iflabx.com',
+        }),
+        {
+          appId: 'app_tenant_control',
+          subjectUserEmail: 'member@example.com',
+          effect: 'allow',
+          reason: 'Break glass',
+        }
+      );
+      expect(adminService.revokeAppGrantForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@iflabx.com',
+        }),
+        {
+          appId: 'app_tenant_control',
+          grantId: 'grant-1',
+        }
+      );
+      expect(auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'admin.workspace_grant.created',
+            entityId: 'user-member',
+          }),
+          expect.objectContaining({
+            action: 'admin.workspace_grant.revoked',
+            entityId: 'user-member',
+          }),
+        ])
+      );
     } finally {
       await app.close();
     }

@@ -20,6 +20,7 @@ export function useAdminPageData<TData>(
   const [data, setData] = useState<TData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
 
   useEffect(() => {
     if (!session) {
@@ -70,12 +71,15 @@ export function useAdminPageData<TData>(
     return () => {
       isCancelled = true;
     };
-  }, [loadData, router, session]);
+  }, [loadData, reloadVersion, router, session]);
 
   return {
     session,
     data,
     error,
     isLoading: isSessionLoading || isDataLoading,
+    reload() {
+      setReloadVersion(currentValue => currentValue + 1);
+    },
   };
 }

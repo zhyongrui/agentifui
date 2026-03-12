@@ -794,6 +794,25 @@ button:disabled {
   margin-top: 10px;
 }
 
+.admin-grant-form {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-grant-row {
+  align-items: center;
+}
+
+.admin-grant-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-grant-copy span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .admin-code-block pre {
   margin: 0;
   overflow-x: auto;

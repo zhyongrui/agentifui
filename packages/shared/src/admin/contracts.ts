@@ -4,7 +4,10 @@ import type { WorkspaceApp, WorkspaceGroup } from '../apps/contracts.js';
 export type AdminErrorCode =
   | 'ADMIN_UNAUTHORIZED'
   | 'ADMIN_FORBIDDEN'
-  | 'ADMIN_NOT_AVAILABLE';
+  | 'ADMIN_NOT_AVAILABLE'
+  | 'ADMIN_INVALID_PAYLOAD'
+  | 'ADMIN_NOT_FOUND'
+  | 'ADMIN_CONFLICT';
 
 export type AdminErrorResponse = {
   ok: false;
@@ -59,6 +62,25 @@ export type AdminGroupsResponse = {
   };
 };
 
+export type AdminAppGrantEffect = 'allow' | 'deny';
+
+export type AdminAppGrantSubjectUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  status: AuthUserStatus;
+};
+
+export type AdminAppUserGrant = {
+  id: string;
+  effect: AdminAppGrantEffect;
+  reason: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  createdByUserId: string | null;
+  user: AdminAppGrantSubjectUser;
+};
+
 export type AdminAppSummary = Pick<
   WorkspaceApp,
   'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode' | 'launchCost'
@@ -69,6 +91,7 @@ export type AdminAppSummary = Pick<
   denyGrantCount: number;
   launchCount: number;
   lastLaunchedAt: string | null;
+  userGrants: AdminAppUserGrant[];
 };
 
 export type AdminAppsResponse = {
@@ -76,6 +99,28 @@ export type AdminAppsResponse = {
   data: {
     generatedAt: string;
     apps: AdminAppSummary[];
+  };
+};
+
+export type AdminAppGrantCreateRequest = {
+  subjectUserEmail: string;
+  effect: AdminAppGrantEffect;
+  reason?: string | null;
+};
+
+export type AdminAppGrantCreateResponse = {
+  ok: true;
+  data: {
+    app: AdminAppSummary;
+    grant: AdminAppUserGrant;
+  };
+};
+
+export type AdminAppGrantDeleteResponse = {
+  ok: true;
+  data: {
+    app: AdminAppSummary;
+    revokedGrantId: string;
   };
 };
 

@@ -1,7 +1,10 @@
-import type { AuthUser, AuthAuditEvent } from '@agentifui/shared/auth';
+import type { AuthAuditEvent, AuthUser } from '@agentifui/shared/auth';
 import type {
+  AdminAppGrantCreateRequest,
   AdminAppSummary,
+  AdminAppUserGrant,
   AdminAuditActionCount,
+  AdminErrorCode,
   AdminGroupSummary,
   AdminUserSummary,
 } from '@agentifui/shared/admin';
@@ -14,11 +17,64 @@ import {
   resolveDefaultRoleIds,
 } from './workspace-catalog-fixtures.js';
 
+type AdminMutationErrorResult = {
+  ok: false;
+  statusCode: 400 | 404 | 409;
+  code: Extract<AdminErrorCode, 'ADMIN_INVALID_PAYLOAD' | 'ADMIN_NOT_FOUND' | 'ADMIN_CONFLICT'>;
+  message: string;
+  details?: unknown;
+};
+
+type AdminMutationResult<TData> =
+  | {
+      ok: true;
+      data: TData;
+    }
+  | AdminMutationErrorResult;
+
+type CreateAppGrantInput = {
+  appId: string;
+  subjectUserEmail: string;
+  effect: AdminAppGrantCreateRequest['effect'];
+  reason?: string | null;
+};
+
+type RevokeAppGrantInput = {
+  appId: string;
+  grantId: string;
+};
+
 type AdminService = {
   canReadAdminForUser(user: AuthUser): boolean | Promise<boolean>;
   listUsersForUser(user: AuthUser): AdminUserSummary[] | Promise<AdminUserSummary[]>;
   listGroupsForUser(user: AuthUser): AdminGroupSummary[] | Promise<AdminGroupSummary[]>;
   listAppsForUser(user: AuthUser): AdminAppSummary[] | Promise<AdminAppSummary[]>;
+  createAppGrantForUser(
+    user: AuthUser,
+    input: CreateAppGrantInput
+  ): Promise<
+    AdminMutationResult<{
+      app: AdminAppSummary;
+      grant: AdminAppUserGrant;
+    }>
+  > | AdminMutationResult<{
+    app: AdminAppSummary;
+    grant: AdminAppUserGrant;
+  }>;
+  revokeAppGrantForUser(
+    user: AuthUser,
+    input: RevokeAppGrantInput
+  ): Promise<
+    AdminMutationResult<{
+      app: AdminAppSummary;
+      revokedGrantId: string;
+      revokedGrant: AdminAppUserGrant;
+    }>
+  > | AdminMutationResult<{
+    app: AdminAppSummary;
+    revokedGrantId: string;
+    revokedGrant: AdminAppUserGrant;
+  }>;
   listAuditForUser(
     user: AuthUser
   ): Promise<{
@@ -28,6 +84,10 @@ type AdminService = {
     countsByAction: AdminAuditActionCount[];
     events: AuthAuditEvent[];
   };
+};
+
+type InMemoryAppGrant = AdminAppUserGrant & {
+  appId: string;
 };
 
 function toGroupMemberships(email: string) {
@@ -80,49 +140,91 @@ function buildInMemoryAuditEvent(
   };
 }
 
+function buildInMemoryUsers(user: AuthUser): AdminUserSummary[] {
+  const adminRoleIds = resolveDefaultRoleIds(user.email);
+
+  return [
+    {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      status: user.status,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt,
+      mfaEnabled: true,
+      roleIds: adminRoleIds,
+      groupMemberships: toGroupMemberships(user.email),
+    },
+    {
+      id: 'usr_pending_reviewer',
+      email: 'pending-review@example.net',
+      displayName: 'Pending Reviewer',
+      status: 'pending',
+      createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+      lastLoginAt: null,
+      mfaEnabled: false,
+      roleIds: ['user'],
+      groupMemberships: [],
+    },
+    {
+      id: 'usr_security_audit',
+      email: 'security-audit@example.net',
+      displayName: 'Security Audit',
+      status: 'active',
+      createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      lastLoginAt: new Date(Date.now() - 3_600_000).toISOString(),
+      mfaEnabled: true,
+      roleIds: ['user'],
+      groupMemberships: toGroupMemberships('security-audit@example.net'),
+    },
+  ];
+}
+
+function buildAppSummary(
+  appId: string,
+  grants: InMemoryAppGrant[]
+): AdminAppSummary | null {
+  const app = WORKSPACE_APPS.find(candidate => candidate.id === appId);
+
+  if (!app) {
+    return null;
+  }
+
+  return {
+    id: app.id,
+    slug: app.slug,
+    name: app.name,
+    summary: app.summary,
+    kind: app.kind,
+    status: app.status,
+    shortCode: app.shortCode,
+    launchCost: app.launchCost,
+    grantedGroups: app.grantedGroupIds.flatMap(groupId => {
+      const group = WORKSPACE_GROUPS.find(candidate => candidate.id === groupId);
+
+      return group ? [{ id: group.id, name: group.name }] : [];
+    }),
+    grantedRoleIds: app.grantedRoleIds,
+    directUserGrantCount: grants.filter(grant => grant.effect === 'allow').length,
+    denyGrantCount: grants.filter(grant => grant.effect === 'deny').length,
+    launchCount: app.id === 'app_policy_watch' ? 4 : 0,
+    lastLaunchedAt: app.id === 'app_policy_watch' ? new Date(Date.now() - 15 * 60_000).toISOString() : null,
+    userGrants: grants
+      .slice()
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map(({ appId: _, ...grant }) => grant),
+  };
+}
+
 export function createAdminService(): AdminService {
+  const memoryGrants: InMemoryAppGrant[] = [];
+
   return {
     canReadAdminForUser(user) {
       return canReadAdmin(user.email);
     },
     listUsersForUser(user) {
-      const adminRoleIds = resolveDefaultRoleIds(user.email);
-
-      return [
-        {
-          id: user.id,
-          email: user.email,
-          displayName: user.displayName,
-          status: user.status,
-          createdAt: user.createdAt,
-          lastLoginAt: user.lastLoginAt,
-          mfaEnabled: true,
-          roleIds: adminRoleIds,
-          groupMemberships: toGroupMemberships(user.email),
-        },
-        {
-          id: 'usr_pending_reviewer',
-          email: 'pending-review@example.net',
-          displayName: 'Pending Reviewer',
-          status: 'pending',
-          createdAt: new Date(Date.now() - 86_400_000).toISOString(),
-          lastLoginAt: null,
-          mfaEnabled: false,
-          roleIds: ['user'],
-          groupMemberships: [],
-        },
-        {
-          id: 'usr_security_audit',
-          email: 'security-audit@example.net',
-          displayName: 'Security Audit',
-          status: 'active',
-          createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
-          lastLoginAt: new Date(Date.now() - 3_600_000).toISOString(),
-          mfaEnabled: true,
-          roleIds: ['user'],
-          groupMemberships: toGroupMemberships('security-audit@example.net'),
-        },
-      ];
+      return buildInMemoryUsers(user);
     },
     listGroupsForUser() {
       return WORKSPACE_GROUPS.map(group => {
@@ -144,27 +246,166 @@ export function createAdminService(): AdminService {
       });
     },
     listAppsForUser() {
-      return WORKSPACE_APPS.map(app => ({
-        id: app.id,
-        slug: app.slug,
-        name: app.name,
-        summary: app.summary,
-        kind: app.kind,
-        status: app.status,
-        shortCode: app.shortCode,
-        launchCost: app.launchCost,
-        grantedGroups: app.grantedGroupIds.flatMap(groupId => {
-          const group = WORKSPACE_GROUPS.find(candidate => candidate.id === groupId);
+      return WORKSPACE_APPS.map(app => buildAppSummary(
+        app.id,
+        memoryGrants.filter(grant => grant.appId === app.id)
+      )!).filter((app): app is AdminAppSummary => Boolean(app));
+    },
+    createAppGrantForUser(user, input) {
+      const app = WORKSPACE_APPS.find(candidate => candidate.id === input.appId);
 
-          return group ? [{ id: group.id, name: group.name }] : [];
-        }),
-        grantedRoleIds: app.grantedRoleIds,
-        directUserGrantCount: 0,
-        denyGrantCount: 0,
-        launchCount: app.id === 'app_policy_watch' ? 4 : 0,
-        lastLaunchedAt:
-          app.id === 'app_policy_watch' ? new Date(Date.now() - 15 * 60_000).toISOString() : null,
-      }));
+      if (!app) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The target workspace app could not be found.',
+        };
+      }
+
+      const normalizedEmail = input.subjectUserEmail.trim().toLowerCase();
+
+      if (!normalizedEmail) {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: 'ADMIN_INVALID_PAYLOAD',
+          message: 'A target user email is required.',
+        };
+      }
+
+      const targetUser = buildInMemoryUsers(user).find(candidate => candidate.email === normalizedEmail);
+
+      if (!targetUser) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The target user could not be found in this tenant.',
+          details: {
+            subjectUserEmail: normalizedEmail,
+          },
+        };
+      }
+
+      const duplicateGrant = memoryGrants.find(
+        grant =>
+          grant.appId === app.id &&
+          grant.user.id === targetUser.id &&
+          grant.effect === input.effect
+      );
+
+      if (duplicateGrant) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: 'ADMIN_CONFLICT',
+          message: 'This direct user grant already exists.',
+          details: {
+            appId: app.id,
+            subjectUserEmail: normalizedEmail,
+            effect: input.effect,
+          },
+        };
+      }
+
+      const grant: InMemoryAppGrant = {
+        id: randomUUID(),
+        appId: app.id,
+        effect: input.effect,
+        reason: input.reason?.trim() || null,
+        createdAt: new Date().toISOString(),
+        expiresAt: null,
+        createdByUserId: user.id,
+        user: {
+          id: targetUser.id,
+          email: targetUser.email,
+          displayName: targetUser.displayName,
+          status: targetUser.status,
+        },
+      };
+      memoryGrants.push(grant);
+
+      return {
+        ok: true,
+        data: {
+          grant: (({ appId: _, ...strippedGrant }) => strippedGrant)(grant),
+          app: buildAppSummary(
+            app.id,
+            memoryGrants.filter(currentGrant => currentGrant.appId === app.id)
+          )!,
+        },
+      };
+    },
+    revokeAppGrantForUser(user, input) {
+      void user;
+
+      const index = memoryGrants.findIndex(
+        grant => grant.appId === input.appId && grant.id === input.grantId
+      );
+
+      if (index === -1) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The target direct user grant could not be found.',
+          details: {
+            appId: input.appId,
+            grantId: input.grantId,
+          },
+        };
+      }
+
+      const revokedGrant = memoryGrants[index];
+
+      if (!revokedGrant) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The target direct user grant could not be found.',
+          details: {
+            appId: input.appId,
+            grantId: input.grantId,
+          },
+        };
+      }
+
+      memoryGrants.splice(index, 1);
+      const app = buildAppSummary(
+        input.appId,
+        memoryGrants.filter(grant => grant.appId === input.appId)
+      );
+
+      if (!app) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The target workspace app could not be found.',
+          details: {
+            appId: input.appId,
+          },
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          app,
+          revokedGrantId: revokedGrant.id,
+          revokedGrant: {
+            id: revokedGrant.id,
+            effect: revokedGrant.effect,
+            reason: revokedGrant.reason,
+            createdAt: revokedGrant.createdAt,
+            expiresAt: revokedGrant.expiresAt,
+            createdByUserId: revokedGrant.createdByUserId,
+            user: revokedGrant.user,
+          },
+        },
+      };
     },
     listAuditForUser(user) {
       const events = [
@@ -226,4 +467,4 @@ export function createAdminService(): AdminService {
   };
 }
 
-export type { AdminService };
+export type { AdminMutationResult, AdminService, CreateAppGrantInput, RevokeAppGrantInput };

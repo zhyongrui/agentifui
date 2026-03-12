@@ -480,13 +480,18 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - `tenant_admin` 或 `root_admin` 已可读后台真实数据，而非进入占位页
   - Web `/admin/*` 已能查看用户状态、群组聚合、应用授权概览和租户审计事件
   - E2E 已切到真实后台数据验证，不再只验证“页面可打开”
+- `R10-B` `S3-1` 后台治理写路径
+  - Gateway 已新增 `POST /admin/apps/:appId/grants` 与 `DELETE /admin/apps/:appId/grants/:grantId`
+  - 后台已支持按邮箱创建 direct user allow/deny grant，并可从同一页面撤销
+  - 写操作会即时影响 `/workspace/apps` 可见性，并写入后台审计事件
+  - E2E 已覆盖“admin 授权后普通用户获得 Tenant Control 可见性”的完整浏览器链路
 
 下一个激活项：
 
-- `R10-B` `S3-1` 后台治理写路径
-  - 基于当前只读后台继续补授权写接口、Manager 边界、Break-glass 和后台动作审计
-  - 保留文件上传、分享和更细粒度执行时间线为 `S2` 残余 backlog
-  - 以现有 conversation/run 持久化边界作为后续治理与观测基础
+- `R11` `S3-2` 审计合规深化
+  - 在已完成的 direct grant 写路径之上补审计筛选、导出、PII 标记和 run-aware 合规视图
+  - 保留 Manager / Break-glass 和批量治理作为 `S3-1` 的后续细化子项
+  - 继续以现有 conversation/run 持久化边界作为治理与观测基础
 
 ### 12.2 Rolling Plan
 
@@ -502,7 +507,7 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 | R8 | `S2-2` 对话主链路 | 接入流式对话、停止生成和消息状态 | 首条真实对话链路完成 |
 | R9 | `S2-3` Run 追踪 | 让会话、执行和状态追踪闭环 | 运行态可查询、可回放 |
 | R10-A | `S3-1 / S3-2` 后台读模型 | 用真实数据替换 `/admin/*` 占位页，建立只读治理面 | 已完成 |
-| R10-B | `S3-1` 后台写路径 | 补授权管理、Manager/Break-glass、批量治理动作 | 后台不再只有读能力 |
+| R10-B | `S3-1` 后台写路径 | 补 direct grant 写接口、撤销路径和后台动作审计 | 已完成第一版 direct user grant 治理闭环 |
 | R11 | `S3-2` 审计合规深化 | 补审计导出、PII 标记、run-aware 合规视图 | 审计可查询、可导出、可挂 run |
 | R12 | `S2` 残余 backlog | 文件上传、分享、细粒度执行时间线与历史衔接 | 对话主链路的残余 AC 收口 |
 | R13 | `S3-3` 平台管理与发布硬化 | 平台管理、稳定公网入口、CI/观测/发布验证 | 达到 Phase 1 发布门槛 |
@@ -529,17 +534,14 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 
 ### 12.5 长期执行路线
 
-在 `R10-A` 完成后，后续按下面顺序持续推进，不再回到“先搭占位页”的模式：
+在 `R10-B` 完成后，后续按下面顺序持续推进，不再回到“先搭占位页”的模式：
 
-1. `R10-B`
-   - 后台从只读进入可治理状态
-   - 优先补 `workspace_app_access_grants` 写接口、Manager 边界、Break-glass 和后台动作审计
-2. `R11`
+1. `R11`
    - 把当前 `auth` 审计事件和 `run`/`trace` 数据面汇总到统一审计检索与导出能力
    - 为后续 PII 标记和合规导出建立稳定合同
-3. `R12`
+2. `R12`
    - 回补 `S2` 剩余 backlog：文件上传、分享、执行时间线、会话历史回源
-4. `R13`
+3. `R13`
    - 平台管理与发布硬化
    - 包括稳定公网入口、CI 深化、运维可观测性和发布前容量验证
 
@@ -609,14 +611,15 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - chat page 已能发起真实 completion 并回写 run status
 - `S1-3` / `S2-*` 仍未完成真实 quota service、消息持久化、渐进式流式渲染与历史列表衔接。
 - `S1-2` 已具备第一版角色体系、显式 deny 优先级和用户直授例外授权。
-- `S1-2` 仍未完成 Manager 授权路径、Break-glass 和授权写接口。
-- `S3-1 / S3-2` 已完成后台只读治理面：
+- `S1-2` 已具备 direct user grant 的后台写接口，但仍未完成 Manager 授权路径与 Break-glass。
+- `S3-1 / S3-2` 已完成后台第一版治理闭环：
   - `/admin/users`、`/admin/groups`、`/admin/apps`、`/admin/audit` 已接真实数据
-  - 浏览器回归已覆盖后台真实数据而非占位页
-- 后续治理主线已切到 `R10-B`：
-  - 后台写接口
-  - Manager / Break-glass
-  - 审计导出与更细的合规视图
+  - `/admin/apps` 已支持 direct user allow/deny grant 的创建与撤销
+  - 浏览器回归已覆盖后台授权写入后 workspace 可见性变化
+- 后续治理主线已切到 `R11`：
+  - 审计导出
+  - PII 标记
+  - 更细的 run-aware 合规视图
 
 ## 14. 关联文档
 

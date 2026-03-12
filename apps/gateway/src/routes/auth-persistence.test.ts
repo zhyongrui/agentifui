@@ -1683,4 +1683,236 @@ describe.sequential('persistent auth runtime', () => {
     },
     PERSISTENCE_TEST_TIMEOUT_MS
   );
+
+  it(
+    'persists direct admin app grants into workspace visibility and audit history',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Tenant Admin',
+          },
+        });
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer User',
+          },
+        });
+
+        const [adminLogin, developerLogin] = await Promise.all([
+          app.inject({
+            method: 'POST',
+            url: '/auth/login',
+            payload: {
+              email: 'admin@iflabx.com',
+              password: 'Secure123',
+            },
+          }),
+          app.inject({
+            method: 'POST',
+            url: '/auth/login',
+            payload: {
+              email: 'developer@iflabx.com',
+              password: 'Secure123',
+            },
+          }),
+        ]);
+
+        expect(adminLogin.statusCode).toBe(200);
+        expect(developerLogin.statusCode).toBe(200);
+
+        const adminSessionToken = adminLogin.json().data.sessionToken as string;
+        const developerSessionToken = developerLogin.json().data.sessionToken as string;
+
+        const developerWorkspaceBeforeGrant = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${developerSessionToken}`,
+          },
+        });
+
+        expect(developerWorkspaceBeforeGrant.statusCode).toBe(200);
+        expect(
+          (developerWorkspaceBeforeGrant.json() as WorkspaceCatalogResponse).data.apps.map(
+            workspaceApp => workspaceApp.id
+          )
+        ).not.toContain('app_tenant_control');
+
+        const createGrantResponse = await app.inject({
+          method: 'POST',
+          url: '/admin/apps/app_tenant_control/grants',
+          headers: {
+            authorization: `Bearer ${adminSessionToken}`,
+          },
+          payload: {
+            subjectUserEmail: 'developer@iflabx.com',
+            effect: 'allow',
+            reason: 'Break glass access',
+          },
+        });
+
+        expect(createGrantResponse.statusCode).toBe(200);
+        const createdGrantId = createGrantResponse.json().data.grant.id as string;
+
+        const [developerWorkspaceAfterGrant, adminAppsAfterGrant, adminAuditAfterGrant] =
+          await Promise.all([
+            app.inject({
+              method: 'GET',
+              url: '/workspace/apps',
+              headers: {
+                authorization: `Bearer ${developerSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/apps',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/audit',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+          ]);
+
+        expect(developerWorkspaceAfterGrant.statusCode).toBe(200);
+        expect(
+          (developerWorkspaceAfterGrant.json() as WorkspaceCatalogResponse).data.apps.map(
+            workspaceApp => workspaceApp.id
+          )
+        ).toContain('app_tenant_control');
+
+        const appsAfterGrantBody = adminAppsAfterGrant.json() as AdminAppsResponse;
+        expect(
+          appsAfterGrantBody.data.apps.find(appSummary => appSummary.id === 'app_tenant_control')
+        ).toMatchObject({
+          directUserGrantCount: 1,
+          userGrants: [
+            expect.objectContaining({
+              id: createdGrantId,
+              effect: 'allow',
+              user: expect.objectContaining({
+                email: 'developer@iflabx.com',
+              }),
+            }),
+          ],
+        });
+
+        const auditAfterGrantBody = adminAuditAfterGrant.json() as AdminAuditResponse;
+        expect(auditAfterGrantBody.data.countsByAction).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              action: 'admin.workspace_grant.created',
+            }),
+          ])
+        );
+        expect(auditAfterGrantBody.data.events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              action: 'admin.workspace_grant.created',
+              payload: expect.objectContaining({
+                appId: 'app_tenant_control',
+                subjectUserEmail: 'developer@iflabx.com',
+              }),
+            }),
+          ])
+        );
+
+        const revokeGrantResponse = await app.inject({
+          method: 'DELETE',
+          url: `/admin/apps/app_tenant_control/grants/${createdGrantId}`,
+          headers: {
+            authorization: `Bearer ${adminSessionToken}`,
+          },
+        });
+
+        expect(revokeGrantResponse.statusCode).toBe(200);
+
+        const [developerWorkspaceAfterRevoke, adminAppsAfterRevoke, adminAuditAfterRevoke] =
+          await Promise.all([
+            app.inject({
+              method: 'GET',
+              url: '/workspace/apps',
+              headers: {
+                authorization: `Bearer ${developerSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/apps',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/audit',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+          ]);
+
+        expect(developerWorkspaceAfterRevoke.statusCode).toBe(200);
+        expect(
+          (developerWorkspaceAfterRevoke.json() as WorkspaceCatalogResponse).data.apps.map(
+            workspaceApp => workspaceApp.id
+          )
+        ).not.toContain('app_tenant_control');
+
+        const appsAfterRevokeBody = adminAppsAfterRevoke.json() as AdminAppsResponse;
+        expect(
+          appsAfterRevokeBody.data.apps.find(appSummary => appSummary.id === 'app_tenant_control')
+        ).toMatchObject({
+          directUserGrantCount: 0,
+          userGrants: [],
+        });
+
+        const auditAfterRevokeBody = adminAuditAfterRevoke.json() as AdminAuditResponse;
+        expect(auditAfterRevokeBody.data.countsByAction).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              action: 'admin.workspace_grant.revoked',
+            }),
+          ])
+        );
+        expect(auditAfterRevokeBody.data.events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              action: 'admin.workspace_grant.revoked',
+              payload: expect.objectContaining({
+                appId: 'app_tenant_control',
+                subjectUserEmail: 'developer@iflabx.com',
+                grantId: createdGrantId,
+              }),
+            }),
+          ])
+        );
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
 });

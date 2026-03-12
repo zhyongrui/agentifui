@@ -432,11 +432,17 @@ test('mfa setup, mfa login verification, and disable flow work end-to-end', asyn
   await expect(page.getByRole('heading', { name: 'MFA Verification' })).toBeVisible();
 
   await page.getByLabel('TOTP Code').fill('000000');
-  await page.getByRole('button', { name: 'Complete sign in' }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/auth/mfa/verify'),
+    page.getByRole('button', { name: 'Complete sign in' }).click(),
+  ]);
   await expect(page.getByText('The provided MFA code is invalid.')).toBeVisible();
 
   await page.getByLabel('TOTP Code').fill(generateTotpCode(manualKey));
-  await page.getByRole('button', { name: 'Complete sign in' }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/auth/mfa/verify'),
+    page.getByRole('button', { name: 'Complete sign in' }).click(),
+  ]);
   await expectAppsWorkspace(page);
 
   await page.goto('/settings/security');
@@ -484,7 +490,20 @@ test('security and admin users see different workspace catalogs', async ({ page 
 });
 
 test('admin pages render persisted governance data for tenant admins', async ({ page }) => {
+  const memberEmail = uniqueEmail('member');
   const adminEmail = uniqueEmail('admin');
+
+  await register(page, {
+    email: memberEmail,
+    displayName: 'Member Browser User',
+  });
+  await expect(page).toHaveURL(/\/login\?registered=1$/);
+  await login(page, {
+    email: memberEmail,
+  });
+  await expectAppsWorkspace(page);
+  await expect(appCard(page, 'Tenant Control')).toHaveCount(0);
+  await logout(page);
 
   await register(page, {
     email: adminEmail,
@@ -512,6 +531,15 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
   await expect(page).toHaveURL(/\/admin\/apps$/);
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
   await expect(page.getByText('Tenant Control')).toBeVisible();
+  const tenantControlCard = appCard(page, 'Tenant Control');
+  await tenantControlCard.getByLabel('Tenant Control grant email').fill(memberEmail);
+  await tenantControlCard.getByLabel('Tenant Control grant reason').fill('Manual browser grant');
+  await Promise.all([
+    waitForGatewayPost(page, '/admin/apps/app_tenant_control/grants'),
+    tenantControlCard.getByRole('button', { name: 'Save direct override' }).click(),
+  ]);
+  await expect(page.getByText(`${memberEmail} now has a allow override on Tenant Control.`)).toBeVisible();
+  await expect(tenantControlCard.getByText(memberEmail)).toBeVisible();
 
   await page.getByRole('link', { name: 'Audit' }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/);
@@ -524,4 +552,12 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
       hasText: 'auth.login.succeeded',
     })
   ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'admin.workspace_grant.created' })).toBeVisible();
+
+  await logout(page);
+  await login(page, {
+    email: memberEmail,
+  });
+  await expectAppsWorkspace(page);
+  await expect(appCard(page, 'Tenant Control')).toBeVisible();
 });

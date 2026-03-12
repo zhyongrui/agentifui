@@ -129,7 +129,7 @@ export async function buildApp(
   await registerBasePlugins(app, env);
   await registerRootRoutes(app, env);
   await registerAuthRoutes(app, env, authService, auditService);
-  await registerAdminRoutes(app, authService, adminService);
+  await registerAdminRoutes(app, authService, adminService, auditService);
   await registerWorkspaceRoutes(app, authService, workspaceService);
   await registerChatRoutes(app, authService, workspaceService);
 

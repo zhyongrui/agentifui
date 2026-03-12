@@ -62,7 +62,9 @@ export type AuthAuditAction =
   | 'auth.login.failed'
   | 'auth.logout.succeeded'
   | 'auth.mfa.enabled'
-  | 'auth.mfa.disabled';
+  | 'auth.mfa.disabled'
+  | 'admin.workspace_grant.created'
+  | 'admin.workspace_grant.revoked';
 
 export type AuthAuditEntityType = 'user' | 'session';
 

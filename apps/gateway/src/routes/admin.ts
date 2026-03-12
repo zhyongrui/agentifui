@@ -1,4 +1,7 @@
 import type {
+  AdminAppGrantCreateRequest,
+  AdminAppGrantCreateResponse,
+  AdminAppGrantDeleteResponse,
   AdminAppsResponse,
   AdminAuditResponse,
   AdminErrorResponse,
@@ -9,6 +12,7 @@ import type { AuthUser } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
 
 import type { AdminService } from '../services/admin-service.js';
+import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 
 function buildErrorResponse(
@@ -38,6 +42,10 @@ function readBearerToken(value: string | undefined): string | null {
   }
 
   return token;
+}
+
+function isGrantEffect(value: unknown): value is AdminAppGrantCreateRequest['effect'] {
+  return value === 'allow' || value === 'deny';
 }
 
 async function requireTenantAdminSession(
@@ -117,7 +125,8 @@ async function requireTenantAdminSession(
 export async function registerAdminRoutes(
   app: FastifyInstance,
   authService: AuthService,
-  adminService: AdminService
+  adminService: AdminService,
+  auditService: AuditService
 ) {
   app.get('/admin/users', async (request, reply) => {
     const session = await requireTenantAdminSession(
@@ -207,6 +216,131 @@ export async function registerAdminRoutes(
         generatedAt: new Date().toISOString(),
         countsByAction: auditData.countsByAction,
         events: auditData.events,
+      },
+    };
+
+    return response;
+  });
+
+  app.post('/admin/apps/:appId/grants', async (request, reply) => {
+    const session = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const params = request.params as { appId?: string };
+    const body = (request.body ?? {}) as Partial<AdminAppGrantCreateRequest>;
+    const appId = params.appId?.trim();
+    const subjectUserEmail = body.subjectUserEmail?.trim();
+    const reason = typeof body.reason === 'string' ? body.reason : null;
+
+    if (!appId || !subjectUserEmail || !isGrantEffect(body.effect)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Admin app grants require an app id, target user email and allow/deny effect.'
+      );
+    }
+
+    const result = await adminService.createAppGrantForUser(session.user, {
+      appId,
+      subjectUserEmail,
+      effect: body.effect,
+      reason,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    await auditService.recordEvent({
+      tenantId: session.user.tenantId,
+      actorUserId: session.user.id,
+      action: 'admin.workspace_grant.created',
+      entityType: 'user',
+      entityId: result.data.grant.user.id,
+      ipAddress: request.ip,
+      payload: {
+        appId: result.data.app.id,
+        appName: result.data.app.name,
+        effect: result.data.grant.effect,
+        subjectUserEmail: result.data.grant.user.email,
+        reason: result.data.grant.reason,
+        grantId: result.data.grant.id,
+      },
+    });
+
+    const response: AdminAppGrantCreateResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.delete('/admin/apps/:appId/grants/:grantId', async (request, reply) => {
+    const session = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const params = request.params as { appId?: string; grantId?: string };
+    const appId = params.appId?.trim();
+    const grantId = params.grantId?.trim();
+
+    if (!appId || !grantId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Admin app grant revocation requires an app id and grant id.'
+      );
+    }
+
+    const result = await adminService.revokeAppGrantForUser(session.user, {
+      appId,
+      grantId,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    await auditService.recordEvent({
+      tenantId: session.user.tenantId,
+      actorUserId: session.user.id,
+      action: 'admin.workspace_grant.revoked',
+      entityType: 'user',
+      entityId: result.data.revokedGrant.user.id,
+      ipAddress: request.ip,
+      payload: {
+        appId: result.data.app.id,
+        appName: result.data.app.name,
+        effect: result.data.revokedGrant.effect,
+        subjectUserEmail: result.data.revokedGrant.user.email,
+        reason: result.data.revokedGrant.reason,
+        grantId: result.data.revokedGrantId,
+      },
+    });
+
+    const response: AdminAppGrantDeleteResponse = {
+      ok: true,
+      data: {
+        app: result.data.app,
+        revokedGrantId: result.data.revokedGrantId,
       },
     };
 

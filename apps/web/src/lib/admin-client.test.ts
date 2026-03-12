@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createAdminAppGrant,
   fetchAdminApps,
   fetchAdminAudit,
   fetchAdminGroups,
   fetchAdminUsers,
+  revokeAdminAppGrant,
 } from './admin-client.js';
 
 afterEach(() => {
@@ -120,6 +122,91 @@ describe('admin client', () => {
       ok: true,
       data: {
         events: [],
+      },
+    });
+  });
+
+  it('posts and deletes admin app grants through the same-origin gateway proxy', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            app: {
+              id: 'app_tenant_control',
+              userGrants: [],
+            },
+            grant: {
+              id: 'grant-1',
+              effect: 'allow',
+              user: {
+                email: 'member@example.com',
+              },
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            app: {
+              id: 'app_tenant_control',
+              userGrants: [],
+            },
+            revokedGrantId: 'grant-1',
+          },
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const [createResult, revokeResult] = await Promise.all([
+      createAdminAppGrant('session-123', 'app_tenant_control', {
+        subjectUserEmail: 'member@example.com',
+        effect: 'allow',
+        reason: 'break glass',
+      }),
+      revokeAdminAppGrant('session-123', 'app_tenant_control', 'grant-1'),
+    ]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/admin/apps/app_tenant_control/grants', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        subjectUserEmail: 'member@example.com',
+        effect: 'allow',
+        reason: 'break glass',
+      }),
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/gateway/admin/apps/app_tenant_control/grants/grant-1',
+      {
+        method: 'DELETE',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        body: undefined,
+        cache: 'no-store',
+      }
+    );
+    expect(createResult).toMatchObject({
+      ok: true,
+      data: {
+        grant: {
+          id: 'grant-1',
+        },
+      },
+    });
+    expect(revokeResult).toMatchObject({
+      ok: true,
+      data: {
+        revokedGrantId: 'grant-1',
       },
     });
   });
