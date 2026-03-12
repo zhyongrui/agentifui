@@ -63,9 +63,13 @@ export type AuthAuditAction =
   | 'auth.logout.succeeded'
   | 'auth.mfa.enabled'
   | 'auth.mfa.disabled'
+  | 'workspace.preferences.updated'
   | 'workspace.app.launched'
+  | 'workspace.run.stop_requested'
+  | 'admin.workspace.read'
   | 'admin.workspace_grant.created'
-  | 'admin.workspace_grant.revoked';
+  | 'admin.workspace_grant.revoked'
+  | 'admin.workspace_grant.rejected';
 
 export type AuthAuditEntityType =
   | 'user'

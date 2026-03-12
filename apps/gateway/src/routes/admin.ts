@@ -361,6 +361,71 @@ async function requireTenantAdminSession(
   };
 }
 
+async function recordAdminReadEvent(
+  auditService: AuditService,
+  input: {
+    user: AuthUser;
+    ipAddress: string | null;
+    resource: '/admin/apps' | '/admin/audit' | '/admin/audit/export' | '/admin/groups' | '/admin/users';
+    resultCount?: number;
+    filters?: AdminAuditFilters;
+    exportFormat?: AdminAuditExportFormat;
+  }
+) {
+  await auditService.recordEvent({
+    tenantId: input.user.tenantId,
+    actorUserId: input.user.id,
+    action: 'admin.workspace.read',
+    entityType: 'session',
+    entityId: input.user.id,
+    ipAddress: input.ipAddress,
+    payload: {
+      resource: input.resource,
+      resultCount: input.resultCount ?? null,
+      filters: input.filters ?? null,
+      exportFormat: input.exportFormat ?? null,
+    },
+  });
+}
+
+async function recordGrantRejectedEvent(
+  auditService: AuditService,
+  input: {
+    user: AuthUser;
+    ipAddress: string | null;
+    operation: 'create' | 'revoke';
+    appId: string | null;
+    grantId?: string | null;
+    subjectUserEmail?: string | null;
+    effect?: AdminAppGrantCreateRequest['effect'] | null;
+    reason?: string | null;
+    failureCode: string;
+    failureMessage: string;
+    details?: unknown;
+  }
+) {
+  await auditService.recordEvent({
+    tenantId: input.user.tenantId,
+    actorUserId: input.user.id,
+    action: 'admin.workspace_grant.rejected',
+    level: 'warning',
+    entityType: 'workspace_app',
+    entityId: input.appId,
+    ipAddress: input.ipAddress,
+    payload: {
+      operation: input.operation,
+      appId: input.appId,
+      grantId: input.grantId ?? null,
+      subjectUserEmail: input.subjectUserEmail ?? null,
+      effect: input.effect ?? null,
+      reason: input.reason ?? null,
+      failureCode: input.failureCode,
+      failureMessage: input.failureMessage,
+      details: input.details ?? null,
+    },
+  });
+}
+
 export async function registerAdminRoutes(
   app: FastifyInstance,
   authService: AuthService,
@@ -387,6 +452,13 @@ export async function registerAdminRoutes(
       },
     };
 
+    await recordAdminReadEvent(auditService, {
+      user: session.user,
+      ipAddress: request.ip,
+      resource: '/admin/users',
+      resultCount: response.data.users.length,
+    });
+
     return response;
   });
 
@@ -410,6 +482,13 @@ export async function registerAdminRoutes(
       },
     };
 
+    await recordAdminReadEvent(auditService, {
+      user: session.user,
+      ipAddress: request.ip,
+      resource: '/admin/groups',
+      resultCount: response.data.groups.length,
+    });
+
     return response;
   });
 
@@ -432,6 +511,13 @@ export async function registerAdminRoutes(
         apps: await adminService.listAppsForUser(session.user),
       },
     };
+
+    await recordAdminReadEvent(auditService, {
+      user: session.user,
+      ipAddress: request.ip,
+      resource: '/admin/apps',
+      resultCount: response.data.apps.length,
+    });
 
     return response;
   });
@@ -469,6 +555,14 @@ export async function registerAdminRoutes(
         events: auditData.events,
       },
     };
+
+    await recordAdminReadEvent(auditService, {
+      user: session.user,
+      ipAddress: request.ip,
+      resource: '/admin/audit',
+      resultCount: response.data.events.length,
+      filters: resolvedFilters,
+    });
 
     return response;
   });
@@ -521,6 +615,15 @@ export async function registerAdminRoutes(
     reply.header('x-agentifui-exported-at', metadata.exportedAt);
     reply.header('x-agentifui-export-count', String(metadata.eventCount));
 
+    await recordAdminReadEvent(auditService, {
+      user: session.user,
+      ipAddress: request.ip,
+      resource: '/admin/audit/export',
+      resultCount: auditData.events.length,
+      filters: exportFilters,
+      exportFormat: format,
+    });
+
     if (format === 'json') {
       reply.type('application/json; charset=utf-8');
       return JSON.stringify(bundle, null, 2);
@@ -549,6 +652,18 @@ export async function registerAdminRoutes(
     const reason = typeof body.reason === 'string' ? body.reason : null;
 
     if (!appId || !subjectUserEmail || !isGrantEffect(body.effect)) {
+      await recordGrantRejectedEvent(auditService, {
+        user: session.user,
+        ipAddress: request.ip,
+        operation: 'create',
+        appId: appId ?? null,
+        subjectUserEmail: subjectUserEmail ?? null,
+        effect: isGrantEffect(body.effect) ? body.effect : null,
+        reason,
+        failureCode: 'ADMIN_INVALID_PAYLOAD',
+        failureMessage:
+          'Admin app grants require an app id, target user email and allow/deny effect.',
+      });
       reply.code(400);
       return buildErrorResponse(
         'ADMIN_INVALID_PAYLOAD',
@@ -564,6 +679,18 @@ export async function registerAdminRoutes(
     });
 
     if (!result.ok) {
+      await recordGrantRejectedEvent(auditService, {
+        user: session.user,
+        ipAddress: request.ip,
+        operation: 'create',
+        appId,
+        subjectUserEmail,
+        effect: body.effect,
+        reason,
+        failureCode: result.code,
+        failureMessage: result.message,
+        details: result.details,
+      });
       reply.code(result.statusCode);
       return buildErrorResponse(result.code, result.message, result.details);
     }
@@ -610,6 +737,15 @@ export async function registerAdminRoutes(
     const grantId = params.grantId?.trim();
 
     if (!appId || !grantId) {
+      await recordGrantRejectedEvent(auditService, {
+        user: session.user,
+        ipAddress: request.ip,
+        operation: 'revoke',
+        appId: appId ?? null,
+        grantId: grantId ?? null,
+        failureCode: 'ADMIN_INVALID_PAYLOAD',
+        failureMessage: 'Admin app grant revocation requires an app id and grant id.',
+      });
       reply.code(400);
       return buildErrorResponse(
         'ADMIN_INVALID_PAYLOAD',
@@ -623,6 +759,16 @@ export async function registerAdminRoutes(
     });
 
     if (!result.ok) {
+      await recordGrantRejectedEvent(auditService, {
+        user: session.user,
+        ipAddress: request.ip,
+        operation: 'revoke',
+        appId,
+        grantId,
+        failureCode: result.code,
+        failureMessage: result.message,
+        details: result.details,
+      });
       reply.code(result.statusCode);
       return buildErrorResponse(result.code, result.message, result.details);
     }

@@ -20,6 +20,7 @@ import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 
+import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 import type { WorkspaceService } from '../services/workspace-service.js';
 
@@ -712,7 +713,8 @@ async function* streamCompletionEvents(input: {
 export async function registerChatRoutes(
   app: FastifyInstance,
   authService: AuthService,
-  workspaceService: WorkspaceService
+  workspaceService: WorkspaceService,
+  auditService: AuditService
 ) {
   app.get('/v1/models', async (request, reply) => {
     const traceId = request.headers['x-trace-id']?.toString().trim() || buildTraceId();
@@ -996,6 +998,28 @@ export async function registerChatRoutes(
       result: 'success',
       stop_type: streamState ? 'hard' : 'soft',
     };
+
+    const runResult = await workspaceService.getRunForUser(access.user, taskId);
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.run.stop_requested',
+      entityType: 'run',
+      entityId: taskId,
+      ipAddress: request.ip,
+      level: streamState ? 'info' : 'warning',
+      payload: {
+        runId: taskId,
+        stopType: response.stop_type,
+        traceId: runResult.ok ? runResult.data.traceId : traceId,
+        conversationId: runResult.ok ? runResult.data.conversationId : null,
+        appId: runResult.ok ? runResult.data.app.id : null,
+        appName: runResult.ok ? runResult.data.app.name : null,
+        activeGroupId: runResult.ok ? runResult.data.activeGroup.id : null,
+        activeGroupName: runResult.ok ? runResult.data.activeGroup.name : null,
+      },
+    });
 
     return response;
   });

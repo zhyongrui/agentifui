@@ -7,6 +7,7 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from '../app.js';
+import { createAuditService } from '../services/audit-service.js';
 import { createAuthService } from '../services/auth-service.js';
 
 const testEnv: {
@@ -45,7 +46,8 @@ function createTestAuthService(overrides: Partial<Parameters<typeof createAuthSe
 
 async function createTestApp(
   authService = createTestAuthService(),
-  envOverrides: Partial<typeof testEnv> = {}
+  envOverrides: Partial<typeof testEnv> = {},
+  appOverrides: Record<string, unknown> = {}
 ) {
   const app = await buildApp(
     {
@@ -55,6 +57,7 @@ async function createTestApp(
     {
       logger: false,
       authService,
+      ...appOverrides,
     }
   );
 
@@ -576,7 +579,8 @@ describe('chat routes', () => {
 
   it('hard-stops an active streaming response and persists stopped state', async () => {
     const authService = createTestAuthService();
-    const { app } = await createTestApp(authService);
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
 
     authService.register({
       email: 'developer@iflabx.com',
@@ -709,6 +713,25 @@ describe('chat routes', () => {
           },
         ],
       });
+
+      const auditEvents = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'workspace.run.stop_requested',
+            entityType: 'run',
+            entityId: runId,
+            payload: expect.objectContaining({
+              runId,
+              stopType: 'hard',
+              conversationId,
+            }),
+          }),
+        ])
+      );
     } finally {
       if (baseUrl) {
         await app.close();

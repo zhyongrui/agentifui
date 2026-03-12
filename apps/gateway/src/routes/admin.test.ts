@@ -612,6 +612,180 @@ describe('admin routes', () => {
     }
   });
 
+  it('records admin workspace read access after successful GET requests', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const auditService = createAuditService();
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+      auditService,
+    });
+
+    try {
+      const [usersResponse, appsResponse, auditResponse] = await Promise.all([
+        app.inject({
+          method: 'GET',
+          url: '/admin/users',
+          headers: {
+            authorization: `Bearer ${login.data.sessionToken}`,
+          },
+        }),
+        app.inject({
+          method: 'GET',
+          url: '/admin/apps',
+          headers: {
+            authorization: `Bearer ${login.data.sessionToken}`,
+          },
+        }),
+        app.inject({
+          method: 'GET',
+          url: '/admin/audit?action=auth.login.succeeded',
+          headers: {
+            authorization: `Bearer ${login.data.sessionToken}`,
+          },
+        }),
+      ]);
+
+      expect(usersResponse.statusCode).toBe(200);
+      expect(appsResponse.statusCode).toBe(200);
+      expect(auditResponse.statusCode).toBe(200);
+
+      const events = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'admin.workspace.read',
+            payload: expect.objectContaining({
+              resource: '/admin/users',
+            }),
+          }),
+          expect.objectContaining({
+            action: 'admin.workspace.read',
+            payload: expect.objectContaining({
+              resource: '/admin/apps',
+            }),
+          }),
+          expect.objectContaining({
+            action: 'admin.workspace.read',
+            payload: expect.objectContaining({
+              resource: '/admin/audit',
+              filters: expect.objectContaining({
+                action: 'auth.login.succeeded',
+              }),
+            }),
+          }),
+        ])
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('records rejected admin grant mutations as warning audit events', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    adminService.createAppGrantForUser.mockResolvedValue({
+      ok: false,
+      statusCode: 409,
+      code: 'ADMIN_CONFLICT',
+      message: 'This direct user grant already exists.',
+      details: {
+        appId: 'app_tenant_control',
+        subjectUserEmail: 'member@example.com',
+      },
+    });
+    const auditService = createAuditService();
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+      auditService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/admin/apps/app_tenant_control/grants',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          subjectUserEmail: 'member@example.com',
+          effect: 'allow',
+          reason: 'duplicate',
+        } satisfies AdminAppGrantCreateRequest,
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'ADMIN_CONFLICT',
+        },
+      });
+
+      const events = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'admin.workspace_grant.rejected',
+            level: 'warning',
+            entityType: 'workspace_app',
+            entityId: 'app_tenant_control',
+            payload: expect.objectContaining({
+              operation: 'create',
+              appId: 'app_tenant_control',
+              subjectUserEmail: 'member@example.com',
+              failureCode: 'ADMIN_CONFLICT',
+            }),
+          }),
+        ])
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('validates admin app grant payloads before calling the service', async () => {
     const authService = createTestAuthService();
     authService.register({

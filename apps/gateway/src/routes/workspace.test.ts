@@ -9,6 +9,7 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from '../app.js';
+import { createAuditService } from '../services/audit-service.js';
 import { createAuthService } from '../services/auth-service.js';
 
 const testEnv: {
@@ -47,7 +48,8 @@ function createTestAuthService(overrides: Partial<Parameters<typeof createAuthSe
 
 async function createTestApp(
   authService = createTestAuthService(),
-  envOverrides: Partial<typeof testEnv> = {}
+  envOverrides: Partial<typeof testEnv> = {},
+  appOverrides: Record<string, unknown> = {}
 ) {
   const app = await buildApp(
     {
@@ -57,6 +59,7 @@ async function createTestApp(
     {
       logger: false,
       authService,
+      ...appOverrides,
     }
   );
 
@@ -223,7 +226,8 @@ describe('workspace routes', () => {
 
   it('persists workspace preferences for the active user', async () => {
     const authService = createTestAuthService();
-    const { app } = await createTestApp(authService);
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
 
     authService.register({
       email: 'developer@iflabx.com',
@@ -301,6 +305,25 @@ describe('workspace routes', () => {
       expect(catalogBody.data.defaultActiveGroupId).toBe('grp_research');
       expect(catalogBody.data.favoriteAppIds).toEqual(['app_policy_watch']);
       expect(catalogBody.data.recentAppIds).toEqual(['app_market_brief']);
+
+      const auditEvents = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'workspace.preferences.updated',
+            entityType: 'user',
+            payload: {
+              favoriteAppIds: ['app_policy_watch'],
+              recentAppIds: ['app_market_brief'],
+              defaultActiveGroupId: 'grp_research',
+              updatedAt: expect.any(String),
+            },
+          }),
+        ])
+      );
     } finally {
       await app.close();
     }

@@ -383,7 +383,10 @@ test('invitation acceptance activates the user and allows password login', async
   await expect(page.getByLabel('Invitation Token')).toHaveValue(token);
   await page.getByLabel('Display Name').fill('Invited User');
   await page.getByLabel('Password').fill(DEFAULT_PASSWORD);
-  await page.getByRole('button', { name: 'Activate account' }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/auth/invitations/accept'),
+    page.getByRole('button', { name: 'Activate account' }).click(),
+  ]);
 
   await expect(page).toHaveURL(/\/login\?activated=1$/);
   await expect(page.getByText('Invitation accepted. Sign in with your new password.')).toBeVisible();

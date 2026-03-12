@@ -182,6 +182,21 @@ export async function registerWorkspaceRoutes(
       }),
     };
 
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.preferences.updated',
+      entityType: 'user',
+      entityId: access.user.id,
+      ipAddress: request.ip,
+      payload: {
+        favoriteAppIds: response.data.favoriteAppIds,
+        recentAppIds: response.data.recentAppIds,
+        defaultActiveGroupId: response.data.defaultActiveGroupId,
+        updatedAt: response.data.updatedAt,
+      },
+    });
+
     return response;
   });
 
