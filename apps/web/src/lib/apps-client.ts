@@ -1,7 +1,11 @@
 import type {
+  WorkspaceAppLaunchRequest,
+  WorkspaceAppLaunchResponse,
   WorkspaceApp,
   WorkspaceCatalogResponse,
   WorkspaceErrorResponse,
+  WorkspacePreferencesResponse,
+  WorkspacePreferencesUpdateRequest,
 } from '@agentifui/shared/apps';
 
 const GATEWAY_PROXY_BASE_PATH = '/api/gateway';
@@ -38,28 +42,72 @@ function normalizeWorkspaceApp(app: WorkspaceApp): WorkspaceApp {
   };
 }
 
-export async function fetchWorkspaceCatalog(
-  sessionToken: string
-): Promise<WorkspaceCatalogResponse | WorkspaceErrorResponse> {
-  const response = await fetch(`${getGatewayBaseUrl()}/workspace/apps`, {
-    method: 'GET',
-    headers: {
-      authorization: `Bearer ${sessionToken}`,
-    },
-    cache: 'no-store',
-  });
-
-  const payload = (await response.json()) as WorkspaceCatalogResponse | WorkspaceErrorResponse;
-
-  if (!payload.ok) {
-    return payload;
-  }
-
+function normalizeWorkspaceCatalogPayload(payload: WorkspaceCatalogResponse): WorkspaceCatalogResponse {
   return {
     ...payload,
     data: {
       ...payload.data,
       apps: payload.data.apps.map(normalizeWorkspaceApp),
+      favoriteAppIds: normalizeStringArray(payload.data.favoriteAppIds),
+      recentAppIds: normalizeStringArray(payload.data.recentAppIds),
     },
   };
+}
+
+async function fetchWorkspaceJson<TSuccess>(
+  path: string,
+  input: {
+    method: 'GET' | 'POST' | 'PUT';
+    sessionToken: string;
+    body?: unknown;
+  }
+): Promise<TSuccess | WorkspaceErrorResponse> {
+  const response = await fetch(`${getGatewayBaseUrl()}${path}`, {
+    method: input.method,
+    headers: {
+      authorization: `Bearer ${input.sessionToken}`,
+      ...(input.body ? { 'content-type': 'application/json' } : {}),
+    },
+    body: input.body ? JSON.stringify(input.body) : undefined,
+    cache: 'no-store',
+  });
+
+  return (await response.json()) as TSuccess | WorkspaceErrorResponse;
+}
+
+export async function fetchWorkspaceCatalog(
+  sessionToken: string
+): Promise<WorkspaceCatalogResponse | WorkspaceErrorResponse> {
+  const payload = await fetchWorkspaceJson<WorkspaceCatalogResponse>('/workspace/apps', {
+    method: 'GET',
+    sessionToken,
+  });
+
+  if (!payload.ok) {
+    return payload;
+  }
+
+  return normalizeWorkspaceCatalogPayload(payload);
+}
+
+export async function updateWorkspacePreferences(
+  sessionToken: string,
+  input: WorkspacePreferencesUpdateRequest
+): Promise<WorkspacePreferencesResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspacePreferencesResponse>('/workspace/preferences', {
+    method: 'PUT',
+    sessionToken,
+    body: input,
+  });
+}
+
+export async function launchWorkspaceApp(
+  sessionToken: string,
+  input: WorkspaceAppLaunchRequest
+): Promise<WorkspaceAppLaunchResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceAppLaunchResponse>('/workspace/apps/launch', {
+    method: 'POST',
+    sessionToken,
+    body: input,
+  });
 }

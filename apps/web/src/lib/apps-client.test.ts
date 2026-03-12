@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchWorkspaceCatalog } from './apps-client.js';
+import {
+  fetchWorkspaceCatalog,
+  launchWorkspaceApp,
+  updateWorkspacePreferences,
+} from './apps-client.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -20,6 +24,8 @@ describe('apps client', () => {
             memberGroupIds: [],
             defaultActiveGroupId: 'grp_product',
             apps: [],
+            favoriteAppIds: [],
+            recentAppIds: [],
             quotaServiceState: 'available',
             quotaUsagesByGroupId: {},
             generatedAt: '2026-03-11T00:00:00.000Z',
@@ -94,6 +100,8 @@ describe('apps client', () => {
                 launchCost: 40,
               },
             ],
+            favoriteAppIds: ['app_market_brief'],
+            recentAppIds: ['app_market_brief'],
             quotaServiceState: 'available',
             quotaUsagesByGroupId: {},
             generatedAt: '2026-03-11T00:00:00.000Z',
@@ -113,6 +121,114 @@ describe('apps client', () => {
             tags: ['research', 'daily'],
           },
         ],
+        favoriteAppIds: ['app_market_brief'],
+        recentAppIds: ['app_market_brief'],
+      },
+    });
+  });
+
+  it('updates workspace preferences through the same-origin gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            favoriteAppIds: ['app_audit_lens'],
+            recentAppIds: ['app_market_brief'],
+            defaultActiveGroupId: 'grp_security',
+            updatedAt: '2026-03-12T10:00:00.000Z',
+          },
+        }),
+      })
+    );
+
+    const result = await updateWorkspacePreferences('session-123', {
+      favoriteAppIds: ['app_audit_lens'],
+      recentAppIds: ['app_market_brief'],
+      defaultActiveGroupId: 'grp_security',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/preferences', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        favoriteAppIds: ['app_audit_lens'],
+        recentAppIds: ['app_market_brief'],
+        defaultActiveGroupId: 'grp_security',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        favoriteAppIds: ['app_audit_lens'],
+        recentAppIds: ['app_market_brief'],
+        defaultActiveGroupId: 'grp_security',
+        updatedAt: '2026-03-12T10:00:00.000Z',
+      },
+    });
+  });
+
+  it('launches a workspace app through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'launch-123',
+            status: 'handoff_ready',
+            launchUrl: '/apps?app=market-brief&launchId=launch-123',
+            launchedAt: '2026-03-12T10:05:00.000Z',
+            app: {
+              id: 'app_market_brief',
+              slug: 'market-brief',
+              name: 'Market Brief',
+              summary: 'summary',
+              kind: 'analysis',
+              status: 'ready',
+              shortCode: 'MB',
+              launchCost: 40,
+            },
+            attributedGroup: {
+              id: 'grp_product',
+              name: 'Product Studio',
+              description: 'desc',
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await launchWorkspaceApp('session-123', {
+      appId: 'app_market_brief',
+      activeGroupId: 'grp_product',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/apps/launch', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        appId: 'app_market_brief',
+        activeGroupId: 'grp_product',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        id: 'launch-123',
+        status: 'handoff_ready',
+        attributedGroup: {
+          id: 'grp_product',
+        },
       },
     });
   });

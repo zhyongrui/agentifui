@@ -17,6 +17,8 @@ export const schemaModules = [
   'workspace_apps',
   'workspace_app_access_grants',
   'workspace_group_app_grants',
+  'workspace_user_preferences',
+  'workspace_app_launches',
 ] as const;
 
 export type SchemaModule = (typeof schemaModules)[number];

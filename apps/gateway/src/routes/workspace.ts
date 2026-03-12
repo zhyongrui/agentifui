@@ -1,4 +1,12 @@
-import type { WorkspaceCatalogResponse, WorkspaceErrorResponse } from '@agentifui/shared/apps';
+import type {
+  WorkspaceAppLaunchRequest,
+  WorkspaceAppLaunchResponse,
+  WorkspaceCatalogResponse,
+  WorkspaceErrorResponse,
+  WorkspacePreferencesResponse,
+  WorkspacePreferencesUpdateRequest,
+} from '@agentifui/shared/apps';
+import type { AuthUser } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
 
 import type { AuthService } from '../services/auth-service.js';
@@ -33,46 +41,178 @@ function readBearerToken(value: string | undefined): string | null {
   return token;
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(entry => typeof entry === 'string');
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
+async function requireActiveWorkspaceSession(
+  authService: AuthService,
+  authorization: string | undefined
+): Promise<
+  | {
+      ok: true;
+      user: AuthUser;
+    }
+  | {
+      ok: false;
+      statusCode: 401 | 403;
+      response: WorkspaceErrorResponse;
+    }
+> {
+  const sessionToken = readBearerToken(authorization);
+
+  if (!sessionToken) {
+    return {
+      ok: false,
+      statusCode: 401,
+      response: buildErrorResponse(
+        'WORKSPACE_UNAUTHORIZED',
+        'A valid session token is required to access the workspace.'
+      ),
+    };
+  }
+
+  const user = await authService.getUserBySessionToken(sessionToken);
+
+  if (!user) {
+    return {
+      ok: false,
+      statusCode: 401,
+      response: buildErrorResponse(
+        'WORKSPACE_UNAUTHORIZED',
+        'The current workspace session is missing or has expired.'
+      ),
+    };
+  }
+
+  if (user.status !== 'active') {
+    return {
+      ok: false,
+      statusCode: 403,
+      response: buildErrorResponse(
+        'WORKSPACE_FORBIDDEN',
+        'Only active users can enter the apps workspace.',
+        {
+          status: user.status,
+        }
+      ),
+    };
+  }
+
+  return {
+    ok: true,
+    user,
+  };
+}
+
 export async function registerWorkspaceRoutes(
   app: FastifyInstance,
   authService: AuthService,
   workspaceService: WorkspaceService
 ) {
   app.get('/workspace/apps', async (request, reply) => {
-    const sessionToken = readBearerToken(request.headers.authorization);
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
 
-    if (!sessionToken) {
-      reply.code(401);
-      return buildErrorResponse(
-        'WORKSPACE_UNAUTHORIZED',
-        'A valid session token is required to access the workspace.'
-      );
-    }
-
-    const user = await authService.getUserBySessionToken(sessionToken);
-
-    if (!user) {
-      reply.code(401);
-      return buildErrorResponse(
-        'WORKSPACE_UNAUTHORIZED',
-        'The current workspace session is missing or has expired.'
-      );
-    }
-
-    if (user.status !== 'active') {
-      reply.code(403);
-      return buildErrorResponse(
-        'WORKSPACE_FORBIDDEN',
-        'Only active users can enter the apps workspace.',
-        {
-          status: user.status,
-        }
-      );
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
     }
 
     const response: WorkspaceCatalogResponse = {
       ok: true,
-      data: await workspaceService.getCatalogForUser(user),
+      data: await workspaceService.getCatalogForUser(access.user),
+    };
+
+    return response;
+  });
+
+  app.get('/workspace/preferences', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const response: WorkspacePreferencesResponse = {
+      ok: true,
+      data: await workspaceService.getPreferencesForUser(access.user),
+    };
+
+    return response;
+  });
+
+  app.put('/workspace/preferences', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const body = (request.body ?? {}) as Partial<WorkspacePreferencesUpdateRequest>;
+
+    if (
+      !isStringArray(body.favoriteAppIds) ||
+      !isStringArray(body.recentAppIds) ||
+      !isNullableString(body.defaultActiveGroupId)
+    ) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace preferences require favorite/recent app id arrays and a nullable default active group id.'
+      );
+    }
+
+    const response: WorkspacePreferencesResponse = {
+      ok: true,
+      data: await workspaceService.updatePreferencesForUser(access.user, {
+        favoriteAppIds: body.favoriteAppIds,
+        recentAppIds: body.recentAppIds,
+        defaultActiveGroupId: body.defaultActiveGroupId,
+      }),
+    };
+
+    return response;
+  });
+
+  app.post('/workspace/apps/launch', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const body = (request.body ?? {}) as Partial<WorkspaceAppLaunchRequest>;
+    const appId = body.appId?.trim();
+    const activeGroupId = body.activeGroupId?.trim();
+
+    if (!appId || !activeGroupId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace app launch requires an app id and active group id.'
+      );
+    }
+
+    const result = await workspaceService.launchAppForUser(access.user, {
+      appId,
+      activeGroupId,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceAppLaunchResponse = {
+      ok: true,
+      data: result.data,
     };
 
     return response;

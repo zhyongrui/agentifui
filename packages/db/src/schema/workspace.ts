@@ -10,7 +10,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
-import { groups, tenants } from './core.js';
+import { groups, tenants, users } from './core.js';
 
 export const workspaceAppKindEnum = pgEnum('workspace_app_kind', [
   'chat',
@@ -19,6 +19,9 @@ export const workspaceAppKindEnum = pgEnum('workspace_app_kind', [
   'governance',
 ]);
 export const workspaceAppStatusEnum = pgEnum('workspace_app_status', ['ready', 'beta']);
+export const workspaceAppLaunchStatusEnum = pgEnum('workspace_app_launch_status', [
+  'handoff_ready',
+]);
 
 export const workspaceApps = pgTable(
   'workspace_apps',
@@ -71,5 +74,58 @@ export const workspaceGroupAppGrants = pgTable(
     workspaceGroupAppGrantTenantIndex: index('workspace_group_app_grants_tenant_idx').on(
       table.tenantId
     ),
+  })
+);
+
+export const workspaceUserPreferences = pgTable(
+  'workspace_user_preferences',
+  {
+    userId: varchar('user_id', { length: 120 })
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    favoriteAppIds: jsonb('favorite_app_ids').$type<string[]>().notNull().default([]),
+    recentAppIds: jsonb('recent_app_ids').$type<string[]>().notNull().default([]),
+    defaultActiveGroupId: varchar('default_active_group_id', { length: 120 }).references(
+      () => groups.id,
+      { onDelete: 'set null' }
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workspaceUserPreferencesTenantIndex: index('workspace_user_preferences_tenant_idx').on(
+      table.tenantId
+    ),
+  })
+);
+
+export const workspaceAppLaunches = pgTable(
+  'workspace_app_launches',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    appId: varchar('app_id', { length: 120 })
+      .notNull()
+      .references(() => workspaceApps.id, { onDelete: 'cascade' }),
+    attributedGroupId: varchar('attributed_group_id', { length: 120 })
+      .notNull()
+      .references(() => groups.id, { onDelete: 'restrict' }),
+    status: workspaceAppLaunchStatusEnum('status').notNull().default('handoff_ready'),
+    launchUrl: text('launch_url').notNull(),
+    launchedAt: timestamp('launched_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workspaceAppLaunchesTenantIndex: index('workspace_app_launches_tenant_idx').on(table.tenantId),
+    workspaceAppLaunchesUserIndex: index('workspace_app_launches_user_idx').on(table.userId),
+    workspaceAppLaunchesAppIndex: index('workspace_app_launches_app_idx').on(table.appId),
   })
 );

@@ -4,6 +4,7 @@ import type {
   WorkspaceApp,
   WorkspaceCatalog,
   WorkspaceGroup,
+  WorkspacePreferences,
 } from '@agentifui/shared/apps';
 
 type WorkspaceRoleSeed = {
@@ -273,9 +274,18 @@ function buildWorkspaceCatalog(
     apps: WorkspaceApp[];
     groups: WorkspaceGroup[];
     memberGroupIds: string[];
+    preferences?: Pick<
+      WorkspacePreferences,
+      'favoriteAppIds' | 'recentAppIds' | 'defaultActiveGroupId'
+    >;
   }
 ): WorkspaceCatalog {
-  const defaultActiveGroupId = input.memberGroupIds[0]!;
+  const fallbackActiveGroupId = input.memberGroupIds[0]!;
+  const defaultActiveGroupId =
+    input.preferences?.defaultActiveGroupId &&
+    input.memberGroupIds.includes(input.preferences.defaultActiveGroupId)
+      ? input.preferences.defaultActiveGroupId
+      : fallbackActiveGroupId;
   const tenantQuota = buildTenantQuota(user);
   const userQuota = buildUserQuota(user);
 
@@ -284,6 +294,8 @@ function buildWorkspaceCatalog(
     memberGroupIds: input.memberGroupIds,
     defaultActiveGroupId,
     apps: input.apps,
+    favoriteAppIds: input.preferences?.favoriteAppIds ?? [],
+    recentAppIds: input.preferences?.recentAppIds ?? [],
     quotaServiceState: 'available',
     quotaUsagesByGroupId: Object.fromEntries(
       input.memberGroupIds.map(groupId => [groupId, [tenantQuota, buildGroupQuota(groupId), userQuota]])

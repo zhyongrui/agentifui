@@ -1,4 +1,8 @@
-import type { WorkspaceCatalogResponse } from '@agentifui/shared/apps';
+import type {
+  WorkspaceAppLaunchResponse,
+  WorkspaceCatalogResponse,
+  WorkspacePreferencesResponse,
+} from '@agentifui/shared/apps';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from '../app.js';
@@ -157,6 +161,8 @@ describe('workspace routes', () => {
       expect(body.ok).toBe(true);
       expect(body.data.memberGroupIds).toEqual(['grp_product', 'grp_research']);
       expect(body.data.defaultActiveGroupId).toBe('grp_product');
+      expect(body.data.favoriteAppIds).toEqual([]);
+      expect(body.data.recentAppIds).toEqual([]);
       expect(body.data.groups.map(group => group.id)).toEqual(['grp_product', 'grp_research']);
       expect(body.data.apps.map(workspaceApp => workspaceApp.id)).toEqual([
         'app_market_brief',
@@ -207,6 +213,230 @@ describe('workspace routes', () => {
       expect(body.data.memberGroupIds).toEqual(['grp_security']);
       expect(body.data.groups.map(group => group.id)).toEqual(['grp_security']);
       expect(body.data.apps.map(workspaceApp => workspaceApp.id)).toEqual(['app_audit_lens']);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('persists workspace preferences for the active user', async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Developer',
+    });
+
+    const login = authService.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected active login to succeed');
+    }
+
+    try {
+      const updateResponse = await app.inject({
+        method: 'PUT',
+        url: '/workspace/preferences',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          favoriteAppIds: ['app_policy_watch', 'app_unknown', 'app_policy_watch'],
+          recentAppIds: ['app_market_brief', 'app_unknown'],
+          defaultActiveGroupId: 'grp_research',
+        },
+      });
+
+      expect(updateResponse.statusCode).toBe(200);
+      expect(updateResponse.json()).toEqual({
+        ok: true,
+        data: {
+          favoriteAppIds: ['app_policy_watch'],
+          recentAppIds: ['app_market_brief'],
+          defaultActiveGroupId: 'grp_research',
+          updatedAt: expect.any(String),
+        },
+      });
+
+      const preferencesResponse = await app.inject({
+        method: 'GET',
+        url: '/workspace/preferences',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(preferencesResponse.statusCode).toBe(200);
+      expect(preferencesResponse.json()).toEqual({
+        ok: true,
+        data: {
+          favoriteAppIds: ['app_policy_watch'],
+          recentAppIds: ['app_market_brief'],
+          defaultActiveGroupId: 'grp_research',
+          updatedAt: expect.any(String),
+        },
+      } satisfies WorkspacePreferencesResponse);
+
+      const catalogResponse = await app.inject({
+        method: 'GET',
+        url: '/workspace/apps',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(catalogResponse.statusCode).toBe(200);
+
+      const catalogBody = catalogResponse.json() as WorkspaceCatalogResponse;
+
+      expect(catalogBody.data.defaultActiveGroupId).toBe('grp_research');
+      expect(catalogBody.data.favoriteAppIds).toEqual(['app_policy_watch']);
+      expect(catalogBody.data.recentAppIds).toEqual(['app_market_brief']);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('creates a launch handoff for an authorized app and records it as recent', async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Developer',
+    });
+
+    const login = authService.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected active login to succeed');
+    }
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_research',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const body = response.json() as WorkspaceAppLaunchResponse;
+
+      expect(body).toMatchObject({
+        ok: true,
+        data: {
+          status: 'handoff_ready',
+          app: {
+            id: 'app_policy_watch',
+          },
+          attributedGroup: {
+            id: 'grp_research',
+          },
+        },
+      });
+      expect(body.data.launchUrl).toContain('/apps?');
+
+      const catalogResponse = await app.inject({
+        method: 'GET',
+        url: '/workspace/apps',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(catalogResponse.statusCode).toBe(200);
+      expect((catalogResponse.json() as WorkspaceCatalogResponse).data.recentAppIds).toEqual([
+        'app_policy_watch',
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects invalid workspace preference payloads and blocked launches', async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Developer',
+    });
+
+    const login = authService.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected active login to succeed');
+    }
+
+    try {
+      const invalidPreferences = await app.inject({
+        method: 'PUT',
+        url: '/workspace/preferences',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          favoriteAppIds: 'broken',
+          recentAppIds: [],
+          defaultActiveGroupId: 'grp_product',
+        },
+      });
+
+      expect(invalidPreferences.statusCode).toBe(400);
+      expect(invalidPreferences.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'WORKSPACE_INVALID_PAYLOAD',
+        },
+      });
+
+      const blockedLaunch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_product',
+        },
+      });
+
+      expect(blockedLaunch.statusCode).toBe(409);
+      expect(blockedLaunch.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'WORKSPACE_LAUNCH_BLOCKED',
+          details: {
+            reason: 'group_switch_required',
+          },
+        },
+      });
     } finally {
       await app.close();
     }

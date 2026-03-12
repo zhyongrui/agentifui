@@ -86,6 +86,11 @@
   - `rbac_user_roles`
   - role allow / user allow / explicit deny 优先级
   - 过期用户授权自动失效
+- `S1-3` 已完成工作台状态持久化与首版 launch handoff
+  - `workspace_user_preferences`
+  - `workspace_app_launches`
+  - 收藏 / 最近使用 / 默认工作群组已走 Gateway + PostgreSQL
+  - `/workspace/apps/launch` 已返回第一版真实 launch contract
 - 生产构建下的 Gateway 启动链路已修复 workspace package ESM 导出问题
 - 已建立真实浏览器 E2E 回归基线
   - `npm run test:e2e` 会自动拉起隔离的 Web/Gateway 进程
@@ -95,7 +100,7 @@
 当前未完成：
 
 - `S1-2` Manager 授权边界、Break-glass、授权管理写接口和审计收口
-- `S1-3` 的真实应用启动链路、最近使用/收藏持久化和真实会话创建
+- `S1-3` 的真实应用会话创建与 launch handoff 到真实 app surface
 - CI 细化
 
 ## 5. 里程碑计划
@@ -412,13 +417,19 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - `admin*` 邮箱用户已具备 `tenant_admin` 默认角色并获得 `Tenant Control` 入口
   - 过期用户授权会被自动忽略
   - 修复了 Gateway 在生产 `start` 场景下解析 workspace 包到 `src/*.ts` 的问题
+- `R6-A` `S1-3` 工作台状态持久化与启动握手
+  - 新增 `workspace_user_preferences` 与 `workspace_app_launches`
+  - `/workspace/apps` 已返回持久化 favorites / recents / defaultActiveGroupId
+  - `/workspace/preferences` 与 `/workspace/apps/launch` 已具备第一版真实合同
+  - Web `/apps` 已切到真实 preferences / launch 接口，不再以 localStorage 作为状态源
+  - launch 成功会写入持久化 recents 并生成 `handoff_ready` 记录
 
 下一个激活项：
 
-- `R6-A` `S1-3` 工作台状态持久化与启动握手
-  - 持久化最近使用与收藏
-  - 定义工作台进入应用时的真实 launch contract
-  - 为后续真实 conversation/run 创建打通第一条入口
+- `R6-B` `S1-3` 真实应用会话创建
+  - 将 `workspace_app_launches` 接到真实 app/session/run 创建
+  - 让 launchUrl 指向可进入的 app surface，而不是仅停留在 handoff contract
+  - 为 `S2-2 / S2-3` 的真实对话链路准备会话和追踪主键
 
 ### 12.2 Rolling Plan
 
@@ -429,7 +440,7 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 | R3 | `S1-1` MFA (TOTP) | 补 MFA 启用、校验和错误反馈 | `AC-S1-1-06` 进入可验证状态 |
 | R4 | `S1-1` 持久化认证 | 分两步完成：`R4-A` 先替换为 `db` 持久化，`R4-B` 再接入 `better-auth` | 已完成 |
 | R5 | `S1-2` RBAC 持久化 | 分两步完成：`R5-A` 先落工作台目录与群组授权来源，`R5-B` 再补角色/deny/user grant | 已完成第一版 RBAC 可见性判定 |
-| R6 | `S1-3` 启动链路 | 分两步完成：`R6-A` 先持久化收藏/最近使用并定义 launch contract，`R6-B` 再创建真实会话 | `R6-A` 激活中 |
+| R6 | `S1-3` 启动链路 | 分两步完成：`R6-A` 先持久化收藏/最近使用并定义 launch contract，`R6-B` 再创建真实会话 | `R6-A` 已完成，`R6-B` 激活 |
 | R7 | `S2-1` 网关协议 | 定义统一模型调用协议、错误结构和 trace | 网关最小协议可被 web 调用 |
 | R8 | `S2-2` 对话主链路 | 接入流式对话、停止生成和消息状态 | 首条真实对话链路完成 |
 | R9 | `S2-3` Run 追踪 | 让会话、执行和状态追踪闭环 | 运行态可查询、可回放 |
@@ -486,8 +497,12 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 - `S1-3` 已完成第一版 gateway-backed workspace catalog：
   - 目录数据由 gateway 返回
   - 授权应用已由数据库群组授权结果过滤
-  - Web 仅保留收藏、最近使用、搜索和群组本地状态
-- `S1-3` 仍未完成真实启动链路、最近使用/收藏持久化和真实配额服务。
+  - Web 已切到持久化 favorites / recents / default group / launch handoff
+- `S1-3` 已完成 `R6-A`：
+  - 收藏、最近使用和默认工作群组已落 PostgreSQL
+  - `/workspace/apps/launch` 已生成 `handoff_ready` 记录
+  - `/apps` 已通过真实 launch contract 进入启动准备态
+- `S1-3` 仍未完成真实 app surface、真实会话创建和后续 run 追踪衔接。
 - `S1-2` 已具备第一版角色体系、显式 deny 优先级和用户直授例外授权。
 - `S1-2` 仍未完成 Manager 授权路径、Break-glass 和授权写接口。
 

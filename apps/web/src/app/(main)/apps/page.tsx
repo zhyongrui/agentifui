@@ -16,18 +16,15 @@ import { useRouter } from 'next/navigation';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 
 import {
-  readStoredGroupId,
-  readStoredIds,
   recordRecentApp,
   resolveActiveGroupId,
   toggleFavoriteApp,
-  WORKSPACE_ACTIVE_GROUP_KEY,
-  WORKSPACE_FAVORITES_KEY,
-  WORKSPACE_RECENTS_KEY,
-  writeStoredGroupId,
-  writeStoredIds,
 } from '../../../lib/apps-workspace';
-import { fetchWorkspaceCatalog } from '../../../lib/apps-client';
+import {
+  fetchWorkspaceCatalog,
+  launchWorkspaceApp,
+  updateWorkspacePreferences,
+} from '../../../lib/apps-client';
 import { clearAuthSession } from '../../../lib/auth-session';
 import { useProtectedSession } from '../../../lib/use-protected-session';
 import { MainSectionNav } from '../../../components/main-section-nav';
@@ -238,7 +235,6 @@ export default function AppsPage() {
   const [activeGroupId, setActiveGroupId] = useState('');
   const [search, setSearch] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [hasLoadedWorkspaceState, setHasLoadedWorkspaceState] = useState(false);
   const deferredSearch = useDeferredValue(search);
   const groupsById = useMemo(
     () => new Map((workspace?.groups ?? []).map(group => [group.id, group])),
@@ -261,6 +257,9 @@ export default function AppsPage() {
       setWorkspace(null);
       setWorkspaceError(null);
       setNotice(null);
+      setFavoriteIds([]);
+      setRecentIds([]);
+      setActiveGroupId('');
       return;
     }
 
@@ -294,6 +293,15 @@ export default function AppsPage() {
         }
 
         setWorkspace(result.data);
+        setFavoriteIds(result.data.favoriteAppIds);
+        setRecentIds(result.data.recentAppIds);
+        setActiveGroupId(
+          resolveActiveGroupId(
+            result.data.defaultActiveGroupId,
+            result.data.memberGroupIds,
+            result.data.defaultActiveGroupId
+          )
+        );
       })
       .catch(() => {
         if (isCancelled) {
@@ -314,46 +322,6 @@ export default function AppsPage() {
     };
   }, [router, session]);
 
-  useEffect(() => {
-    if (!workspace) {
-      setHasLoadedWorkspaceState(false);
-      return;
-    }
-
-    const storage = window.localStorage;
-
-    setFavoriteIds(readStoredIds(storage, WORKSPACE_FAVORITES_KEY));
-    setRecentIds(readStoredIds(storage, WORKSPACE_RECENTS_KEY));
-    setActiveGroupId(
-      resolveActiveGroupId(
-        readStoredGroupId(storage, WORKSPACE_ACTIVE_GROUP_KEY),
-        workspace.memberGroupIds,
-        workspace.defaultActiveGroupId
-      )
-    );
-    setHasLoadedWorkspaceState(true);
-  }, [workspace]);
-
-  useEffect(() => {
-    if (!workspace || !hasLoadedWorkspaceState) {
-      return;
-    }
-
-    const storage = window.localStorage;
-
-    writeStoredIds(storage, WORKSPACE_FAVORITES_KEY, favoriteIds);
-    writeStoredIds(storage, WORKSPACE_RECENTS_KEY, recentIds);
-    writeStoredGroupId(
-      storage,
-      WORKSPACE_ACTIVE_GROUP_KEY,
-      resolveActiveGroupId(
-        activeGroupId,
-        workspace.memberGroupIds,
-        workspace.defaultActiveGroupId
-      )
-    );
-  }, [activeGroupId, favoriteIds, hasLoadedWorkspaceState, recentIds, workspace]);
-
   if (isLoading) {
     return <p className="lead">Checking your session...</p>;
   }
@@ -370,26 +338,88 @@ export default function AppsPage() {
     return null;
   }
 
+  const currentSession = session;
+  const workspaceState = workspace;
   const currentActiveGroup = activeGroup;
   const quotaUsages =
-    workspace.quotaUsagesByGroupId[currentActiveGroup.id] ??
-    workspace.quotaUsagesByGroupId[workspace.defaultActiveGroupId] ??
+    workspaceState.quotaUsagesByGroupId[currentActiveGroup.id] ??
+    workspaceState.quotaUsagesByGroupId[workspaceState.defaultActiveGroupId] ??
     [];
   const quotaAlerts = listQuotaAlerts(quotaUsages);
   const sections = buildWorkspaceSections({
-    apps: workspace.apps,
-    memberGroupIds: workspace.memberGroupIds,
+    apps: workspaceState.apps,
+    memberGroupIds: workspaceState.memberGroupIds,
     favoriteIds,
     recentIds,
     search: deferredSearch,
   });
-  const hasAdminPreview = workspace.apps.some(app => app.id === 'app_tenant_control');
+  const hasAdminPreview = workspaceState.apps.some(app => app.id === 'app_tenant_control');
 
-  function handleToggleFavorite(appId: string) {
-    setFavoriteIds(currentIds => toggleFavoriteApp(currentIds, appId));
+  function applyWorkspacePreferences(nextPreferences: {
+    favoriteAppIds: string[];
+    recentAppIds: string[];
+    defaultActiveGroupId: string | null;
+  }) {
+    const resolvedDefaultActiveGroupId = resolveActiveGroupId(
+      nextPreferences.defaultActiveGroupId,
+      workspaceState.memberGroupIds,
+      workspaceState.defaultActiveGroupId
+    );
+
+    setFavoriteIds(nextPreferences.favoriteAppIds);
+    setRecentIds(nextPreferences.recentAppIds);
+    setActiveGroupId(resolvedDefaultActiveGroupId);
+    setWorkspace(currentWorkspace =>
+      currentWorkspace
+        ? {
+            ...currentWorkspace,
+            favoriteAppIds: nextPreferences.favoriteAppIds,
+            recentAppIds: nextPreferences.recentAppIds,
+            defaultActiveGroupId: resolvedDefaultActiveGroupId,
+          }
+        : currentWorkspace
+    );
   }
 
-  function handlePrimaryAction(app: WorkspaceApp, guard: AppLaunchGuard) {
+  async function persistWorkspacePreferences(nextPreferences: {
+    favoriteAppIds: string[];
+    recentAppIds: string[];
+    defaultActiveGroupId: string | null;
+  }) {
+    const result = await updateWorkspacePreferences(currentSession.sessionToken, nextPreferences);
+
+    if (!result.ok) {
+      if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+        clearAuthSession(window.sessionStorage);
+        router.replace('/login');
+        return false;
+      }
+
+      if (result.error.code === 'WORKSPACE_FORBIDDEN') {
+        router.replace('/auth/pending');
+        return false;
+      }
+
+      setNotice({
+        tone: 'error',
+        message: result.error.message,
+      });
+      return false;
+    }
+
+    applyWorkspacePreferences(result.data);
+    return true;
+  }
+
+  async function handleToggleFavorite(appId: string) {
+    await persistWorkspacePreferences({
+      favoriteAppIds: toggleFavoriteApp(favoriteIds, appId),
+      recentAppIds: recentIds,
+      defaultActiveGroupId: currentActiveGroup.id,
+    });
+  }
+
+  async function handlePrimaryAction(app: WorkspaceApp, guard: AppLaunchGuard) {
     if (guard.reason === 'group_switch_required') {
       const nextGroupId = guard.eligibleGroupIds[0];
 
@@ -399,7 +429,11 @@ export default function AppsPage() {
 
       const nextGroup = groupsById.get(nextGroupId);
 
-      setActiveGroupId(nextGroupId);
+      await persistWorkspacePreferences({
+        favoriteAppIds: favoriteIds,
+        recentAppIds: recentIds,
+        defaultActiveGroupId: nextGroupId,
+      });
       setNotice({
         tone: 'info',
         message: `工作群组已切换到 ${nextGroup?.name ?? nextGroupId}，可以重新发起应用启动。`,
@@ -415,10 +449,46 @@ export default function AppsPage() {
       return;
     }
 
-    setRecentIds(currentIds => recordRecentApp(currentIds, app.id));
+    const result = await launchWorkspaceApp(currentSession.sessionToken, {
+      appId: app.id,
+      activeGroupId: currentActiveGroup.id,
+    });
+
+    if (!result.ok) {
+      if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+        clearAuthSession(window.sessionStorage);
+        router.replace('/login');
+        return;
+      }
+
+      if (result.error.code === 'WORKSPACE_FORBIDDEN') {
+        router.replace('/auth/pending');
+        return;
+      }
+
+      setNotice({
+        tone: 'error',
+        message: result.error.message,
+      });
+      return;
+    }
+
+    const nextRecentIds = recordRecentApp(recentIds, app.id);
+
+    setRecentIds(nextRecentIds);
+    setActiveGroupId(result.data.attributedGroup.id);
+    setWorkspace(currentWorkspace =>
+      currentWorkspace
+        ? {
+            ...currentWorkspace,
+            recentAppIds: nextRecentIds,
+            defaultActiveGroupId: result.data.attributedGroup.id,
+          }
+        : currentWorkspace
+    );
     setNotice({
       tone: 'success',
-      message: `${app.name} 已进入启动准备态。当前配额将归因到 ${currentActiveGroup.name}，真实会话入口会在 S2-2 接入。`,
+      message: `${result.data.app.name} 已进入启动准备态。Handoff 已创建，当前配额归因到 ${result.data.attributedGroup.name}，真实会话入口会在 R6-B / S2-2 接入。`,
     });
   }
 
@@ -431,14 +501,14 @@ export default function AppsPage() {
           <span className="eyebrow">S1-3 Workspace</span>
           <h1>Apps workspace</h1>
           <p className="lead">
-            欢迎回来，{session.user.displayName}。这里已经改为由 Gateway 返回真实工作台目录，前端仅保留收藏、最近使用、搜索和当前群组切换等本地交互状态。
+            欢迎回来，{session.user.displayName}。这里现在由 Gateway 返回真实工作台目录，并持久化收藏、最近使用、默认工作群组和首版 launch handoff。
           </p>
         </div>
         <div className="workspace-badges">
-          <span className="workspace-badge">{workspace.apps.length} 个授权应用</span>
+          <span className="workspace-badge">{workspaceState.apps.length} 个授权应用</span>
           <span className="workspace-badge">当前群组: {currentActiveGroup.name}</span>
           <span className="workspace-badge">
-            目录时间: {new Date(workspace.generatedAt).toLocaleString()}
+            目录时间: {new Date(workspaceState.generatedAt).toLocaleString()}
           </span>
           <span className="workspace-badge">安全入口: Security / MFA</span>
         </div>
@@ -449,10 +519,16 @@ export default function AppsPage() {
           <span>Working group</span>
           <select
             value={currentActiveGroup.id}
-            onChange={event => setActiveGroupId(event.target.value)}
+            onChange={event => {
+              void persistWorkspacePreferences({
+                favoriteAppIds: favoriteIds,
+                recentAppIds: recentIds,
+                defaultActiveGroupId: event.target.value,
+              });
+            }}
           >
-            {workspace.groups
-              .filter(group => workspace.memberGroupIds.includes(group.id))
+            {workspaceState.groups
+              .filter(group => workspaceState.memberGroupIds.includes(group.id))
               .map(group => (
                 <option key={group.id} value={group.id}>
                   {group.name}
@@ -472,7 +548,7 @@ export default function AppsPage() {
         </label>
       </div>
 
-      {workspace.quotaServiceState === 'degraded' ? (
+      {workspaceState.quotaServiceState === 'degraded' ? (
         <div className="notice info">
           配额服务当前由 Gateway 标记为降级状态。应用目录仍然可浏览，但新启动会被统一暂停，这一行为对齐 `AC-S1-3-B01`。
         </div>
@@ -521,10 +597,14 @@ export default function AppsPage() {
         favoriteIds={favoriteIds}
         groupsById={groupsById}
         quotaUsages={quotaUsages}
-        quotaServiceState={workspace.quotaServiceState}
-        memberGroupIds={workspace.memberGroupIds}
-        onToggleFavorite={handleToggleFavorite}
-        onPrimaryAction={handlePrimaryAction}
+        quotaServiceState={workspaceState.quotaServiceState}
+        memberGroupIds={workspaceState.memberGroupIds}
+        onToggleFavorite={appId => {
+          void handleToggleFavorite(appId);
+        }}
+        onPrimaryAction={(app, guard) => {
+          void handlePrimaryAction(app, guard);
+        }}
         emptyMessage="还没有最近使用记录。先从下面的应用目录里打开一个应用。"
       />
 
@@ -536,10 +616,14 @@ export default function AppsPage() {
         favoriteIds={favoriteIds}
         groupsById={groupsById}
         quotaUsages={quotaUsages}
-        quotaServiceState={workspace.quotaServiceState}
-        memberGroupIds={workspace.memberGroupIds}
-        onToggleFavorite={handleToggleFavorite}
-        onPrimaryAction={handlePrimaryAction}
+        quotaServiceState={workspaceState.quotaServiceState}
+        memberGroupIds={workspaceState.memberGroupIds}
+        onToggleFavorite={appId => {
+          void handleToggleFavorite(appId);
+        }}
+        onPrimaryAction={(app, guard) => {
+          void handlePrimaryAction(app, guard);
+        }}
         emptyMessage="还没有收藏应用。你可以在任何应用卡片上点击“收藏”。"
       />
 
@@ -551,10 +635,14 @@ export default function AppsPage() {
         favoriteIds={favoriteIds}
         groupsById={groupsById}
         quotaUsages={quotaUsages}
-        quotaServiceState={workspace.quotaServiceState}
-        memberGroupIds={workspace.memberGroupIds}
-        onToggleFavorite={handleToggleFavorite}
-        onPrimaryAction={handlePrimaryAction}
+        quotaServiceState={workspaceState.quotaServiceState}
+        memberGroupIds={workspaceState.memberGroupIds}
+        onToggleFavorite={appId => {
+          void handleToggleFavorite(appId);
+        }}
+        onPrimaryAction={(app, guard) => {
+          void handlePrimaryAction(app, guard);
+        }}
         emptyMessage="没有匹配的应用，换个关键词试试。"
       />
     </div>

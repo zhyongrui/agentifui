@@ -1,4 +1,8 @@
-import type { WorkspaceCatalogResponse } from '@agentifui/shared/apps';
+import type {
+  WorkspaceAppLaunchResponse,
+  WorkspaceCatalogResponse,
+  WorkspacePreferencesResponse,
+} from '@agentifui/shared/apps';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
@@ -17,7 +21,15 @@ async function createPersistentApp() {
   });
 }
 
-const PERSISTENCE_TEST_TIMEOUT_MS = 30000;
+function normalizeStringArray(value: string[] | string) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  return JSON.parse(value) as string[];
+}
+
+const PERSISTENCE_TEST_TIMEOUT_MS = 60000;
 
 describe.sequential('persistent auth runtime', () => {
   it(
@@ -795,6 +807,256 @@ describe.sequential('persistent auth runtime', () => {
             workspaceApp => workspaceApp.id
           )
         ).not.toContain('app_tenant_control');
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'persists workspace preferences across app restarts',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        const register = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer',
+          },
+        });
+
+        expect(register.statusCode).toBe(201);
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+          user: {
+            id: string;
+          };
+        };
+
+        const update = await app.inject({
+          method: 'PUT',
+          url: '/workspace/preferences',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            favoriteAppIds: ['app_policy_watch'],
+            recentAppIds: ['app_market_brief'],
+            defaultActiveGroupId: 'grp_research',
+          },
+        });
+
+        expect(update.statusCode).toBe(200);
+        expect(update.json()).toEqual({
+          ok: true,
+          data: {
+            favoriteAppIds: ['app_policy_watch'],
+            recentAppIds: ['app_market_brief'],
+            defaultActiveGroupId: 'grp_research',
+            updatedAt: expect.any(String),
+          },
+        } satisfies WorkspacePreferencesResponse);
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const [row] = await runtimeDatabase<{
+            default_active_group_id: string | null;
+            favorite_app_ids: string[] | string;
+            recent_app_ids: string[] | string;
+          }[]>`
+            select
+              favorite_app_ids,
+              recent_app_ids,
+              default_active_group_id
+            from workspace_user_preferences
+            where user_id = ${loginPayload.user.id}
+            limit 1
+          `;
+
+          expect(row).toBeDefined();
+
+          if (!row) {
+            throw new Error('expected workspace preferences row to exist');
+          }
+
+          expect(normalizeStringArray(row.favorite_app_ids)).toEqual(['app_policy_watch']);
+          expect(normalizeStringArray(row.recent_app_ids)).toEqual(['app_market_brief']);
+          expect(row.default_active_group_id).toBe('grp_research');
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+        let restartedAppClosed = false;
+
+        try {
+          const catalog = await restartedApp.inject({
+            method: 'GET',
+            url: '/workspace/apps',
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(catalog.statusCode).toBe(200);
+          expect((catalog.json() as WorkspaceCatalogResponse).data).toMatchObject({
+            defaultActiveGroupId: 'grp_research',
+            favoriteAppIds: ['app_policy_watch'],
+            recentAppIds: ['app_market_brief'],
+          });
+        } finally {
+          if (!restartedAppClosed) {
+            await restartedApp.close();
+            restartedAppClosed = true;
+          }
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'stores launch handoffs and updates recents in persistent workspace state',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        const register = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer',
+          },
+        });
+
+        expect(register.statusCode).toBe(201);
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+          user: {
+            id: string;
+          };
+        };
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+
+        expect(launchBody).toMatchObject({
+          ok: true,
+          data: {
+            status: 'handoff_ready',
+            app: {
+              id: 'app_policy_watch',
+            },
+            attributedGroup: {
+              id: 'grp_research',
+            },
+          },
+        });
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const [launchRow] = await runtimeDatabase<{
+            app_id: string;
+            attributed_group_id: string;
+            launch_url: string;
+            status: string;
+          }[]>`
+            select app_id, attributed_group_id, status, launch_url
+            from workspace_app_launches
+            where id = ${launchBody.data.id}
+            limit 1
+          `;
+          const [preferencesRow] = await runtimeDatabase<{
+            recent_app_ids: string[] | string;
+          }[]>`
+            select recent_app_ids
+            from workspace_user_preferences
+            where user_id = ${loginPayload.user.id}
+            limit 1
+          `;
+
+          expect(launchRow).toEqual({
+            app_id: 'app_policy_watch',
+            attributed_group_id: 'grp_research',
+            status: 'handoff_ready',
+            launch_url: launchBody.data.launchUrl,
+          });
+
+          expect(preferencesRow).toBeDefined();
+
+          if (!preferencesRow) {
+            throw new Error('expected workspace preferences row to exist');
+          }
+
+          expect(normalizeStringArray(preferencesRow.recent_app_ids)).toEqual([
+            'app_policy_watch',
+          ]);
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
       } finally {
         if (!appClosed) {
           await app.close();

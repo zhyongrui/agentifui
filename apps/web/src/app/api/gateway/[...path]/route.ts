@@ -81,3 +81,12 @@ export async function POST(
 ) {
   return proxyGatewayRequest(request, context);
 }
+
+export async function PUT(
+  request: NextRequest,
+  context: {
+    params: Promise<{ path: string[] }>;
+  }
+) {
+  return proxyGatewayRequest(request, context);
+}

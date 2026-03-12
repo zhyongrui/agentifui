@@ -61,6 +61,8 @@ export type WorkspaceCatalog = {
   memberGroupIds: string[];
   defaultActiveGroupId: string;
   apps: WorkspaceApp[];
+  favoriteAppIds: string[];
+  recentAppIds: string[];
   quotaServiceState: QuotaServiceState;
   quotaUsagesByGroupId: Record<string, QuotaUsage[]>;
   generatedAt: string;
@@ -71,7 +73,54 @@ export type WorkspaceCatalogResponse = {
   data: WorkspaceCatalog;
 };
 
-export type WorkspaceErrorCode = 'WORKSPACE_UNAUTHORIZED' | 'WORKSPACE_FORBIDDEN';
+export type WorkspacePreferences = {
+  favoriteAppIds: string[];
+  recentAppIds: string[];
+  defaultActiveGroupId: string | null;
+  updatedAt: string | null;
+};
+
+export type WorkspacePreferencesUpdateRequest = {
+  favoriteAppIds: string[];
+  recentAppIds: string[];
+  defaultActiveGroupId: string | null;
+};
+
+export type WorkspacePreferencesResponse = {
+  ok: true;
+  data: WorkspacePreferences;
+};
+
+export type WorkspaceAppLaunchRequest = {
+  appId: string;
+  activeGroupId: string;
+};
+
+export type WorkspaceAppLaunchStatus = 'handoff_ready';
+
+export type WorkspaceAppLaunch = {
+  id: string;
+  status: WorkspaceAppLaunchStatus;
+  launchUrl: string;
+  launchedAt: string;
+  app: Pick<
+    WorkspaceApp,
+    'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode' | 'launchCost'
+  >;
+  attributedGroup: WorkspaceGroup;
+};
+
+export type WorkspaceAppLaunchResponse = {
+  ok: true;
+  data: WorkspaceAppLaunch;
+};
+
+export type WorkspaceErrorCode =
+  | 'WORKSPACE_UNAUTHORIZED'
+  | 'WORKSPACE_FORBIDDEN'
+  | 'WORKSPACE_INVALID_PAYLOAD'
+  | 'WORKSPACE_NOT_FOUND'
+  | 'WORKSPACE_LAUNCH_BLOCKED';
 
 export type WorkspaceErrorResponse = {
   ok: false;
