@@ -80,6 +80,7 @@ export const users = pgTable(
     displayName: varchar('display_name', { length: 120 }).notNull(),
     status: userStatusEnum('status').notNull().default('pending'),
     passwordHash: text('password_hash'),
+    image: text('image'),
     failedLoginCount: integer('failed_login_count').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     isEmailVerified: boolean('is_email_verified').notNull().default(false),

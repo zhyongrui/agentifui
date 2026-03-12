@@ -9,6 +9,11 @@ export const schemaModules = [
   'audit_events',
   'auth_sessions',
   'auth_challenges',
+  'better_auth_accounts',
+  'better_auth_sessions',
+  'better_auth_verifications',
+  'workspace_apps',
+  'workspace_group_app_grants',
 ] as const;
 
 export type SchemaModule = (typeof schemaModules)[number];

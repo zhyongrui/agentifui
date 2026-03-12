@@ -11,16 +11,23 @@
 
 ## 当前状态
 
-当前仓库已经完成 `M0` 收口，并进入 `S1-1` 的真实认证实现阶段。
+当前仓库已经完成 `M0` 收口，并进入 `S1-2 / S1-3` 的真实授权与工作台落地阶段。
 
 - `apps/web`：已具备 `(auth)`、`(main)`、`(admin)` 路由骨架，以及 `pending`、`invite accept`、`security` 占位页
-- `apps/gateway`：已具备插件化入口、环境配置、健康检查，以及 DB-backed 的 `/auth/*` 认证、MFA、邀请和审计链路
+- `apps/gateway`：已具备插件化入口、环境配置、健康检查，以及 DB-backed 的 `/auth/*` 认证、MFA、邀请、审计和工作台授权链路
 - `packages/shared`：已具备 auth DTO、错误码和密码策略校验
 - `packages/ui`：共享 UI 包占位
-- `packages/db`：已具备 schema、迁移目录、运行时连接封装和 `db:reset` / `db:migrate` 脚本
+- `packages/db`：已具备 schema、迁移目录、运行时连接封装和 `db:reset` / `db:migrate` 脚本，包含 better-auth 与工作台授权表
 - `docs/plans/PHASE1_DEVELOPMENT_PLAN.md`：基于设计文档整理的实施计划
 - `docs/guides/S1-1_KICKOFF.md`：S1-1 开发切入清单
 - `docs/dev-log/`：按天记录的开发日志
+
+当前已落地的关键能力：
+
+- better-auth 已作为网关内部认证内核接管密码校验、会话创建、会话查找和登出撤销，现有 `/auth/*` 合同保持不变
+- `/workspace/apps` 已改为 PostgreSQL-backed 授权目录，不再依赖纯内存授权映射
+- 默认工作群组成员关系会在用户首次进入工作台时落库，普通用户与安全用户会看到不同的应用集合
+- Web 端继续通过同源 `/api/gateway/*` 代理访问网关，适配本机和公网预览
 
 ## 快速开始
 
@@ -35,6 +42,12 @@ npm run dev
 
 - Web: `http://localhost:3000`
 - Gateway: `http://localhost:4000/health`
+
+本地数据库默认使用：
+
+```bash
+DATABASE_URL=postgresql://agentifui:agentifui@localhost:5432/agentifui
+```
 
 测试：
 
@@ -53,6 +66,6 @@ npm run db:reset
 
 ## 建议的下一步
 
-1. 在 `apps/gateway` 的持久化认证边界上接入 `better-auth`，收口 `R4-B`。
-2. 在 `S1-2` 开始固化 RBAC 的持久化来源，替换工作台当前的内存授权映射。
-3. 在 `S1-3` 继续推进真实应用启动链路和真实会话创建。
+1. 在 `S1-2` 继续落地角色、显式 allow/deny 和用户直授模型，收口真正的 RBAC 判定。
+2. 在 `S1-3` 继续推进真实应用启动链路、最近使用/收藏持久化和真实会话创建。
+3. 在 `S2-1` 启动统一网关协议、Trace ID 和错误结构收口。

@@ -18,13 +18,7 @@ import type {
   SsoCallbackResponse,
 } from '@agentifui/shared/auth';
 import { validatePassword } from '@agentifui/shared/auth';
-import {
-  createHash,
-  randomBytes,
-  randomUUID,
-  scryptSync,
-  timingSafeEqual,
-} from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type {
   AuthFailure,
@@ -33,6 +27,8 @@ import type {
   AuthServiceOptions,
   SeedInvitationResult,
 } from './auth-service.js';
+import type { BetterAuthCore } from './better-auth-core.js';
+import { hashPassword, verifyPassword } from './password-hash.js';
 import { createOtpAuthUri, generateTotpSecret, verifyTotpCode } from './totp-service.js';
 
 const MFA_ISSUER = 'AgentifUI';
@@ -97,30 +93,6 @@ function toIso(value: Date | string | null) {
   }
 
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
-function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString('hex');
-  const digest = scryptSync(password, salt, 64).toString('hex');
-
-  return `${salt}:${digest}`;
-}
-
-function verifyPassword(password: string, storedHash: string): boolean {
-  const [salt, digest] = storedHash.split(':');
-
-  if (!salt || !digest) {
-    return false;
-  }
-
-  const derived = scryptSync(password, salt, 64);
-  const expected = Buffer.from(digest, 'hex');
-
-  if (derived.length !== expected.length) {
-    return false;
-  }
-
-  return timingSafeEqual(derived, expected);
 }
 
 function hashToken(value: string) {
@@ -321,7 +293,88 @@ async function insertAuthIdentity(
   `;
 }
 
-async function issueSession(database: DatabaseClient, user: UserRow) {
+async function upsertCredentialAccount(
+  database: DatabaseClient,
+  input: {
+    passwordHash: string;
+    userId: string;
+  }
+) {
+  await database`
+    insert into better_auth_accounts (
+      id,
+      account_id,
+      provider_id,
+      user_id,
+      access_token,
+      refresh_token,
+      id_token,
+      access_token_expires_at,
+      refresh_token_expires_at,
+      scope,
+      password,
+      created_at,
+      updated_at
+    )
+    values (
+      ${randomUUID()},
+      ${input.userId},
+      'credential',
+      ${input.userId},
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      ${input.passwordHash},
+      now(),
+      now()
+    )
+    on conflict (provider_id, account_id) do update
+    set user_id = excluded.user_id,
+        password = excluded.password,
+        updated_at = now()
+  `;
+}
+
+async function verifyCredentialPassword(
+  user: UserRow,
+  password: string,
+  betterAuthCore?: BetterAuthCore
+) {
+  if (betterAuthCore) {
+    const isValid = await betterAuthCore.verifyCredentialPassword({
+      userId: user.id,
+      password,
+    });
+
+    if (isValid !== null) {
+      return isValid;
+    }
+  }
+
+  if (!user.password_hash) {
+    return false;
+  }
+
+  return verifyPassword(password, user.password_hash);
+}
+
+async function issueSession(
+  database: DatabaseClient,
+  user: UserRow,
+  betterAuthCore?: BetterAuthCore
+) {
+  if (betterAuthCore) {
+    const session = await betterAuthCore.createSession(user.id);
+
+    return {
+      sessionToken: session.token,
+      user: toAuthUser(user),
+    };
+  }
+
   const sessionToken = randomUUID();
 
   await database`
@@ -351,7 +404,7 @@ async function issueSession(database: DatabaseClient, user: UserRow) {
   };
 }
 
-async function finalizeSuccessfulLogin(database: DatabaseClient, userId: string) {
+async function finalizeSuccessfulLoginState(database: DatabaseClient, userId: string) {
   const [user] = await database<UserRow[]>`
     update users
     set failed_login_count = 0,
@@ -376,7 +429,39 @@ async function finalizeSuccessfulLogin(database: DatabaseClient, userId: string)
     throw new Error(`Unable to finalize login for missing user ${userId}.`);
   }
 
-  return issueSession(database, user);
+  return user;
+}
+
+function toAuthUserFromSessionLookup(
+  sessionLookup: Awaited<ReturnType<BetterAuthCore['findSession']>>
+): AuthUser | null {
+  if (!sessionLookup) {
+    return null;
+  }
+
+  const user = sessionLookup.user as {
+    createdAt: Date;
+    email: string;
+    id: string;
+    lastLoginAt?: Date | null;
+    name: string;
+    status?: AuthUser['status'];
+    tenantId?: string;
+  };
+
+  if (!user.tenantId || !user.status) {
+    return null;
+  }
+
+  return {
+    id: user.id,
+    tenantId: user.tenantId,
+    email: user.email,
+    displayName: user.name,
+    status: user.status,
+    createdAt: user.createdAt.toISOString(),
+    lastLoginAt: user.lastLoginAt ? user.lastLoginAt.toISOString() : null,
+  };
 }
 
 async function createChallenge(
@@ -425,7 +510,9 @@ async function createChallenge(
 
 export function createPersistentAuthService(
   database: DatabaseClient,
-  options: AuthServiceOptions
+  options: AuthServiceOptions & {
+    betterAuthCore?: BetterAuthCore;
+  }
 ): AuthService {
   return {
     async register(input: RegisterRequest) {
@@ -459,47 +546,62 @@ export function createPersistentAuthService(
       const displayName =
         input.displayName?.trim() || email.split('@')[0] || 'AgentifUI User';
 
-      const [user] = await database<UserRow[]>`
-        insert into users (
-          id,
-          tenant_id,
-          email,
-          display_name,
-          status,
-          password_hash,
-          failed_login_count,
-          locked_until,
-          is_email_verified,
-          last_login_at,
-          created_at,
-          updated_at
-        )
-        values (
-          ${userId},
-          ${options.defaultTenantId},
-          ${email},
-          ${displayName},
-          'active',
-          ${hashPassword(input.password)},
-          0,
-          null,
-          false,
-          null,
-          now(),
-          now()
-        )
-        returning
-          id,
-          tenant_id,
-          email,
-          display_name,
-          status,
-          password_hash,
-          failed_login_count,
-          locked_until,
-          last_login_at,
-          created_at
-      `;
+      const passwordHash = hashPassword(input.password);
+      const [user] = await database.begin(async transaction => {
+        const tx = asDatabaseClient(transaction);
+        const [createdUser] = await tx<UserRow[]>`
+          insert into users (
+            id,
+            tenant_id,
+            email,
+            display_name,
+            status,
+            password_hash,
+            failed_login_count,
+            locked_until,
+            is_email_verified,
+            last_login_at,
+            created_at,
+            updated_at
+          )
+          values (
+            ${userId},
+            ${options.defaultTenantId},
+            ${email},
+            ${displayName},
+            'active',
+            ${passwordHash},
+            0,
+            null,
+            false,
+            null,
+            now(),
+            now()
+          )
+          returning
+            id,
+            tenant_id,
+            email,
+            display_name,
+            status,
+            password_hash,
+            failed_login_count,
+            locked_until,
+            last_login_at,
+            created_at
+        `;
+
+        if (!createdUser) {
+          throw new Error('User registration did not return a persisted record.');
+        }
+
+        await upsertCredentialAccount(tx, {
+          userId: createdUser.id,
+          passwordHash,
+        });
+
+        return [createdUser];
+      });
 
       if (!user) {
         throw new Error('User registration did not return a persisted record.');
@@ -577,6 +679,7 @@ export function createPersistentAuthService(
       const displayName =
         input.displayName?.trim() || email.split('@')[0] || 'AgentifUI User';
 
+      const passwordHash = hashPassword(input.password);
       const [user] = await database.begin(async transaction => {
         const tx = asDatabaseClient(transaction);
         const [createdUser] = await tx<UserRow[]>`
@@ -600,7 +703,7 @@ export function createPersistentAuthService(
             ${email},
             ${displayName},
             'active',
-            ${hashPassword(input.password)},
+            ${passwordHash},
             0,
             null,
             false,
@@ -632,6 +735,11 @@ export function createPersistentAuthService(
           where id = ${invitation.id}
         `;
 
+        await upsertCredentialAccount(tx, {
+          userId: createdUser.id,
+          passwordHash,
+        });
+
         await insertAuthIdentity(tx, {
           tenantId: createdUser.tenant_id,
           userId: createdUser.id,
@@ -658,7 +766,7 @@ export function createPersistentAuthService(
       const email = normalizeEmail(input.email);
       const user = await findUserByEmail(database, email);
 
-      if (!user || !user.password_hash) {
+      if (!user) {
         return fail(
           401,
           'AUTH_INVALID_CREDENTIALS',
@@ -674,7 +782,7 @@ export function createPersistentAuthService(
         );
       }
 
-      if (!verifyPassword(input.password, user.password_hash)) {
+      if (!(await verifyCredentialPassword(user, input.password, options.betterAuthCore))) {
         const nextFailureCount = user.failed_login_count + 1;
 
         if (nextFailureCount >= options.lockoutThreshold) {
@@ -737,10 +845,15 @@ export function createPersistentAuthService(
         );
       }
 
-      const data = await database.begin(async transaction => {
-        const tx = asDatabaseClient(transaction);
-        return finalizeSuccessfulLogin(tx, user.id);
-      });
+      if (user.password_hash) {
+        await upsertCredentialAccount(database, {
+          userId: user.id,
+          passwordHash: user.password_hash,
+        });
+      }
+
+      const updatedUser = await finalizeSuccessfulLoginState(database, user.id);
+      const data = await issueSession(database, updatedUser, options.betterAuthCore);
 
       return {
         ok: true,
@@ -779,7 +892,7 @@ export function createPersistentAuthService(
           );
         }
 
-        const data = await database.begin(async transaction => {
+        const updatedUser = await database.begin(async transaction => {
           const tx = asDatabaseClient(transaction);
 
           await insertAuthIdentity(tx, {
@@ -790,18 +903,17 @@ export function createPersistentAuthService(
             email,
           });
 
-          const session = await finalizeSuccessfulLogin(tx, existingUser.id);
-
-          return {
-            ...session,
-            providerId: input.providerId,
-            createdViaJit: false,
-          };
+          return finalizeSuccessfulLoginState(tx, existingUser.id);
         });
+        const session = await issueSession(database, updatedUser, options.betterAuthCore);
 
         return {
           ok: true,
-          data,
+          data: {
+            ...session,
+            providerId: input.providerId,
+            createdViaJit: false,
+          },
         };
       }
 
@@ -812,10 +924,10 @@ export function createPersistentAuthService(
       const displayName =
         input.displayName?.trim() || email.split('@')[0] || 'AgentifUI User';
 
-      const data = await database.begin(async transaction => {
+      const user = await database.begin(async transaction => {
         const tx = asDatabaseClient(transaction);
         const userId = randomUUID();
-        const [user] = await tx<UserRow[]>`
+        const [createdUser] = await tx<UserRow[]>`
           insert into users (
             id,
             tenant_id,
@@ -857,34 +969,41 @@ export function createPersistentAuthService(
             created_at
         `;
 
-        if (!user) {
+        if (!createdUser) {
           throw new Error('SSO JIT provisioning did not return a persisted user.');
         }
 
         await insertAuthIdentity(tx, {
-          tenantId: user.tenant_id,
-          userId: user.id,
+          tenantId: createdUser.tenant_id,
+          userId: createdUser.id,
           provider: 'sso',
           providerUserId: `${input.providerId}:${email}`,
           email,
         });
 
-        const session = await issueSession(tx, user);
-
-        return {
-          ...session,
-          providerId: input.providerId,
-          createdViaJit: true,
-        };
+        return createdUser;
       });
+      const session = await issueSession(database, user, options.betterAuthCore);
 
       return {
         ok: true,
-        data,
+        data: {
+          ...session,
+          providerId: input.providerId,
+          createdViaJit: true,
+        },
       };
     },
 
     async revokeSession(sessionToken: string) {
+      if (options.betterAuthCore) {
+        const revoked = await options.betterAuthCore.revokeSession(sessionToken);
+
+        if (revoked) {
+          return true;
+        }
+      }
+
       const rows = await database<{ id: string }[]>`
         update auth_sessions
         set status = 'revoked',
@@ -898,6 +1017,16 @@ export function createPersistentAuthService(
     },
 
     async getUserBySessionToken(sessionToken: string) {
+      if (options.betterAuthCore) {
+        const user = toAuthUserFromSessionLookup(
+          await options.betterAuthCore.findSession(sessionToken)
+        );
+
+        if (user) {
+          return user;
+        }
+      }
+
       const sessionTokenHash = hashToken(sessionToken);
       const [user] = await database<UserRow[]>`
         select
@@ -1142,12 +1271,13 @@ export function createPersistentAuthService(
         return fail(401, 'AUTH_MFA_INVALID_CODE', 'The provided MFA code is invalid.');
       }
 
-      const data = await database.begin(async transaction => {
+      const userAfterLogin = await database.begin(async transaction => {
         const tx = asDatabaseClient(transaction);
 
         await markChallengeConsumed(tx, challenge.id);
-        return finalizeSuccessfulLogin(tx, user.id);
+        return finalizeSuccessfulLoginState(tx, user.id);
       });
+      const data = await issueSession(database, userAfterLogin, options.betterAuthCore);
 
       return {
         ok: true,
@@ -1160,6 +1290,9 @@ export function createPersistentAuthService(
         truncate table
           auth_challenges,
           auth_sessions,
+          better_auth_sessions,
+          better_auth_accounts,
+          better_auth_verifications,
           audit_events,
           mfa_factors,
           invitations,

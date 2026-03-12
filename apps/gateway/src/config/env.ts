@@ -8,6 +8,8 @@ export type GatewayEnv = {
   port: number;
   corsOrigin: boolean | string;
   databaseUrl?: string;
+  betterAuthSecret?: string;
+  betterAuthUrl?: string;
   ssoDomainMap: Record<string, string>;
   defaultTenantId: string;
   defaultSsoUserStatus: SsoJitUserStatus;
@@ -21,6 +23,7 @@ const DEFAULT_TENANT_ID = 'dev-tenant';
 const DEFAULT_SSO_JIT_USER_STATUS: SsoJitUserStatus = 'pending';
 const DEFAULT_AUTH_LOCKOUT_THRESHOLD = 5;
 const DEFAULT_AUTH_LOCKOUT_DURATION_MS = 30 * 60 * 1000;
+const DEFAULT_BETTER_AUTH_SECRET = 'agentifui-dev-secret-change-me';
 
 function parsePort(value: string | undefined): number {
   if (!value) {
@@ -96,16 +99,38 @@ function parseSsoJitUserStatus(value: string | undefined): SsoJitUserStatus {
   throw new Error(`Invalid GATEWAY_SSO_JIT_DEFAULT_STATUS value: ${value}`);
 }
 
+function parseBetterAuthSecret(
+  value: string | undefined,
+  nodeEnv: GatewayEnv['nodeEnv']
+): string {
+  const secret = value?.trim();
+
+  if (secret) {
+    return secret;
+  }
+
+  if (nodeEnv === 'production') {
+    throw new Error('BETTER_AUTH_SECRET is required in production.');
+  }
+
+  return DEFAULT_BETTER_AUTH_SECRET;
+}
+
 export function parseGatewayEnv(source: NodeJS.ProcessEnv): GatewayEnv {
+  const nodeEnv = parseNodeEnv(source.NODE_ENV);
+  const port = parsePort(source.GATEWAY_PORT);
+
   return {
-    nodeEnv: parseNodeEnv(source.NODE_ENV),
+    nodeEnv,
     host: source.GATEWAY_HOST ?? DEFAULT_GATEWAY_HOST,
-    port: parsePort(source.GATEWAY_PORT),
+    port,
     corsOrigin:
       source.GATEWAY_CORS_ORIGIN && source.GATEWAY_CORS_ORIGIN !== 'true'
         ? source.GATEWAY_CORS_ORIGIN
         : true,
     databaseUrl: source.DATABASE_URL?.trim() || undefined,
+    betterAuthSecret: parseBetterAuthSecret(source.BETTER_AUTH_SECRET, nodeEnv),
+    betterAuthUrl: source.BETTER_AUTH_URL?.trim() || `http://127.0.0.1:${port}`,
     ssoDomainMap: parseSsoDomainMap(source.GATEWAY_SSO_DOMAINS),
     defaultTenantId: source.GATEWAY_DEFAULT_TENANT_ID ?? DEFAULT_TENANT_ID,
     defaultSsoUserStatus: parseSsoJitUserStatus(

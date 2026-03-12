@@ -14,8 +14,16 @@ import { registerRootRoutes } from './routes/root.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { createAuditService, type AuditService } from './services/audit-service.js';
 import { createAuthService, type AuthService } from './services/auth-service.js';
+import {
+  createBetterAuthCore,
+  type BetterAuthCore,
+} from './services/better-auth-core.js';
 import { createPersistentAuditService } from './services/persistent-audit-service.js';
 import { createPersistentAuthService } from './services/persistent-auth-service.js';
+import {
+  createPersistentWorkspaceService,
+  ensureWorkspaceCatalogSeed,
+} from './services/persistent-workspace-service.js';
 import {
   createWorkspaceService,
   type WorkspaceService,
@@ -28,6 +36,8 @@ type BuildAppOptions = {
   auditService?: AuditService;
   workspaceService?: WorkspaceService;
 };
+
+const DEFAULT_BETTER_AUTH_SECRET = 'agentifui-dev-secret-change-me';
 
 export async function buildApp(
   env: GatewayEnv,
@@ -54,11 +64,22 @@ export async function buildApp(
         })
       : null);
   const ownsDatabase = Boolean(database && !options.database);
+  let betterAuthCore: BetterAuthCore | null = null;
 
   if (database) {
     await migrateDatabase(database);
     await ensureTenant(database, {
       tenantId: env.defaultTenantId,
+    });
+    await ensureWorkspaceCatalogSeed(database, env.defaultTenantId);
+  }
+
+  if (database && env.databaseUrl && !options.authService) {
+    betterAuthCore = await createBetterAuthCore({
+      baseUrl: env.betterAuthUrl ?? `http://127.0.0.1:${env.port}`,
+      connectionString: env.databaseUrl,
+      defaultTenantId: env.defaultTenantId,
+      secret: env.betterAuthSecret ?? DEFAULT_BETTER_AUTH_SECRET,
     });
   }
 
@@ -66,6 +87,7 @@ export async function buildApp(
     options.authService ??
     (database
       ? createPersistentAuthService(database, {
+          betterAuthCore: betterAuthCore ?? undefined,
           defaultTenantId: env.defaultTenantId,
           defaultSsoUserStatus: env.defaultSsoUserStatus,
           lockoutThreshold: env.authLockoutThreshold,
@@ -80,11 +102,20 @@ export async function buildApp(
   const auditService =
     options.auditService ??
     (database ? createPersistentAuditService(database) : createAuditService());
-  const workspaceService = options.workspaceService ?? createWorkspaceService();
+  const workspaceService =
+    options.workspaceService ??
+    (database ? createPersistentWorkspaceService(database) : createWorkspaceService());
 
   if (ownsDatabase && database) {
     app.addHook('onClose', async () => {
+      if (betterAuthCore) {
+        await betterAuthCore.close();
+      }
       await closeDatabaseClient(database);
+    });
+  } else if (betterAuthCore) {
+    app.addHook('onClose', async () => {
+      await betterAuthCore.close();
     });
   }
 

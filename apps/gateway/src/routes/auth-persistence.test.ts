@@ -49,7 +49,43 @@ describe.sequential('persistent auth runtime', () => {
       });
 
       expect(login.statusCode).toBe(200);
-      const sessionToken = login.json().data.sessionToken as string;
+      const loginPayload = login.json().data as {
+        sessionToken: string;
+        user: {
+          id: string;
+        };
+      };
+      const sessionToken = loginPayload.sessionToken;
+
+      const runtimeDatabase = createPersistentTestDatabase();
+
+      try {
+        const [credentialAccount] = await runtimeDatabase<{
+          account_id: string;
+          provider_id: string;
+        }[]>`
+          select account_id, provider_id
+          from better_auth_accounts
+          where user_id = ${loginPayload.user.id}
+          limit 1
+        `;
+
+        expect(credentialAccount).toMatchObject({
+          account_id: loginPayload.user.id,
+          provider_id: 'credential',
+        });
+
+        const [sessionRow] = await runtimeDatabase<{ token: string }[]>`
+          select token
+          from better_auth_sessions
+          where user_id = ${loginPayload.user.id}
+          limit 1
+        `;
+
+        expect(sessionRow?.token).toBe(sessionToken);
+      } finally {
+        await runtimeDatabase.end({ timeout: 5 });
+      }
 
       const auditBeforeRestart = await app.inject({
         method: 'GET',
@@ -95,6 +131,20 @@ describe.sequential('persistent auth runtime', () => {
         });
 
         expect(logout.statusCode).toBe(200);
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const sessionRows = await runtimeDatabase<{ id: string }[]>`
+            select id
+            from better_auth_sessions
+            where token = ${sessionToken}
+          `;
+
+          expect(sessionRows).toHaveLength(0);
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
 
         const workspaceAfterLogout = await restartedApp.inject({
           method: 'GET',
@@ -317,6 +367,155 @@ describe.sequential('persistent auth runtime', () => {
         await app.close();
       }
     }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'seeds DB-backed workspace memberships and preserves app grants by user segment',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        const developerRegister = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer',
+          },
+        });
+        const securityRegister = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'security-audit@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Security Auditor',
+          },
+        });
+
+        expect(developerRegister.statusCode).toBe(201);
+        expect(securityRegister.statusCode).toBe(201);
+
+        const developerLogin = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+        const securityLogin = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'security-audit@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(developerLogin.statusCode).toBe(200);
+        expect(securityLogin.statusCode).toBe(200);
+
+        const developerPayload = developerLogin.json().data as {
+          sessionToken: string;
+          user: {
+            id: string;
+          };
+        };
+        const securityPayload = securityLogin.json().data as {
+          sessionToken: string;
+          user: {
+            id: string;
+          };
+        };
+
+        const developerWorkspace = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${developerPayload.sessionToken}`,
+          },
+        });
+        const securityWorkspace = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${securityPayload.sessionToken}`,
+          },
+        });
+
+        expect(developerWorkspace.statusCode).toBe(200);
+        expect(developerWorkspace.json().data.memberGroupIds).toEqual([
+          'grp_product',
+          'grp_research',
+        ]);
+        expect(developerWorkspace.json().data.apps.map((workspaceApp: { id: string }) => workspaceApp.id)).toEqual([
+          'app_market_brief',
+          'app_service_copilot',
+          'app_release_radar',
+          'app_policy_watch',
+          'app_runbook_mentor',
+        ]);
+
+        expect(securityWorkspace.statusCode).toBe(200);
+        expect(securityWorkspace.json().data.memberGroupIds).toEqual(['grp_security']);
+        expect(securityWorkspace.json().data.apps.map((workspaceApp: { id: string }) => workspaceApp.id)).toEqual([
+          'app_audit_lens',
+        ]);
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const developerMembershipRows = await runtimeDatabase<{
+            group_id: string;
+            is_primary: boolean;
+          }[]>`
+            select group_id, is_primary
+            from group_members
+            where user_id = ${developerPayload.user.id}
+            order by is_primary desc, created_at asc
+          `;
+          const securityMembershipRows = await runtimeDatabase<{
+            group_id: string;
+            is_primary: boolean;
+          }[]>`
+            select group_id, is_primary
+            from group_members
+            where user_id = ${securityPayload.user.id}
+            order by is_primary desc, created_at asc
+          `;
+
+          expect(developerMembershipRows).toEqual([
+            {
+              group_id: 'grp_product',
+              is_primary: true,
+            },
+            {
+              group_id: 'grp_research',
+              is_primary: false,
+            },
+          ]);
+          expect(securityMembershipRows).toEqual([
+            {
+              group_id: 'grp_security',
+              is_primary: true,
+            },
+          ]);
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
     },
     PERSISTENCE_TEST_TIMEOUT_MS
   );

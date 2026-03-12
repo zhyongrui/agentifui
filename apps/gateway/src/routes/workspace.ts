@@ -72,7 +72,7 @@ export async function registerWorkspaceRoutes(
 
     const response: WorkspaceCatalogResponse = {
       ok: true,
-      data: workspaceService.getCatalogForUser(user),
+      data: await workspaceService.getCatalogForUser(user),
     };
 
     return response;
