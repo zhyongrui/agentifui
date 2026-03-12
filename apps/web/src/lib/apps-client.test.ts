@@ -10,7 +10,6 @@ afterEach(() => {
 
 describe('apps client', () => {
   it('requests the workspace catalog with a bearer token', async () => {
-    vi.stubEnv('NEXT_PUBLIC_GATEWAY_URL', 'https://gateway.example.com');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -31,7 +30,7 @@ describe('apps client', () => {
 
     const result = await fetchWorkspaceCatalog('session-123');
 
-    expect(fetch).toHaveBeenCalledWith('https://gateway.example.com/workspace/apps', {
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/apps', {
       method: 'GET',
       headers: {
         authorization: 'Bearer session-123',

@@ -49,6 +49,8 @@ npm run db:migrate
 npm run db:reset
 ```
 
+公网或远程浏览器访问时，Web 会通过同源 `/api/gateway/*` 代理转发到 `GATEWAY_INTERNAL_URL`，默认是 `http://127.0.0.1:4000`。
+
 ## 建议的下一步
 
 1. 在 `apps/gateway` 的持久化认证边界上接入 `better-auth`，收口 `R4-B`。

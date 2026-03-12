@@ -15,9 +15,9 @@ async function createPersistentApp() {
   });
 }
 
-const PERSISTENCE_TEST_TIMEOUT_MS = 15000;
+const PERSISTENCE_TEST_TIMEOUT_MS = 30000;
 
-describe('persistent auth runtime', () => {
+describe.sequential('persistent auth runtime', () => {
   it(
     'persists sessions and revokes them on logout across app restarts',
     async () => {

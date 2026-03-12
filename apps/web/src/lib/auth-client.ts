@@ -20,10 +20,10 @@ import type {
   SsoDiscoveryResponse,
 } from '@agentifui/shared/auth';
 
-const DEFAULT_GATEWAY_URL = 'http://localhost:4000';
+const GATEWAY_PROXY_BASE_PATH = '/api/gateway';
 
 function getGatewayBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_GATEWAY_URL ?? DEFAULT_GATEWAY_URL;
+  return GATEWAY_PROXY_BASE_PATH;
 }
 
 type AuthClientResult<T> = T | AuthErrorResponse;
