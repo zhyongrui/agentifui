@@ -2,7 +2,9 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationRunsResponse,
   WorkspacePreferencesResponse,
+  WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
 import { describe, expect, it } from 'vitest';
 
@@ -421,11 +423,62 @@ describe('workspace routes', () => {
             id: runId,
             type: 'agent',
             status: 'pending',
+            triggeredFrom: 'app_launch',
             traceId,
             createdAt: expect.any(String),
+            finishedAt: null,
+            elapsedTime: 0,
+            totalTokens: 0,
+            totalSteps: 0,
           },
         },
       } satisfies WorkspaceConversationResponse);
+
+      const runsResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}/runs`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runsResponse.statusCode).toBe(200);
+      expect((runsResponse.json() as WorkspaceConversationRunsResponse).data).toEqual({
+        conversationId,
+        runs: [
+          {
+            id: runId,
+            type: 'agent',
+            status: 'pending',
+            triggeredFrom: 'app_launch',
+            traceId,
+            createdAt: expect.any(String),
+            finishedAt: null,
+            elapsedTime: 0,
+            totalTokens: 0,
+            totalSteps: 0,
+          },
+        ],
+      });
+
+      const runResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/runs/${runId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data).toMatchObject({
+        id: runId,
+        conversationId,
+        status: 'pending',
+        triggeredFrom: 'app_launch',
+        usage: {
+          totalTokens: 0,
+        },
+      });
     } finally {
       await app.close();
     }

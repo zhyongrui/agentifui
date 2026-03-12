@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   fetchWorkspaceConversation,
+  fetchWorkspaceConversationRuns,
   fetchWorkspaceCatalog,
+  fetchWorkspaceRun,
   launchWorkspaceApp,
   updateWorkspacePreferences,
 } from './apps-client.js';
@@ -272,8 +274,13 @@ describe('apps client', () => {
               id: 'run-123',
               type: 'agent',
               status: 'pending',
+              triggeredFrom: 'app_launch',
               traceId: 'trace-123',
               createdAt: '2026-03-12T10:05:00.000Z',
+              finishedAt: null,
+              elapsedTime: 0,
+              totalTokens: 0,
+              totalSteps: 0,
             },
           },
         }),
@@ -296,6 +303,134 @@ describe('apps client', () => {
         id: 'conv-123',
         run: {
           traceId: 'trace-123',
+        },
+      },
+    });
+  });
+
+  it('loads conversation run history from the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            runs: [
+              {
+                id: 'run-456',
+                type: 'agent',
+                status: 'succeeded',
+                triggeredFrom: 'chat_completion',
+                traceId: 'trace-456',
+                createdAt: '2026-03-12T10:10:00.000Z',
+                finishedAt: '2026-03-12T10:10:02.000Z',
+                elapsedTime: 2000,
+                totalTokens: 24,
+                totalSteps: 1,
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceConversationRuns('session-123', 'conv-123');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/conversations/conv-123/runs', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      body: undefined,
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        conversationId: 'conv-123',
+        runs: [
+          {
+            id: 'run-456',
+            traceId: 'trace-456',
+          },
+        ],
+      },
+    });
+  });
+
+  it('loads a single workspace run from the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'run-456',
+            conversationId: 'conv-123',
+            type: 'agent',
+            status: 'succeeded',
+            triggeredFrom: 'chat_completion',
+            traceId: 'trace-456',
+            createdAt: '2026-03-12T10:10:00.000Z',
+            finishedAt: '2026-03-12T10:10:02.000Z',
+            elapsedTime: 2000,
+            totalTokens: 24,
+            totalSteps: 1,
+            app: {
+              id: 'app_market_brief',
+              slug: 'market-brief',
+              name: 'Market Brief',
+              summary: 'summary',
+              kind: 'analysis',
+              status: 'ready',
+              shortCode: 'MB',
+            },
+            activeGroup: {
+              id: 'grp_product',
+              name: 'Product Studio',
+              description: 'desc',
+            },
+            error: null,
+            inputs: {
+              messages: [
+                {
+                  role: 'user',
+                  content: 'hello',
+                },
+              ],
+            },
+            outputs: {
+              assistant: {
+                content: 'world',
+              },
+            },
+            usage: {
+              promptTokens: 8,
+              completionTokens: 16,
+              totalTokens: 24,
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceRun('session-123', 'run-456');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/runs/run-456', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      body: undefined,
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        id: 'run-456',
+        usage: {
+          totalTokens: 24,
         },
       },
     });

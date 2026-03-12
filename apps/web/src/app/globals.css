@@ -626,6 +626,42 @@ button:disabled {
   gap: 14px;
 }
 
+.run-history-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.run-history-list,
+.run-history-detail,
+.run-replay-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.run-history-item {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  color: inherit;
+}
+
+.run-history-item.selected {
+  border-color: rgba(13, 107, 77, 0.32);
+  background: rgba(13, 107, 77, 0.08);
+}
+
+.run-history-item span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
 .chat-empty-state {
   display: grid;
   gap: 8px;
@@ -715,7 +751,8 @@ button:disabled {
   .workspace-toolbar,
   .quota-grid,
   .app-grid,
-  .chat-meta-grid {
+  .chat-meta-grid,
+  .run-history-grid {
     grid-template-columns: 1fr;
   }
 

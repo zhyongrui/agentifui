@@ -15,6 +15,7 @@ type ChatRequestOptions = {
 type ChatCompletionStreamHandlers = {
   onMetadata?: (metadata: {
     conversationId: string;
+    runId: string;
     traceId: string;
   }) => void;
   onChunk?: (chunk: ChatCompletionChunk) => void;
@@ -133,11 +134,13 @@ export async function streamChatCompletion(
       if (event.eventName === 'agentif.metadata') {
         const payload = JSON.parse(event.data) as {
           conversation_id: string;
+          run_id: string;
           trace_id: string;
         };
 
         handlers.onMetadata?.({
           conversationId: payload.conversation_id,
+          runId: payload.run_id,
           traceId: payload.trace_id,
         });
         continue;

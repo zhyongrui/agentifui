@@ -275,6 +275,162 @@ describe('chat routes', () => {
     }
   });
 
+  it('creates a fresh run for the next completion on the same conversation', async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Developer',
+    });
+
+    const login = authService.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected active login to succeed');
+    }
+
+    try {
+      const launch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_research',
+        },
+      });
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+      const initialRunId = launchBody.data.runId;
+
+      if (!conversationId || !initialRunId) {
+        throw new Error('expected launch payload to include conversation and run ids');
+      }
+
+      const firstCompletion = await app.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: 'app_policy_watch',
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: 'user',
+              content: 'Summarize the current policy changes for my group.',
+            },
+          ],
+        },
+      });
+      const firstBody = firstCompletion.json() as ChatCompletionResponse;
+
+      expect(firstBody.id).toBe(initialRunId);
+
+      const secondCompletion = await app.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: 'app_policy_watch',
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: 'user',
+              content: 'Summarize the current policy changes for my group.',
+            },
+            {
+              role: 'assistant',
+              content: firstBody.choices[0]?.message.content ?? '',
+            },
+            {
+              role: 'user',
+              content: 'Now tell me what changed since the previous answer.',
+            },
+          ],
+        },
+      });
+      const secondBody = secondCompletion.json() as ChatCompletionResponse;
+
+      expect(secondCompletion.statusCode).toBe(200);
+      expect(secondBody.id).toEqual(expect.stringMatching(/^run_/));
+      expect(secondBody.id).not.toBe(initialRunId);
+      expect(secondBody.trace_id).not.toBe(launchBody.data.traceId);
+      expect(secondBody.metadata?.run_id).toBe(secondBody.id);
+
+      const runsResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}/runs`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runsResponse.statusCode).toBe(200);
+      expect((runsResponse.json() as { data: { runs: Array<{ id: string }> } }).data.runs).toEqual([
+        expect.objectContaining({
+          id: secondBody.id,
+        }),
+        expect.objectContaining({
+          id: initialRunId,
+        }),
+      ]);
+
+      const runResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/runs/${secondBody.id}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as { data: Record<string, unknown> }).data).toMatchObject({
+        id: secondBody.id,
+        conversationId,
+        status: 'succeeded',
+        triggeredFrom: 'chat_completion',
+        usage: {
+          totalTokens: expect.any(Number),
+        },
+        outputs: {
+          assistant: {
+            content: expect.any(String),
+          },
+        },
+      });
+
+      const conversationResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversationResponse.statusCode).toBe(200);
+      expect((conversationResponse.json() as WorkspaceConversationResponse).data.run).toMatchObject({
+        id: secondBody.id,
+        status: 'succeeded',
+        triggeredFrom: 'chat_completion',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('creates a new conversation when conversation_id is omitted', async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);

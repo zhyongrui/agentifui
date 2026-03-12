@@ -449,11 +449,53 @@ async function resolveConversation(
   };
 }
 
+async function ensureConversationRun(
+  workspaceService: WorkspaceService,
+  user: AuthUser,
+  conversation: WorkspaceConversation,
+  traceId: string
+) {
+  if (
+    conversation.messages.length === 0 &&
+    conversation.run.status === 'pending' &&
+    conversation.run.totalSteps === 0
+  ) {
+    return {
+      ok: true as const,
+      conversation,
+    };
+  }
+
+  const nextRun = await workspaceService.createConversationRunForUser(user, {
+    conversationId: conversation.id,
+    triggeredFrom: 'chat_completion',
+  });
+
+  if (!nextRun.ok) {
+    return {
+      ok: false as const,
+      statusCode: 404,
+      response: buildErrorResponse(traceId, {
+        type: 'not_found_error',
+        code: 'conversation_not_found',
+        message: 'The target workspace conversation could not be found.',
+        param: 'conversation_id',
+      }),
+    };
+  }
+
+  return {
+    ok: true as const,
+    conversation: nextRun.data,
+  };
+}
+
 function buildMetadataEvent(input: {
   conversation: WorkspaceConversation;
 }): string {
   return `event: agentif.metadata\ndata: ${JSON.stringify({
     conversation_id: input.conversation.id,
+    run_id: input.conversation.run.id,
     trace_id: input.conversation.run.traceId,
   })}\n\n`;
 }
@@ -598,6 +640,11 @@ async function* streamCompletionEvents(input: {
           finishReason: 'stop',
           status: wasStopped ? 'stopped' : 'completed',
         },
+        usage: {
+          promptTokens: input.promptTokens,
+          completionTokens,
+          totalTokens: input.promptTokens + completionTokens,
+        },
       },
       elapsedTime: Date.now() - input.startedAt,
       totalTokens: input.promptTokens + completionTokens,
@@ -631,6 +678,7 @@ async function* streamCompletionEvents(input: {
     activeStreams.delete(input.conversation.run.id);
 
     if (!finalized) {
+      const completionTokens = estimateTokens(assistantContent);
       await input.workspaceService.updateConversationRunForUser(input.user, {
         conversationId: input.conversation.id,
         runId: input.conversation.run.id,
@@ -644,6 +692,11 @@ async function* streamCompletionEvents(input: {
             content: assistantContent,
             finishReason: 'stop',
             status: streamState?.stopRequested ? 'stopped' : 'failed',
+          },
+          usage: {
+            promptTokens: input.promptTokens,
+            completionTokens,
+            totalTokens: input.promptTokens + completionTokens,
           },
         },
         error: streamState?.stopRequested ? undefined : 'The streaming response ended unexpectedly.',
@@ -771,7 +824,19 @@ export async function registerChatRoutes(
       return conversationResult.response;
     }
 
-    const conversation = conversationResult.conversation;
+    const runPreparationResult = await ensureConversationRun(
+      workspaceService,
+      access.user,
+      conversationResult.conversation,
+      fallbackTraceId
+    );
+
+    if (!runPreparationResult.ok) {
+      reply.code(runPreparationResult.statusCode);
+      return runPreparationResult.response;
+    }
+
+    const conversation = runPreparationResult.conversation;
     const traceId = conversation.run.traceId || fallbackTraceId;
     const startedAt = Date.now();
     const assistantText = buildAssistantText(conversation, body.messages);
@@ -863,6 +928,11 @@ export async function registerChatRoutes(
           content: assistantText,
           finishReason: 'stop',
           status: 'completed',
+        },
+        usage: {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
         },
       },
       elapsedTime: Date.now() - startedAt,

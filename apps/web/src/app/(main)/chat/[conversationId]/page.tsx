@@ -3,6 +3,8 @@
 import type {
   WorkspaceConversation,
   WorkspaceConversationMessage,
+  WorkspaceRun,
+  WorkspaceRunSummary,
 } from '@agentifui/shared/apps';
 import type { ChatCompletionMessage, ChatGatewayErrorResponse } from '@agentifui/shared/chat';
 import Link from 'next/link';
@@ -10,7 +12,11 @@ import { useParams, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 
 import { MainSectionNav } from '../../../../components/main-section-nav';
-import { fetchWorkspaceConversation } from '../../../../lib/apps-client';
+import {
+  fetchWorkspaceConversation,
+  fetchWorkspaceConversationRuns,
+  fetchWorkspaceRun,
+} from '../../../../lib/apps-client';
 import { clearAuthSession } from '../../../../lib/auth-session';
 import { stopChatCompletion, streamChatCompletion } from '../../../../lib/chat-client';
 import { useProtectedSession } from '../../../../lib/use-protected-session';
@@ -43,6 +49,67 @@ function buildLocalMessage(
   };
 }
 
+function formatReplayContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .flatMap(part => {
+      if (typeof part !== 'object' || part === null) {
+        return [];
+      }
+
+      const value = part as Record<string, unknown>;
+      return value.type === 'text' && typeof value.text === 'string' ? [value.text] : [];
+    })
+    .join('\n');
+}
+
+function buildReplayMessages(run: WorkspaceRun): Array<{ id: string; role: string; content: string }> {
+  const rawMessages = run.inputs.messages;
+
+  if (!Array.isArray(rawMessages)) {
+    return [];
+  }
+
+  return rawMessages.flatMap((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) {
+      return [];
+    }
+
+    const message = entry as Record<string, unknown>;
+
+    if (typeof message.role !== 'string') {
+      return [];
+    }
+
+    return [
+      {
+        id: `${run.id}_${index}`,
+        role: message.role,
+        content: formatReplayContent(message.content),
+      },
+    ];
+  });
+}
+
+function buildAssistantReplay(run: WorkspaceRun): string {
+  const assistant = run.outputs.assistant;
+
+  if (typeof assistant !== 'object' || assistant === null) {
+    return '';
+  }
+
+  const content = (assistant as Record<string, unknown>).content;
+
+  return typeof content === 'string' ? content : '';
+}
+
 export default function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
   const router = useRouter();
@@ -51,21 +118,57 @@ export default function ConversationPage() {
   const [conversationError, setConversationError] = useState<string | null>(null);
   const [isConversationLoading, setIsConversationLoading] = useState(false);
   const [messages, setMessages] = useState<WorkspaceConversationMessage[]>([]);
+  const [runs, setRuns] = useState<WorkspaceRunSummary[]>([]);
+  const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
   const [draft, setDraft] = useState('');
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const stopRequestedRef = useRef(false);
   const conversationId =
     typeof params?.conversationId === 'string' ? params.conversationId.trim() : '';
+
+  async function loadRunDetail(sessionToken: string, runId: string) {
+    const result = await fetchWorkspaceRun(sessionToken, runId);
+
+    if (!result.ok) {
+      setSelectedRun(null);
+      return;
+    }
+
+    setSelectedRun(result.data);
+  }
+
+  async function loadRunTracking(sessionToken: string, preferredRunId?: string | null) {
+    const result = await fetchWorkspaceConversationRuns(sessionToken, conversationId);
+
+    if (!result.ok) {
+      setRuns([]);
+      setSelectedRun(null);
+      return;
+    }
+
+    setRuns(result.data.runs);
+
+    const nextRunId = preferredRunId ?? selectedRun?.id ?? result.data.runs[0]?.id ?? null;
+
+    if (!nextRunId) {
+      setSelectedRun(null);
+      return;
+    }
+
+    await loadRunDetail(sessionToken, nextRunId);
+  }
 
   async function loadConversation(
     sessionToken: string,
     options: {
       withSpinner: boolean;
       syncMessages: boolean;
+      preferredRunId?: string | null;
     }
   ) {
     if (options.withSpinner) {
@@ -102,10 +205,13 @@ export default function ConversationPage() {
 
       setConversation(result.data);
       setLastTraceId(result.data.run.traceId);
+      activeRunIdRef.current = result.data.run.id;
 
       if (options.syncMessages) {
         setMessages(result.data.messages);
       }
+
+      await loadRunTracking(sessionToken, options.preferredRunId ?? result.data.run.id);
     } catch {
       setConversation(null);
       setConversationError('Conversation bootstrap failed. Please retry from the apps workspace.');
@@ -118,10 +224,13 @@ export default function ConversationPage() {
 
   useEffect(() => {
     setMessages([]);
+    setRuns([]);
+    setSelectedRun(null);
     setDraft('');
     setComposerError(null);
     setLastTraceId(null);
     activeAssistantMessageIdRef.current = null;
+    activeRunIdRef.current = null;
     stopRequestedRef.current = false;
   }, [conversationId]);
 
@@ -137,39 +246,10 @@ export default function ConversationPage() {
     setIsConversationLoading(true);
     setConversationError(null);
 
-    fetchWorkspaceConversation(session.sessionToken, conversationId)
-      .then(result => {
-        if (isCancelled) {
-          return;
-        }
-
-        if (!result.ok) {
-          setConversation(null);
-
-          if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
-            clearAuthSession(window.sessionStorage);
-            router.replace('/login');
-            return;
-          }
-
-          if (result.error.code === 'WORKSPACE_FORBIDDEN') {
-            router.replace('/auth/pending');
-            return;
-          }
-
-          if (result.error.code === 'WORKSPACE_NOT_FOUND') {
-            setConversationError('The requested workspace conversation could not be found.');
-            return;
-          }
-
-          setConversationError(result.error.message);
-          return;
-        }
-
-        setConversation(result.data);
-        setLastTraceId(result.data.run.traceId);
-        setMessages(result.data.messages);
-      })
+    loadConversation(session.sessionToken, {
+      withSpinner: false,
+      syncMessages: true,
+    })
       .catch(() => {
         if (!isCancelled) {
           setConversation(null);
@@ -238,8 +318,25 @@ export default function ConversationPage() {
         {
           onMetadata: metadata => {
             setLastTraceId(metadata.traceId);
+            activeRunIdRef.current = metadata.runId;
+            setConversation(currentConversation =>
+              currentConversation
+                ? {
+                    ...currentConversation,
+                    run: {
+                      ...currentConversation.run,
+                      id: metadata.runId,
+                      traceId: metadata.traceId,
+                      status: 'running',
+                      triggeredFrom: 'chat_completion',
+                    },
+                  }
+                : currentConversation
+            );
           },
           onChunk: chunk => {
+            activeRunIdRef.current = chunk.id;
+
             if (chunk.trace_id) {
               setLastTraceId(chunk.trace_id);
             }
@@ -283,6 +380,7 @@ export default function ConversationPage() {
       await loadConversation(session.sessionToken, {
         withSpinner: false,
         syncMessages: true,
+        preferredRunId: activeRunIdRef.current,
       });
     } catch (error) {
       if (isGatewayErrorResponse(error)) {
@@ -305,16 +403,7 @@ export default function ConversationPage() {
       }
 
       setMessages(currentMessages =>
-        currentMessages
-          .filter(message => message.id !== activeAssistantMessageIdRef.current)
-          .map(message =>
-            message.id === activeAssistantMessageIdRef.current
-              ? {
-                  ...message,
-                  status: 'failed',
-                }
-              : message
-          )
+        currentMessages.filter(message => message.id !== activeAssistantMessageIdRef.current)
       );
       setConversation(currentConversation =>
         currentConversation
@@ -322,6 +411,7 @@ export default function ConversationPage() {
               ...currentConversation,
               run: {
                 ...currentConversation.run,
+                id: activeRunIdRef.current ?? currentConversation.run.id,
                 status: 'failed',
               },
             }
@@ -340,12 +430,19 @@ export default function ConversationPage() {
       return;
     }
 
+    const runId = activeRunIdRef.current ?? conversation.run.id;
+
+    if (!runId) {
+      setComposerError('The active run could not be resolved for this stop request.');
+      return;
+    }
+
     setComposerError(null);
     setIsStopping(true);
     stopRequestedRef.current = true;
 
     try {
-      const result = await stopChatCompletion(session.sessionToken, conversation.run.id);
+      const result = await stopChatCompletion(session.sessionToken, runId);
 
       if ('error' in result) {
         setComposerError(result.error.message);
@@ -357,6 +454,14 @@ export default function ConversationPage() {
     } finally {
       setIsStopping(false);
     }
+  }
+
+  async function handleRunSelect(runId: string) {
+    if (!session) {
+      return;
+    }
+
+    await loadRunDetail(session.sessionToken, runId);
   }
 
   if (isLoading) {
@@ -385,17 +490,20 @@ export default function ConversationPage() {
     return null;
   }
 
+  const replayMessages = selectedRun ? buildReplayMessages(selectedRun) : [];
+  const replayAssistant = selectedRun ? buildAssistantReplay(selectedRun) : '';
+
   return (
     <div className="chat-surface stack">
       <MainSectionNav showSecurity />
 
       <header className="chat-header">
         <div>
-          <span className="eyebrow">R8 Streaming Chat</span>
+          <span className="eyebrow">R9 Run Replay</span>
           <h1>{conversation.title}</h1>
           <p className="lead">
-            The conversation surface now consumes the gateway SSE stream directly, exposes a stop
-            action and restores transcript history from persisted workspace state.
+            The conversation surface now keeps independent runs per completion, supports live stop
+            control and lets you query replayable run state from the persisted workspace boundary.
           </p>
         </div>
         <div className="workspace-badges">
@@ -410,8 +518,8 @@ export default function ConversationPage() {
           <div>
             <h2>Gateway context</h2>
             <p>
-              Streaming updates now arrive incrementally from `/v1/chat/completions`, and the
-              restored transcript comes from the persisted workspace conversation payload.
+              The latest conversation snapshot still comes from workspace state, and each
+              completion now lands in its own queryable run record.
             </p>
           </div>
           <span className={`status-chip status-${conversation.app.status}`}>
@@ -433,12 +541,19 @@ export default function ConversationPage() {
           <article className="chat-meta-card">
             <span>Run status</span>
             <strong>{conversation.run.status}</strong>
-            <p>Type: {conversation.run.type}</p>
+            <p>
+              Type: {conversation.run.type} · Trigger: {conversation.run.triggeredFrom}
+            </p>
           </article>
           <article className="chat-meta-card">
             <span>Transcript</span>
             <strong>{messages.length} messages</strong>
             <p>History is rehydrated from the workspace conversation response.</p>
+          </article>
+          <article className="chat-meta-card">
+            <span>Run history</span>
+            <strong>{runs.length} runs</strong>
+            <p>Each completion is now tracked separately for replay.</p>
           </article>
         </div>
       </section>
@@ -448,8 +563,8 @@ export default function ConversationPage() {
           <div>
             <h2>Conversation</h2>
             <p>
-              Send a prompt to stream an assistant response. Refreshing the page now reloads the
-              transcript from the persisted conversation record.
+              Send a prompt to stream an assistant response. Refreshing the page now reloads both
+              the transcript and the latest run from persisted workspace state.
             </p>
           </div>
         </div>
@@ -512,6 +627,103 @@ export default function ConversationPage() {
             ) : null}
           </div>
         </form>
+      </section>
+
+      <section className="chat-panel">
+        <div className="chat-panel-header">
+          <div>
+            <h2>Run history</h2>
+            <p>
+              Queryable run records are ordered newest first. Select one to inspect the stored
+              request snapshot, assistant output and usage counters.
+            </p>
+          </div>
+        </div>
+
+        <div className="run-history-grid">
+          <div className="run-history-list">
+            {runs.length === 0 ? (
+              <div className="chat-empty-state">
+                <strong>No runs recorded yet.</strong>
+                <p>The first completion will create the initial replayable run record.</p>
+              </div>
+            ) : (
+              runs.map(run => (
+                <button
+                  key={run.id}
+                  type="button"
+                  className={`run-history-item ${selectedRun?.id === run.id ? 'selected' : ''}`}
+                  onClick={() => void handleRunSelect(run.id)}
+                >
+                  <strong>{run.id}</strong>
+                  <span>{run.status}</span>
+                  <span>{run.triggeredFrom}</span>
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className="run-history-detail">
+            {selectedRun ? (
+              <>
+                <div className="chat-meta-grid">
+                  <article className="chat-meta-card">
+                    <span>Selected run</span>
+                    <strong>{selectedRun.id}</strong>
+                    <p>{selectedRun.status}</p>
+                  </article>
+                  <article className="chat-meta-card">
+                    <span>Trace</span>
+                    <strong>{selectedRun.traceId}</strong>
+                    <p>{selectedRun.triggeredFrom}</p>
+                  </article>
+                  <article className="chat-meta-card">
+                    <span>Usage</span>
+                    <strong>{selectedRun.usage.totalTokens} tokens</strong>
+                    <p>
+                      Prompt {selectedRun.usage.promptTokens} · Completion{' '}
+                      {selectedRun.usage.completionTokens}
+                    </p>
+                  </article>
+                  <article className="chat-meta-card">
+                    <span>Timing</span>
+                    <strong>{selectedRun.elapsedTime} ms</strong>
+                    <p>{selectedRun.finishedAt ?? 'in progress'}</p>
+                  </article>
+                </div>
+
+                <div className="run-replay-stack">
+                  <article className="chat-bubble user">
+                    <div className="chat-bubble-meta">
+                      <span className="chat-bubble-label">Prompt snapshot</span>
+                      <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                        {selectedRun.status}
+                      </span>
+                    </div>
+                    <p>
+                      {replayMessages.map(message => `${message.role}: ${message.content}`).join('\n\n') ||
+                        'No prompt snapshot was stored for this run.'}
+                    </p>
+                  </article>
+                  <article className="chat-bubble assistant">
+                    <div className="chat-bubble-meta">
+                      <span className="chat-bubble-label">Assistant output</span>
+                      <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                        {selectedRun.status}
+                      </span>
+                    </div>
+                    <p>{replayAssistant || 'No assistant output was stored for this run.'}</p>
+                  </article>
+                </div>
+              </>
+            ) : (
+              <div className="chat-empty-state">
+                <strong>Select a run.</strong>
+                <p>The latest run will be loaded automatically after the first completion.</p>
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       <div className="actions">

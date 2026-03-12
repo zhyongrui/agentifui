@@ -1118,8 +1118,13 @@ describe.sequential('persistent auth runtime', () => {
               id: runId,
               type: 'agent',
               status: 'pending',
+              triggeredFrom: 'app_launch',
               traceId,
               createdAt: expect.any(String),
+              finishedAt: null,
+              elapsedTime: 0,
+              totalTokens: 0,
+              totalSteps: 0,
             },
           },
         } satisfies WorkspaceConversationResponse);
@@ -1291,6 +1296,196 @@ describe.sequential('persistent auth runtime', () => {
             },
           ],
         });
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'creates and exposes a new persisted run for the next completion on the same conversation',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        const register = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer',
+          },
+        });
+
+        expect(register.statusCode).toBe(201);
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+        };
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+
+        const firstCompletion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            app_id: 'app_policy_watch',
+            conversation_id: launchBody.data.conversationId,
+            messages: [
+              {
+                role: 'user',
+                content: 'Summarize the new policy updates.',
+              },
+            ],
+          },
+        });
+
+        expect(firstCompletion.statusCode).toBe(200);
+
+        const firstBody = firstCompletion.json() as ChatCompletionResponse;
+
+        const secondCompletion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            app_id: 'app_policy_watch',
+            conversation_id: launchBody.data.conversationId,
+            messages: [
+              {
+                role: 'user',
+                content: 'Summarize the new policy updates.',
+              },
+              {
+                role: 'assistant',
+                content: firstBody.choices[0]?.message.content ?? '',
+              },
+              {
+                role: 'user',
+                content: 'Tell me what changed from the previous answer.',
+              },
+            ],
+          },
+        });
+
+        expect(secondCompletion.statusCode).toBe(200);
+
+        const secondBody = secondCompletion.json() as ChatCompletionResponse;
+
+        expect(secondBody.id).not.toBe(launchBody.data.runId);
+        expect(secondBody.trace_id).not.toBe(launchBody.data.traceId);
+        expect(secondBody.metadata?.run_id).toBe(secondBody.id);
+
+        const runsResponse = await app.inject({
+          method: 'GET',
+          url: `/workspace/conversations/${launchBody.data.conversationId}/runs`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(runsResponse.statusCode).toBe(200);
+        expect(
+          (runsResponse.json() as { data: { runs: Array<{ id: string; triggeredFrom: string }> } }).data
+            .runs
+        ).toEqual([
+          expect.objectContaining({
+            id: secondBody.id,
+            triggeredFrom: 'chat_completion',
+          }),
+          expect.objectContaining({
+            id: launchBody.data.runId,
+            triggeredFrom: 'app_launch',
+          }),
+        ]);
+
+        const runResponse = await app.inject({
+          method: 'GET',
+          url: `/workspace/runs/${secondBody.id}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(runResponse.statusCode).toBe(200);
+        expect((runResponse.json() as { data: Record<string, unknown> }).data).toMatchObject({
+          id: secondBody.id,
+          conversationId: launchBody.data.conversationId,
+          status: 'succeeded',
+          triggeredFrom: 'chat_completion',
+          usage: {
+            totalTokens: expect.any(Number),
+          },
+        });
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const rows = await runtimeDatabase<{
+            id: string;
+            trace_id: string;
+            triggered_from: string;
+          }[]>`
+            select id, trace_id, triggered_from
+            from runs
+            where conversation_id = ${launchBody.data.conversationId}
+            order by created_at desc
+            limit 2
+          `;
+
+          expect(rows).toEqual([
+            {
+              id: secondBody.id,
+              trace_id: secondBody.trace_id,
+              triggered_from: 'chat_completion',
+            },
+            {
+              id: launchBody.data.runId!,
+              trace_id: launchBody.data.traceId!,
+              triggered_from: 'app_launch',
+            },
+          ]);
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
       } finally {
         if (!appClosed) {
           await app.close();

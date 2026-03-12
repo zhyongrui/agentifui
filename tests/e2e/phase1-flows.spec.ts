@@ -259,7 +259,11 @@ test('register/login/workspace controls work for a normal active user', async ({
   await expect(
     page.getByText('Policy Watch is now reachable through the AgentifUI gateway.')
   ).toBeVisible();
-  await expect(page.getByText('succeeded')).toBeVisible();
+  await expect(
+    page.locator('article.chat-meta-card').filter({
+      has: page.getByText('Run status'),
+    }).getByText('succeeded')
+  ).toBeVisible();
 
   await page.getByLabel('Message').fill('Start another response and I will stop it.');
   await Promise.all([
@@ -271,7 +275,19 @@ test('register/login/workspace controls work for a normal active user', async ({
     waitForGatewayPost(page, '/v1/chat/completions/run_'),
     page.getByRole('button', { name: 'Stop response' }).click(),
   ]);
-  await expect(page.getByText('stopped')).toBeVisible();
+  await expect(
+    page.locator('article.chat-meta-card').filter({
+      has: page.getByText('Run status'),
+    }).getByText('stopped')
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Run history' })).toBeVisible();
+  await expect(page.locator('.run-history-item')).toHaveCount(2);
+  await expect(
+    page.locator('.run-history-detail').getByText('Prompt snapshot', { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.locator('.run-history-detail').getByText('Assistant output', { exact: true })
+  ).toBeVisible();
   await page.getByRole('link', { name: 'Back to Apps workspace' }).click();
   await expectAppsWorkspace(page);
   await expect(

@@ -4,9 +4,11 @@ import type {
   WorkspaceApp,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
 
 const GATEWAY_PROXY_BASE_PATH = '/api/gateway';
@@ -124,4 +126,27 @@ export async function fetchWorkspaceConversation(
       sessionToken,
     }
   );
+}
+
+export async function fetchWorkspaceConversationRuns(
+  sessionToken: string,
+  conversationId: string
+): Promise<WorkspaceConversationRunsResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationRunsResponse>(
+    `/workspace/conversations/${conversationId}/runs`,
+    {
+      method: 'GET',
+      sessionToken,
+    }
+  );
+}
+
+export async function fetchWorkspaceRun(
+  sessionToken: string,
+  runId: string
+): Promise<WorkspaceRunResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceRunResponse>(`/workspace/runs/${runId}`, {
+    method: 'GET',
+    sessionToken,
+  });
 }

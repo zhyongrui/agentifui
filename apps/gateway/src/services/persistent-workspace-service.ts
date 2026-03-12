@@ -8,6 +8,9 @@ import {
   type WorkspaceGroup,
   type WorkspacePreferences,
   type WorkspacePreferencesUpdateRequest,
+  type WorkspaceRun,
+  type WorkspaceRunSummary,
+  type WorkspaceRunTrigger,
   type WorkspaceRunType,
 } from '@agentifui/shared/apps';
 import { randomUUID } from 'node:crypto';
@@ -22,7 +25,10 @@ import {
 } from './workspace-catalog-fixtures.js';
 import type {
   WorkspaceConversationResult,
+  WorkspaceConversationRunsResult,
   WorkspaceLaunchResult,
+  WorkspaceRunCreateInput,
+  WorkspaceRunResult,
   WorkspaceRunUpdateInput,
   WorkspaceService,
 } from './workspace-service.js';
@@ -87,13 +93,45 @@ type ConversationRow = {
   id: string;
   launch_id: string | null;
   run_created_at: Date | string;
+  run_elapsed_time: number;
+  run_finished_at: Date | string | null;
   run_id: string;
   run_status: WorkspaceConversation['run']['status'];
+  run_total_steps: number;
+  run_total_tokens: number;
   run_trace_id: string;
+  run_triggered_from: WorkspaceRunTrigger;
   run_type: WorkspaceRunType;
   status: WorkspaceConversation['status'];
   title: string;
   updated_at: Date | string;
+};
+
+type WorkspaceRunRow = {
+  active_group_description: string | null;
+  active_group_id: string | null;
+  active_group_name: string | null;
+  app_id: string;
+  app_kind: WorkspaceApp['kind'];
+  app_name: string;
+  app_short_code: string;
+  app_slug: string;
+  app_status: WorkspaceApp['status'];
+  app_summary: string;
+  conversation_id: string;
+  created_at: Date | string;
+  elapsed_time: number;
+  error: string | null;
+  finished_at: Date | string | null;
+  id: string;
+  inputs: Record<string, unknown> | string;
+  outputs: Record<string, unknown> | string;
+  status: WorkspaceConversation['run']['status'];
+  total_steps: number;
+  total_tokens: number;
+  trace_id: string;
+  triggered_from: WorkspaceRunTrigger;
+  type: WorkspaceRunType;
 };
 
 async function listMemberGroupIds(database: DatabaseClient, userId: string) {
@@ -587,6 +625,92 @@ function sanitizeWorkspacePreferences(
   };
 }
 
+function toWorkspaceRunSummary(
+  row:
+    | Pick<
+        ConversationRow,
+        | 'run_created_at'
+        | 'run_elapsed_time'
+        | 'run_finished_at'
+        | 'run_id'
+        | 'run_status'
+        | 'run_total_steps'
+        | 'run_total_tokens'
+        | 'run_trace_id'
+        | 'run_triggered_from'
+        | 'run_type'
+      >
+    | Pick<
+        WorkspaceRunRow,
+        | 'created_at'
+        | 'elapsed_time'
+        | 'finished_at'
+        | 'id'
+        | 'status'
+        | 'total_steps'
+        | 'total_tokens'
+        | 'trace_id'
+        | 'triggered_from'
+        | 'type'
+      >
+): WorkspaceRunSummary {
+  if ('run_id' in row) {
+    return {
+      id: row.run_id,
+      type: row.run_type,
+      status: row.run_status,
+      triggeredFrom: row.run_triggered_from,
+      traceId: row.run_trace_id,
+      createdAt: toIso(row.run_created_at)!,
+      finishedAt: toIso(row.run_finished_at),
+      elapsedTime: row.run_elapsed_time,
+      totalTokens: row.run_total_tokens,
+      totalSteps: row.run_total_steps,
+    };
+  }
+
+  return {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    triggeredFrom: row.triggered_from,
+    traceId: row.trace_id,
+    createdAt: toIso(row.created_at)!,
+    finishedAt: toIso(row.finished_at),
+    elapsedTime: row.elapsed_time,
+    totalTokens: row.total_tokens,
+    totalSteps: row.total_steps,
+  };
+}
+
+function toWorkspaceRunUsage(
+  outputs: Record<string, unknown> | string,
+  totalTokens: number
+): WorkspaceRun['usage'] {
+  const usage = normalizeJsonRecord(outputs).usage;
+
+  if (typeof usage !== 'object' || usage === null) {
+    return {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens,
+    };
+  }
+
+  const usageRecord = usage as Record<string, unknown>;
+
+  return {
+    promptTokens:
+      typeof usageRecord.promptTokens === 'number' ? Math.max(usageRecord.promptTokens, 0) : 0,
+    completionTokens:
+      typeof usageRecord.completionTokens === 'number'
+        ? Math.max(usageRecord.completionTokens, 0)
+        : 0,
+    totalTokens:
+      typeof usageRecord.totalTokens === 'number' ? Math.max(usageRecord.totalTokens, 0) : totalTokens,
+  };
+}
+
 function toWorkspaceConversation(row: ConversationRow): WorkspaceConversation {
   return {
     id: row.id,
@@ -610,13 +734,32 @@ function toWorkspaceConversation(row: ConversationRow): WorkspaceConversation {
       description: row.active_group_description ?? '',
     },
     messages: toWorkspaceConversationMessages(row.conversation_inputs),
-    run: {
-      id: row.run_id,
-      type: row.run_type,
-      status: row.run_status,
-      traceId: row.run_trace_id,
-      createdAt: toIso(row.run_created_at)!,
+    run: toWorkspaceRunSummary(row),
+  };
+}
+
+function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
+  return {
+    ...toWorkspaceRunSummary(row),
+    conversationId: row.conversation_id,
+    app: {
+      id: row.app_id,
+      slug: row.app_slug,
+      name: row.app_name,
+      summary: row.app_summary,
+      kind: row.app_kind,
+      status: row.app_status,
+      shortCode: row.app_short_code,
     },
+    activeGroup: {
+      id: row.active_group_id ?? '',
+      name: row.active_group_name ?? 'Unknown group',
+      description: row.active_group_description ?? '',
+    },
+    error: row.error,
+    inputs: normalizeJsonRecord(row.inputs),
+    outputs: normalizeJsonRecord(row.outputs),
+    usage: toWorkspaceRunUsage(row.outputs, row.total_tokens),
   };
 }
 
@@ -797,8 +940,13 @@ async function readConversationForUser(
       r.id as run_id,
       r.type as run_type,
       r.status as run_status,
+      r.triggered_from as run_triggered_from,
       r.trace_id as run_trace_id,
-      r.created_at as run_created_at
+      r.created_at as run_created_at,
+      r.finished_at as run_finished_at,
+      r.elapsed_time as run_elapsed_time,
+      r.total_tokens as run_total_tokens,
+      r.total_steps as run_total_steps
     from conversations c
     inner join workspace_apps a on a.id = c.app_id
     left join groups g on g.id = c.active_group_id
@@ -811,6 +959,160 @@ async function readConversationForUser(
   `;
 
   return row ? toWorkspaceConversation(row) : null;
+}
+
+async function readConversationRunsForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  conversationId: string
+): Promise<WorkspaceRunSummary[]> {
+  const rows = await database<WorkspaceRunRow[]>`
+    select
+      r.id,
+      r.conversation_id,
+      r.type,
+      r.status,
+      r.triggered_from,
+      r.trace_id,
+      r.inputs,
+      r.outputs,
+      r.error,
+      r.elapsed_time,
+      r.total_tokens,
+      r.total_steps,
+      r.created_at,
+      r.finished_at,
+      a.id as app_id,
+      a.slug as app_slug,
+      a.name as app_name,
+      a.summary as app_summary,
+      a.kind as app_kind,
+      a.status as app_status,
+      a.short_code as app_short_code,
+      g.id as active_group_id,
+      g.name as active_group_name,
+      g.description as active_group_description
+    from runs r
+    inner join conversations c on c.id = r.conversation_id
+    inner join workspace_apps a on a.id = r.app_id
+    left join groups g on g.id = r.active_group_id
+    where r.conversation_id = ${conversationId}
+      and c.user_id = ${user.id}
+    order by r.created_at desc
+  `;
+
+  return rows.map(toWorkspaceRunSummary);
+}
+
+async function readRunForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  runId: string
+): Promise<WorkspaceRun | null> {
+  const [row] = await database<WorkspaceRunRow[]>`
+    select
+      r.id,
+      r.conversation_id,
+      r.type,
+      r.status,
+      r.triggered_from,
+      r.trace_id,
+      r.inputs,
+      r.outputs,
+      r.error,
+      r.elapsed_time,
+      r.total_tokens,
+      r.total_steps,
+      r.created_at,
+      r.finished_at,
+      a.id as app_id,
+      a.slug as app_slug,
+      a.name as app_name,
+      a.summary as app_summary,
+      a.kind as app_kind,
+      a.status as app_status,
+      a.short_code as app_short_code,
+      g.id as active_group_id,
+      g.name as active_group_name,
+      g.description as active_group_description
+    from runs r
+    inner join conversations c on c.id = r.conversation_id
+    inner join workspace_apps a on a.id = r.app_id
+    left join groups g on g.id = r.active_group_id
+    where r.id = ${runId}
+      and c.user_id = ${user.id}
+    limit 1
+  `;
+
+  return row ? toWorkspaceRun(row) : null;
+}
+
+async function createConversationRunForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceRunCreateInput
+): Promise<WorkspaceConversation | null> {
+  const conversation = await readConversationForUser(database, user, input.conversationId);
+
+  if (!conversation) {
+    return null;
+  }
+
+  const runId = `run_${randomUUID()}`;
+  const traceId = buildTraceId();
+  const createdAt = new Date().toISOString();
+
+  await database.begin(async transaction => {
+    const sql = transaction as unknown as DatabaseClient;
+
+    await sql`
+      insert into runs (
+        id,
+        tenant_id,
+        conversation_id,
+        app_id,
+        user_id,
+        active_group_id,
+        type,
+        triggered_from,
+        status,
+        inputs,
+        outputs,
+        elapsed_time,
+        total_tokens,
+        total_steps,
+        trace_id,
+        created_at
+      )
+      values (
+        ${runId},
+        ${user.tenantId},
+        ${conversation.id},
+        ${conversation.app.id},
+        ${user.id},
+        ${conversation.activeGroup.id || null},
+        ${conversation.run.type},
+        ${input.triggeredFrom},
+        'pending',
+        '{}'::jsonb,
+        '{}'::jsonb,
+        0,
+        0,
+        0,
+        ${traceId},
+        ${createdAt}::timestamptz
+      )
+    `;
+
+    await sql`
+      update conversations
+      set updated_at = ${createdAt}::timestamptz
+      where id = ${conversation.id}
+        and user_id = ${user.id}
+    `;
+  });
+
+  return readConversationForUser(database, user, conversation.id);
 }
 
 async function updateConversationRunForUser(
@@ -1103,6 +1405,63 @@ export function createPersistentWorkspaceService(database: DatabaseClient): Work
     },
     async getConversationForUser(user, conversationId): Promise<WorkspaceConversationResult> {
       const conversation = await readConversationForUser(database, user, conversationId);
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: conversation,
+      };
+    },
+    async listConversationRunsForUser(
+      user,
+      conversationId
+    ): Promise<WorkspaceConversationRunsResult> {
+      const conversation = await readConversationForUser(database, user, conversationId);
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          conversationId,
+          runs: await readConversationRunsForUser(database, user, conversationId),
+        },
+      };
+    },
+    async getRunForUser(user, runId): Promise<WorkspaceRunResult> {
+      const run = await readRunForUser(database, user, runId);
+
+      if (!run) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace run could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: run,
+      };
+    },
+    async createConversationRunForUser(user, input): Promise<WorkspaceConversationResult> {
+      const conversation = await createConversationRunForUser(database, user, input);
 
       if (!conversation) {
         return {

@@ -107,7 +107,7 @@ describe('chat client', () => {
   });
 
   it('parses SSE chat completion streams incrementally', async () => {
-    const metadataEvents: Array<{ conversationId: string; traceId: string }> = [];
+    const metadataEvents: Array<{ conversationId: string; runId: string; traceId: string }> = [];
     const chunkEvents: string[] = [];
 
     vi.stubGlobal(
@@ -116,7 +116,7 @@ describe('chat client', () => {
         ok: true,
         body: buildReadableStream([
           'event: agentif.metadata\n',
-          'data: {"conversation_id":"conv-123","trace_id":"trace-123"}\n\n',
+          'data: {"conversation_id":"conv-123","run_id":"run-123","trace_id":"trace-123"}\n\n',
           'data: {"id":"run-123","object":"chat.completion.chunk","created":1,"model":"policy-watch","conversation_id":"conv-123","trace_id":"trace-123","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
           'data: {"id":"run-123","object":"chat.completion.chunk","created":1,"model":"policy-watch","conversation_id":"conv-123","trace_id":"trace-123","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
           'data: {"id":"run-123","object":"chat.completion.chunk","created":1,"model":"policy-watch","conversation_id":"conv-123","trace_id":"trace-123","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}\n\n',
@@ -177,6 +177,7 @@ describe('chat client', () => {
     expect(metadataEvents).toEqual([
       {
         conversationId: 'conv-123',
+        runId: 'run-123',
         traceId: 'trace-123',
       },
     ]);

@@ -6,7 +6,10 @@ import type {
   WorkspaceConversationMessage,
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceRun,
   WorkspaceRunStatus,
+  WorkspaceRunSummary,
+  WorkspaceRunTrigger,
   WorkspaceRunType,
 } from '@agentifui/shared/apps';
 import { evaluateAppLaunch } from '@agentifui/shared/apps';
@@ -49,6 +52,28 @@ type WorkspaceConversationResult =
     }
   | WorkspaceLookupFailure;
 
+type WorkspaceConversationRunsResult =
+  | {
+      ok: true;
+      data: {
+        conversationId: string;
+        runs: WorkspaceRunSummary[];
+      };
+    }
+  | WorkspaceLookupFailure;
+
+type WorkspaceRunResult =
+  | {
+      ok: true;
+      data: WorkspaceRun;
+    }
+  | WorkspaceLookupFailure;
+
+type WorkspaceRunCreateInput = {
+  conversationId: string;
+  triggeredFrom: WorkspaceRunTrigger;
+};
+
 type WorkspaceRunUpdateInput = {
   conversationId: string;
   runId: string;
@@ -81,6 +106,15 @@ type WorkspaceService = {
     user: AuthUser,
     conversationId: string
   ): WorkspaceConversationResult | Promise<WorkspaceConversationResult>;
+  listConversationRunsForUser(
+    user: AuthUser,
+    conversationId: string
+  ): WorkspaceConversationRunsResult | Promise<WorkspaceConversationRunsResult>;
+  getRunForUser(user: AuthUser, runId: string): WorkspaceRunResult | Promise<WorkspaceRunResult>;
+  createConversationRunForUser(
+    user: AuthUser,
+    input: WorkspaceRunCreateInput
+  ): WorkspaceConversationResult | Promise<WorkspaceConversationResult>;
   updateConversationRunForUser(
     user: AuthUser,
     input: WorkspaceRunUpdateInput
@@ -88,6 +122,10 @@ type WorkspaceService = {
 };
 
 type WorkspaceConversationRecord = WorkspaceConversation & {
+  userId: string;
+};
+
+type WorkspaceRunRecord = WorkspaceRun & {
   userId: string;
 };
 
@@ -128,9 +166,90 @@ function resolveRunType(kind: WorkspaceAppLaunch['app']['kind']): WorkspaceRunTy
   return 'agent';
 }
 
+function buildRunSummary(run: WorkspaceRunRecord): WorkspaceRunSummary {
+  return {
+    id: run.id,
+    type: run.type,
+    status: run.status,
+    triggeredFrom: run.triggeredFrom,
+    traceId: run.traceId,
+    createdAt: run.createdAt,
+    finishedAt: run.finishedAt,
+    elapsedTime: run.elapsedTime,
+    totalTokens: run.totalTokens,
+    totalSteps: run.totalSteps,
+  };
+}
+
+function buildUsageFromOutputs(run: WorkspaceRunRecord): WorkspaceRun['usage'] {
+  const candidate = run.outputs.usage;
+
+  if (
+    typeof candidate === 'object' &&
+    candidate !== null &&
+    typeof (candidate as Record<string, unknown>).promptTokens === 'number' &&
+    typeof (candidate as Record<string, unknown>).completionTokens === 'number' &&
+    typeof (candidate as Record<string, unknown>).totalTokens === 'number'
+  ) {
+    const usage = candidate as {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    };
+
+    return {
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+    };
+  }
+
+  return {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: run.totalTokens,
+  };
+}
+
+function createRunRecord(input: {
+  conversation: WorkspaceConversationRecord;
+  createdAt: string;
+  runId: string;
+  traceId: string;
+  triggeredFrom: WorkspaceRunTrigger;
+  userId: string;
+}): WorkspaceRunRecord {
+  return {
+    id: input.runId,
+    conversationId: input.conversation.id,
+    userId: input.userId,
+    type: input.conversation.run.type,
+    status: 'pending',
+    triggeredFrom: input.triggeredFrom,
+    traceId: input.traceId,
+    createdAt: input.createdAt,
+    finishedAt: null,
+    elapsedTime: 0,
+    totalTokens: 0,
+    totalSteps: 0,
+    app: input.conversation.app,
+    activeGroup: input.conversation.activeGroup,
+    error: null,
+    inputs: {},
+    outputs: {},
+    usage: {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+    },
+  };
+}
+
 export function createWorkspaceService(): WorkspaceService {
   const preferencesByUserId = new Map<string, WorkspacePreferences>();
   const conversationsById = new Map<string, WorkspaceConversationRecord>();
+  const runsById = new Map<string, WorkspaceRunRecord>();
+  const runIdsByConversationId = new Map<string, string[]>();
 
   function getContextForUser(user: AuthUser) {
     const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
@@ -160,6 +279,21 @@ export function createWorkspaceService(): WorkspaceService {
           : null,
       updatedAt: input.updatedAt,
     };
+  }
+
+  function updateConversationLatestRun(
+    conversation: WorkspaceConversationRecord,
+    run: WorkspaceRunRecord
+  ) {
+    conversation.run = buildRunSummary(run);
+    conversation.updatedAt = run.finishedAt ?? run.createdAt;
+  }
+
+  function listRunRecords(conversationId: string) {
+    return (runIdsByConversationId.get(conversationId) ?? [])
+      .map(runId => runsById.get(runId))
+      .filter((run): run is WorkspaceRunRecord => Boolean(run))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
   return {
@@ -249,8 +383,6 @@ export function createWorkspaceService(): WorkspaceService {
 
       const launchId = randomUUID();
       const conversationId = `conv_${randomUUID()}`;
-      const runId = `run_${randomUUID()}`;
-      const traceId = buildTraceId();
       const launchedAt = new Date().toISOString();
       const conversation: WorkspaceConversationRecord = {
         id: conversationId,
@@ -269,17 +401,35 @@ export function createWorkspaceService(): WorkspaceService {
           status: app.status,
           shortCode: app.shortCode,
         },
-      activeGroup: attributedGroup,
-      messages: [],
-      run: {
-        id: runId,
-        type: resolveRunType(app.kind),
+        activeGroup: attributedGroup,
+        messages: [],
+        run: {
+          id: '',
+          type: resolveRunType(app.kind),
           status: 'pending',
-          traceId,
+          triggeredFrom: 'app_launch',
+          traceId: '',
           createdAt: launchedAt,
+          finishedAt: null,
+          elapsedTime: 0,
+          totalTokens: 0,
+          totalSteps: 0,
         },
       };
+      const runId = `run_${randomUUID()}`;
+      const traceId = buildTraceId();
+      const run = createRunRecord({
+        conversation,
+        createdAt: launchedAt,
+        runId,
+        traceId,
+        triggeredFrom: 'app_launch',
+        userId: user.id,
+      });
 
+      runsById.set(runId, run);
+      runIdsByConversationId.set(conversationId, [runId]);
+      updateConversationLatestRun(conversation, run);
       conversationsById.set(conversationId, conversation);
 
       return {
@@ -318,6 +468,89 @@ export function createWorkspaceService(): WorkspaceService {
         };
       }
 
+      const latestRun = listRunRecords(conversationId)[0];
+
+      if (latestRun) {
+        updateConversationLatestRun(conversation, latestRun);
+      }
+
+      const { userId, ...conversationData } = conversation;
+
+      return {
+        ok: true,
+        data: conversationData,
+      };
+    },
+    listConversationRunsForUser(user, conversationId) {
+      const conversation = conversationsById.get(conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          conversationId,
+          runs: listRunRecords(conversationId).map(buildRunSummary),
+        },
+      };
+    },
+    getRunForUser(user, runId) {
+      const run = runsById.get(runId);
+
+      if (!run || run.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace run could not be found.',
+        };
+      }
+
+      run.usage = buildUsageFromOutputs(run);
+
+      const { userId, ...runData } = run;
+
+      return {
+        ok: true,
+        data: runData,
+      };
+    },
+    createConversationRunForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const createdAt = new Date().toISOString();
+      const run = createRunRecord({
+        conversation,
+        createdAt,
+        runId: `run_${randomUUID()}`,
+        traceId: buildTraceId(),
+        triggeredFrom: input.triggeredFrom,
+        userId: user.id,
+      });
+
+      runsById.set(run.id, run);
+      runIdsByConversationId.set(conversation.id, [
+        ...(runIdsByConversationId.get(conversation.id) ?? []),
+        run.id,
+      ]);
+      updateConversationLatestRun(conversation, run);
+
       const { userId, ...conversationData } = conversation;
 
       return {
@@ -327,8 +560,15 @@ export function createWorkspaceService(): WorkspaceService {
     },
     updateConversationRunForUser(user, input) {
       const conversation = conversationsById.get(input.conversationId);
+      const run = runsById.get(input.runId);
 
-      if (!conversation || conversation.userId !== user.id || conversation.run.id !== input.runId) {
+      if (
+        !conversation ||
+        conversation.userId !== user.id ||
+        !run ||
+        run.userId !== user.id ||
+        run.conversationId !== input.conversationId
+      ) {
         return {
           ok: false,
           statusCode: 404,
@@ -337,11 +577,38 @@ export function createWorkspaceService(): WorkspaceService {
         };
       }
 
-      conversation.run.status = input.status;
+      run.status = input.status;
+      run.finishedAt =
+        input.finishedAt ??
+        (input.status === 'succeeded' || input.status === 'failed' || input.status === 'stopped'
+          ? new Date().toISOString()
+          : run.finishedAt);
+      run.elapsedTime = input.elapsedTime ?? run.elapsedTime;
+      run.totalTokens = input.totalTokens ?? run.totalTokens;
+      run.totalSteps = input.totalSteps ?? run.totalSteps;
+      run.error = input.error ?? run.error;
+
+      if (input.inputs) {
+        run.inputs = {
+          ...run.inputs,
+          ...input.inputs,
+        };
+      }
+
+      if (input.outputs) {
+        run.outputs = {
+          ...run.outputs,
+          ...input.outputs,
+        };
+      }
+
+      run.usage = buildUsageFromOutputs(run);
+
       if (input.messageHistory) {
         conversation.messages = input.messageHistory;
       }
-      conversation.updatedAt = input.finishedAt ?? new Date().toISOString();
+
+      updateConversationLatestRun(conversation, run);
 
       const { userId, ...conversationData } = conversation;
 
@@ -355,7 +622,10 @@ export function createWorkspaceService(): WorkspaceService {
 
 export type {
   WorkspaceConversationResult,
+  WorkspaceConversationRunsResult,
   WorkspaceLaunchResult,
+  WorkspaceRunCreateInput,
+  WorkspaceRunResult,
   WorkspaceRunUpdateInput,
   WorkspaceService,
 };

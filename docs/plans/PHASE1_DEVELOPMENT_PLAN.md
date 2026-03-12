@@ -106,17 +106,21 @@
   - Web `/chat/[conversationId]` 已接入真实 SSE 渐进式渲染
   - active stream 已支持 hard-stop
   - transcript/message status 已持久化回 workspace conversation
+- `S2-3` 已完成最小 run 查询与回放边界
+  - 每次新的 completion 已生成独立 run
+  - `/workspace/conversations/:conversationId/runs` 与 `/workspace/runs/:runId` 已可查询
+  - Web `/chat/[conversationId]` 已显示 run history / replay 视图
 - 生产构建下的 Gateway 启动链路已修复 workspace package ESM 导出问题
 - 已建立真实浏览器 E2E 回归基线
   - `npm run test:e2e` 会自动拉起隔离的 Web/Gateway 进程
-  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异、工作台 launch -> chat streaming/stop 和后台占位页
+  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异、工作台 launch -> chat streaming/stop/run replay 和后台占位页
   - Linux 环境下会自动准备 Playwright 所需运行库并绕过本地代理干扰
 
 当前未完成：
 
 - `S1-2` Manager 授权边界、Break-glass、授权管理写接口和审计收口
 - `S1-3` 的真实 quota service 与历史列表衔接
-- `S2-2 / S2-3` 的文件上传、分享、执行追踪闭环和更细粒度运行态回放
+- `S2-2 / S2-3` 的文件上传、分享和更细粒度执行时间线
 - CI 细化
 
 ## 5. 里程碑计划
@@ -458,13 +462,18 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - `conversation.inputs.messageHistory` 已持久化 transcript 与消息状态
   - Web `/chat/[conversationId]` 已支持 streaming / stop / restored transcript
   - 浏览器回归已覆盖“发送第二条消息并主动停止”
+- `R9` `S2-3` Run 追踪
+  - 每次新的 completion 已生成独立 run / trace，而不是复用同一个 run
+  - Gateway 已支持读取 conversation 维度 run history 与单 run 详情
+  - Web `/chat/[conversationId]` 已显示 run history、usage 和 replay snapshot
+  - 浏览器与真实 HTTP 冒烟已验证“第二次 completion 新建 run 并可查询回放”
 
 下一个激活项：
 
-- `R9` `S2-3` Run 追踪
-  - 让 workspace conversation 的运行态可以被查询、轮询和回放
-  - 补齐 run timeline / usage / output 的回源接口
-  - 为后续文件上传、分享和多会话恢复提供稳定持久化边界
+- `R10` `S3-*` 治理闭环
+  - 进入后台、审计、平台管理能力的真实闭环
+  - 保留文件上传、分享和更细粒度执行时间线为 `S2` 残余 backlog
+  - 以现有 conversation/run 持久化边界作为后续治理与观测基础
 
 ### 12.2 Rolling Plan
 

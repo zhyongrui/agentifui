@@ -104,6 +104,8 @@ export type WorkspaceRunType = 'workflow' | 'agent' | 'generation';
 
 export type WorkspaceRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'stopped';
 
+export type WorkspaceRunTrigger = 'app_launch' | 'chat_completion';
+
 export type WorkspaceConversationMessageStatus =
   | 'completed'
   | 'streaming'
@@ -116,6 +118,38 @@ export type WorkspaceConversationMessage = {
   content: string;
   status: WorkspaceConversationMessageStatus;
   createdAt: string;
+};
+
+export type WorkspaceRunUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+};
+
+export type WorkspaceRunSummary = {
+  id: string;
+  type: WorkspaceRunType;
+  status: WorkspaceRunStatus;
+  triggeredFrom: WorkspaceRunTrigger;
+  traceId: string;
+  createdAt: string;
+  finishedAt: string | null;
+  elapsedTime: number;
+  totalTokens: number;
+  totalSteps: number;
+};
+
+export type WorkspaceRun = WorkspaceRunSummary & {
+  conversationId: string;
+  app: Pick<
+    WorkspaceApp,
+    'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode'
+  >;
+  activeGroup: WorkspaceGroup;
+  error: string | null;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  usage: WorkspaceRunUsage;
 };
 
 export type WorkspaceAppLaunch = {
@@ -151,18 +185,25 @@ export type WorkspaceConversation = {
   >;
   activeGroup: WorkspaceGroup;
   messages: WorkspaceConversationMessage[];
-  run: {
-    id: string;
-    type: WorkspaceRunType;
-    status: WorkspaceRunStatus;
-    traceId: string;
-    createdAt: string;
-  };
+  run: WorkspaceRunSummary;
 };
 
 export type WorkspaceConversationResponse = {
   ok: true;
   data: WorkspaceConversation;
+};
+
+export type WorkspaceConversationRunsResponse = {
+  ok: true;
+  data: {
+    conversationId: string;
+    runs: WorkspaceRunSummary[];
+  };
+};
+
+export type WorkspaceRunResponse = {
+  ok: true;
+  data: WorkspaceRun;
 };
 
 export type WorkspaceErrorCode =

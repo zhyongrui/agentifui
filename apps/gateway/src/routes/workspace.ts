@@ -3,9 +3,11 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
 import type { AuthUser } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
@@ -248,6 +250,78 @@ export async function registerWorkspaceRoutes(
     }
 
     const response: WorkspaceConversationResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.get('/workspace/conversations/:conversationId/runs', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+
+    if (!conversationId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace run history lookup requires a conversation id.'
+      );
+    }
+
+    const result = await workspaceService.listConversationRunsForUser(access.user, conversationId);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationRunsResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.get('/workspace/runs/:runId', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      runId?: string;
+    };
+    const runId = params.runId?.trim();
+
+    if (!runId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace run lookup requires a run id.'
+      );
+    }
+
+    const result = await workspaceService.getRunForUser(access.user, runId);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceRunResponse = {
       ok: true,
       data: result.data,
     };
