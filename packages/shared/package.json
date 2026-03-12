@@ -21,6 +21,10 @@
     "./chat": {
       "types": "./src/chat/index.ts",
       "default": "./dist/chat/index.js"
+    },
+    "./admin": {
+      "types": "./src/admin/index.ts",
+      "default": "./dist/admin/index.js"
     }
   },
   "scripts": {

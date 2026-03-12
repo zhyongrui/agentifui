@@ -11,14 +11,17 @@ import type { GatewayEnv } from './config/env.js';
 import { registerBasePlugins } from './plugins/base.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerChatRoutes } from './routes/chat.js';
+import { registerAdminRoutes } from './routes/admin.js';
 import { registerRootRoutes } from './routes/root.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
+import { createAdminService, type AdminService } from './services/admin-service.js';
 import { createAuditService, type AuditService } from './services/audit-service.js';
 import { createAuthService, type AuthService } from './services/auth-service.js';
 import {
   createBetterAuthCore,
   type BetterAuthCore,
 } from './services/better-auth-core.js';
+import { createPersistentAdminService } from './services/persistent-admin-service.js';
 import { createPersistentAuditService } from './services/persistent-audit-service.js';
 import { createPersistentAuthService } from './services/persistent-auth-service.js';
 import {
@@ -35,6 +38,7 @@ type BuildAppOptions = {
   database?: DatabaseClient;
   authService?: AuthService;
   auditService?: AuditService;
+  adminService?: AdminService;
   workspaceService?: WorkspaceService;
 };
 
@@ -103,6 +107,8 @@ export async function buildApp(
   const auditService =
     options.auditService ??
     (database ? createPersistentAuditService(database) : createAuditService());
+  const adminService =
+    options.adminService ?? (database ? createPersistentAdminService(database) : createAdminService());
   const workspaceService =
     options.workspaceService ??
     (database ? createPersistentWorkspaceService(database) : createWorkspaceService());
@@ -123,6 +129,7 @@ export async function buildApp(
   await registerBasePlugins(app, env);
   await registerRootRoutes(app, env);
   await registerAuthRoutes(app, env, authService, auditService);
+  await registerAdminRoutes(app, authService, adminService);
   await registerWorkspaceRoutes(app, authService, workspaceService);
   await registerChatRoutes(app, authService, workspaceService);
 

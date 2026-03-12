@@ -12,6 +12,11 @@ function uniqueEmail(prefix: string, domain = 'example.com') {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@${domain}`;
 }
 
+function buildLongStopPrompt() {
+  return `Please repeat this block verbatim and keep every line:
+${'A A A A A A A A A A\n'.repeat(80)}`;
+}
+
 function base32Decode(input: string): Buffer {
   const normalized = input.replace(/=+$/g, '').toUpperCase();
   let bits = 0;
@@ -146,7 +151,9 @@ async function expectAppsWorkspace(page: Page) {
 }
 
 async function expectConversationSurface(page: Page, appName: string) {
-  await expect(page).toHaveURL(/\/chat\/conv_/);
+  await expect(page).toHaveURL(/\/chat\/conv_/, {
+    timeout: 60_000,
+  });
   await expect(page.getByRole('heading', { name: appName })).toBeVisible({
     timeout: 60_000,
   });
@@ -248,7 +255,10 @@ test('register/login/workspace controls work for a normal active user', async ({
   await expect(page.getByText('工作群组已切换到 Research Lab')).toBeVisible();
   await expect(page.getByLabel('Working group')).toHaveValue('grp_research');
 
-  await appCard(page, 'Policy Watch').getByRole('button', { name: '打开应用' }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/workspace/apps/launch'),
+    appCard(page, 'Policy Watch').getByRole('button', { name: '打开应用' }).click(),
+  ]);
   await expectConversationSurface(page, 'Policy Watch');
   await expect(page.getByText('Run status')).toBeVisible();
   await page.getByLabel('Message').fill('Summarize the current policy changes for my group.');
@@ -265,12 +275,11 @@ test('register/login/workspace controls work for a normal active user', async ({
     }).getByText('succeeded')
   ).toBeVisible();
 
-  await page.getByLabel('Message').fill('Start another response and I will stop it.');
-  await Promise.all([
-    waitForGatewayPost(page, '/v1/chat/completions'),
-    page.getByRole('button', { name: 'Send message' }).click(),
-  ]);
-  await expect(page.getByRole('button', { name: 'Stop response' })).toBeVisible();
+  await page.getByLabel('Message').fill(buildLongStopPrompt());
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.getByRole('button', { name: 'Stop response' })).toBeVisible({
+    timeout: 60_000,
+  });
   await Promise.all([
     waitForGatewayPost(page, '/v1/chat/completions/run_'),
     page.getByRole('button', { name: 'Stop response' }).click(),
@@ -279,7 +288,9 @@ test('register/login/workspace controls work for a normal active user', async ({
     page.locator('article.chat-meta-card').filter({
       has: page.getByText('Run status'),
     }).getByText('stopped')
-  ).toBeVisible();
+  ).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.getByRole('heading', { name: 'Run history' })).toBeVisible();
   await expect(page.locator('.run-history-item')).toHaveCount(2);
   await expect(
@@ -320,7 +331,10 @@ test('sso pending flow keeps access limited to the profile page', async ({ page 
   await page.getByLabel('Email').fill(email);
   await expect(page.getByText('Enterprise SSO detected for')).toBeVisible();
   await expect(page.getByRole('button', { name: /Continue with iflabx-sso/ })).toBeVisible();
-  await page.getByRole('button', { name: /Continue with iflabx-sso/ }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/auth/sso/callback'),
+    page.getByRole('button', { name: /Continue with iflabx-sso/ }).click(),
+  ]);
 
   await expect(page).toHaveURL(/\/auth\/pending$/);
   await expect(page.getByRole('heading', { name: 'Pending Approval' })).toBeVisible();
@@ -356,10 +370,9 @@ test('invitation acceptance activates the user and allows password login', async
   await expect(page).toHaveURL(/\/login\?activated=1$/);
   await expect(page.getByText('Invitation accepted. Sign in with your new password.')).toBeVisible();
 
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(DEFAULT_PASSWORD);
-  await page.getByRole('button', { name: 'Continue' }).click();
-
+  await login(page, {
+    email,
+  });
   await expectAppsWorkspace(page);
 });
 
@@ -470,16 +483,45 @@ test('security and admin users see different workspace catalogs', async ({ page 
   await expect(appCard(page, 'Audit Lens')).toHaveCount(0);
 });
 
-test('admin placeholder pages are reachable', async ({ page }) => {
-  await page.goto('/admin/users');
+test('admin pages render persisted governance data for tenant admins', async ({ page }) => {
+  const adminEmail = uniqueEmail('admin');
+
+  await register(page, {
+    email: adminEmail,
+    displayName: 'Admin Browser User',
+  });
+  await expect(page).toHaveURL(/\/login\?registered=1$/);
+  await login(page, {
+    email: adminEmail,
+  });
+  await expectAppsWorkspace(page);
+
+  await page.getByRole('link', { name: 'Admin preview' }).click();
+  await expect(page).toHaveURL(/\/admin\/users$/);
   await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
+  await expect(page.getByText('Total users')).toBeVisible();
+  await expect(page.getByText(adminEmail)).toBeVisible();
 
-  await page.goto('/admin/groups');
+  await page.getByRole('link', { name: 'Groups' }).click();
+  await expect(page).toHaveURL(/\/admin\/groups$/);
   await expect(page.getByRole('heading', { name: 'Groups' })).toBeVisible();
+  await expect(page.getByText('Total groups')).toBeVisible();
+  await expect(page.getByText('Product Studio')).toBeVisible();
 
-  await page.goto('/admin/apps');
+  await page.getByRole('link', { name: 'Apps', exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/apps$/);
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
+  await expect(page.getByText('Tenant Control')).toBeVisible();
 
-  await page.goto('/admin/audit');
+  await page.getByRole('link', { name: 'Audit' }).click();
+  await expect(page).toHaveURL(/\/admin\/audit$/);
   await expect(page.getByRole('heading', { name: 'Audit' })).toBeVisible();
+  await expect(page.getByText('Top actions')).toBeVisible();
+  await expect(
+    page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Top actions' }),
+    }).locator('.tag').filter({
+      hasText: 'auth.login.succeeded',
+    })
+  ).toBeVisible();
 });

@@ -1,4 +1,10 @@
 import type {
+  AdminAppsResponse,
+  AdminAuditResponse,
+  AdminGroupsResponse,
+  AdminUsersResponse,
+} from '@agentifui/shared/admin';
+import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
@@ -1486,6 +1492,188 @@ describe.sequential('persistent auth runtime', () => {
         } finally {
           await runtimeDatabase.end({ timeout: 5 });
         }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'returns persisted admin governance data for tenant admins',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Admin User',
+          },
+        });
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer User',
+          },
+        });
+
+        const adminLogin = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+        const developerLogin = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(adminLogin.statusCode).toBe(200);
+        expect(developerLogin.statusCode).toBe(200);
+
+        const adminSessionToken = adminLogin.json().data.sessionToken as string;
+        const developerSessionToken = developerLogin.json().data.sessionToken as string;
+
+        const [adminWorkspace, developerWorkspace] = await Promise.all([
+          app.inject({
+            method: 'GET',
+            url: '/workspace/apps',
+            headers: {
+              authorization: `Bearer ${adminSessionToken}`,
+            },
+          }),
+          app.inject({
+            method: 'GET',
+            url: '/workspace/apps',
+            headers: {
+              authorization: `Bearer ${developerSessionToken}`,
+            },
+          }),
+        ]);
+
+        expect(adminWorkspace.statusCode).toBe(200);
+        expect(developerWorkspace.statusCode).toBe(200);
+
+        const adminWorkspaceBody = adminWorkspace.json() as WorkspaceCatalogResponse;
+
+        expect(adminWorkspaceBody.data.apps.map(workspaceApp => workspaceApp.id)).toContain(
+          'app_tenant_control'
+        );
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${adminSessionToken}`,
+          },
+          payload: {
+            appId: 'app_tenant_control',
+            activeGroupId: adminWorkspaceBody.data.defaultActiveGroupId,
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+        expect((launch.json() as WorkspaceAppLaunchResponse).data.app.id).toBe('app_tenant_control');
+
+        const [usersResponse, groupsResponse, appsResponse, auditResponse] = await Promise.all([
+          app.inject({
+            method: 'GET',
+            url: '/admin/users',
+            headers: {
+              authorization: `Bearer ${adminSessionToken}`,
+            },
+          }),
+          app.inject({
+            method: 'GET',
+            url: '/admin/groups',
+            headers: {
+              authorization: `Bearer ${adminSessionToken}`,
+            },
+          }),
+          app.inject({
+            method: 'GET',
+            url: '/admin/apps',
+            headers: {
+              authorization: `Bearer ${adminSessionToken}`,
+            },
+          }),
+          app.inject({
+            method: 'GET',
+            url: '/admin/audit',
+            headers: {
+              authorization: `Bearer ${adminSessionToken}`,
+            },
+          }),
+        ]);
+
+        expect(usersResponse.statusCode).toBe(200);
+        expect(groupsResponse.statusCode).toBe(200);
+        expect(appsResponse.statusCode).toBe(200);
+        expect(auditResponse.statusCode).toBe(200);
+
+        const usersBody = usersResponse.json() as AdminUsersResponse;
+        const groupsBody = groupsResponse.json() as AdminGroupsResponse;
+        const appsBody = appsResponse.json() as AdminAppsResponse;
+        const auditBody = auditResponse.json() as AdminAuditResponse;
+
+        expect(usersBody.data.users.map(user => user.email)).toEqual(
+          expect.arrayContaining(['admin@iflabx.com', 'developer@iflabx.com'])
+        );
+        expect(
+          usersBody.data.users.find(user => user.email === 'admin@iflabx.com')?.roleIds
+        ).toEqual(expect.arrayContaining(['tenant_admin', 'user']));
+        expect(groupsBody.data.groups.find(group => group.id === 'grp_product')?.memberCount).toBe(
+          2
+        );
+        expect(
+          appsBody.data.apps.find(app => app.id === 'app_tenant_control')
+        ).toMatchObject({
+          grantedRoleIds: ['tenant_admin'],
+          launchCount: 1,
+        });
+        expect(auditBody.data.countsByAction).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              action: 'auth.login.succeeded',
+            }),
+          ])
+        );
+        expect(auditBody.data.events[0]?.occurredAt).toBeTruthy();
+
+        const forbiddenResponse = await app.inject({
+          method: 'GET',
+          url: '/admin/users',
+          headers: {
+            authorization: `Bearer ${developerSessionToken}`,
+          },
+        });
+
+        expect(forbiddenResponse.statusCode).toBe(403);
+        expect(forbiddenResponse.json()).toMatchObject({
+          ok: false,
+          error: {
+            code: 'ADMIN_FORBIDDEN',
+          },
+        });
       } finally {
         if (!appClosed) {
           await app.close();

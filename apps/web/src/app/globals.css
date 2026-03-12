@@ -532,6 +532,27 @@ button:disabled {
   color: #9a6112;
 }
 
+.status-active,
+.status-completed,
+.status-succeeded {
+  color: var(--accent-strong);
+}
+
+.status-pending,
+.status-warning {
+  color: #9a6112;
+}
+
+.status-critical,
+.status-failed {
+  color: #7b1d1d;
+}
+
+.status-info,
+.status-streaming {
+  color: #294a8a;
+}
+
 .tag-row {
   display: flex;
   flex-wrap: wrap;
@@ -731,26 +752,63 @@ button:disabled {
   resize: vertical;
 }
 
-.status-completed {
-  color: var(--accent-strong);
-}
-
-.status-streaming {
-  color: #294a8a;
-}
-
 .status-stopped {
   color: #9a6112;
 }
 
-.status-failed {
-  color: #7b1d1d;
+.admin-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-stat-card,
+.admin-card,
+.admin-code-block {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.admin-stat-card span {
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-stat-card strong {
+  font-size: 28px;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-tag-row {
+  margin-top: 10px;
+}
+
+.admin-code-block pre {
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 @media (max-width: 960px) {
   .workspace-toolbar,
   .quota-grid,
   .app-grid,
+  .admin-stat-grid,
+  .admin-grid,
   .chat-meta-grid,
   .run-history-grid {
     grid-template-columns: 1fr;

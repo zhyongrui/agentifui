@@ -124,6 +124,7 @@ export default function ConversationPage() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [isAwaitingRunMetadata, setIsAwaitingRunMetadata] = useState(false);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
@@ -232,6 +233,7 @@ export default function ConversationPage() {
     activeAssistantMessageIdRef.current = null;
     activeRunIdRef.current = null;
     stopRequestedRef.current = false;
+    setIsAwaitingRunMetadata(false);
   }, [conversationId]);
 
   useEffect(() => {
@@ -289,11 +291,13 @@ export default function ConversationPage() {
     const nextMessages = [...messages, userMessage];
 
     activeAssistantMessageIdRef.current = assistantMessage.id;
+    activeRunIdRef.current = null;
     stopRequestedRef.current = false;
     setComposerError(null);
     setDraft('');
     setIsStreaming(true);
     setIsStopping(false);
+    setIsAwaitingRunMetadata(true);
     setMessages([...nextMessages, assistantMessage]);
     setConversation(currentConversation =>
       currentConversation
@@ -319,6 +323,7 @@ export default function ConversationPage() {
           onMetadata: metadata => {
             setLastTraceId(metadata.traceId);
             activeRunIdRef.current = metadata.runId;
+            setIsAwaitingRunMetadata(false);
             setConversation(currentConversation =>
               currentConversation
                 ? {
@@ -336,6 +341,7 @@ export default function ConversationPage() {
           },
           onChunk: chunk => {
             activeRunIdRef.current = chunk.id;
+            setIsAwaitingRunMetadata(false);
 
             if (chunk.trace_id) {
               setLastTraceId(chunk.trace_id);
@@ -422,6 +428,7 @@ export default function ConversationPage() {
       stopRequestedRef.current = false;
       setIsStreaming(false);
       setIsStopping(false);
+      setIsAwaitingRunMetadata(false);
     }
   }
 
@@ -430,10 +437,10 @@ export default function ConversationPage() {
       return;
     }
 
-    const runId = activeRunIdRef.current ?? conversation.run.id;
+    const runId = activeRunIdRef.current;
 
     if (!runId) {
-      setComposerError('The active run could not be resolved for this stop request.');
+      setComposerError('The active run is still initializing. Retry stop in a moment.');
       return;
     }
 
@@ -620,9 +627,13 @@ export default function ConversationPage() {
                 className="secondary"
                 type="button"
                 onClick={handleStop}
-                disabled={isStopping}
+                disabled={isStopping || isAwaitingRunMetadata}
               >
-                {isStopping ? 'Stopping...' : 'Stop response'}
+                {isStopping
+                  ? 'Stopping...'
+                  : isAwaitingRunMetadata
+                    ? 'Starting...'
+                    : 'Stop response'}
               </button>
             ) : null}
           </div>

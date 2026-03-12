@@ -1,0 +1,229 @@
+import type { AuthUser, AuthAuditEvent } from '@agentifui/shared/auth';
+import type {
+  AdminAppSummary,
+  AdminAuditActionCount,
+  AdminGroupSummary,
+  AdminUserSummary,
+} from '@agentifui/shared/admin';
+import { randomUUID } from 'node:crypto';
+
+import {
+  WORKSPACE_APPS,
+  WORKSPACE_GROUPS,
+  resolveDefaultMemberGroupIds,
+  resolveDefaultRoleIds,
+} from './workspace-catalog-fixtures.js';
+
+type AdminService = {
+  canReadAdminForUser(user: AuthUser): boolean | Promise<boolean>;
+  listUsersForUser(user: AuthUser): AdminUserSummary[] | Promise<AdminUserSummary[]>;
+  listGroupsForUser(user: AuthUser): AdminGroupSummary[] | Promise<AdminGroupSummary[]>;
+  listAppsForUser(user: AuthUser): AdminAppSummary[] | Promise<AdminAppSummary[]>;
+  listAuditForUser(
+    user: AuthUser
+  ): Promise<{
+    countsByAction: AdminAuditActionCount[];
+    events: AuthAuditEvent[];
+  }> | {
+    countsByAction: AdminAuditActionCount[];
+    events: AuthAuditEvent[];
+  };
+};
+
+function toGroupMemberships(email: string) {
+  const groupIds = resolveDefaultMemberGroupIds(email);
+
+  return groupIds.flatMap((groupId, index) => {
+    const group = WORKSPACE_GROUPS.find(candidate => candidate.id === groupId);
+
+    if (!group) {
+      return [];
+    }
+
+    return [
+      {
+        groupId: group.id,
+        groupName: group.name,
+        role: index === 0 ? ('manager' as const) : ('member' as const),
+        isPrimary: index === 0,
+      },
+    ];
+  });
+}
+
+function canReadAdmin(email: string) {
+  const roleIds = resolveDefaultRoleIds(email);
+
+  return roleIds.includes('tenant_admin') || roleIds.includes('root_admin');
+}
+
+function buildInMemoryAuditEvent(
+  input: Pick<AuthAuditEvent, 'action' | 'entityId' | 'entityType' | 'payload'> & {
+    actorUserId: string | null;
+    id?: string;
+    level?: AuthAuditEvent['level'];
+    occurredAtOffsetMs?: number;
+    tenantId: string;
+  }
+): AuthAuditEvent {
+  return {
+    id: input.id ?? randomUUID(),
+    tenantId: input.tenantId,
+    actorUserId: input.actorUserId,
+    action: input.action,
+    level: input.level ?? 'info',
+    entityType: input.entityType,
+    entityId: input.entityId,
+    ipAddress: '127.0.0.1',
+    payload: input.payload,
+    occurredAt: new Date(Date.now() - (input.occurredAtOffsetMs ?? 0)).toISOString(),
+  };
+}
+
+export function createAdminService(): AdminService {
+  return {
+    canReadAdminForUser(user) {
+      return canReadAdmin(user.email);
+    },
+    listUsersForUser(user) {
+      const adminRoleIds = resolveDefaultRoleIds(user.email);
+
+      return [
+        {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          status: user.status,
+          createdAt: user.createdAt,
+          lastLoginAt: user.lastLoginAt,
+          mfaEnabled: true,
+          roleIds: adminRoleIds,
+          groupMemberships: toGroupMemberships(user.email),
+        },
+        {
+          id: 'usr_pending_reviewer',
+          email: 'pending-review@example.net',
+          displayName: 'Pending Reviewer',
+          status: 'pending',
+          createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+          lastLoginAt: null,
+          mfaEnabled: false,
+          roleIds: ['user'],
+          groupMemberships: [],
+        },
+        {
+          id: 'usr_security_audit',
+          email: 'security-audit@example.net',
+          displayName: 'Security Audit',
+          status: 'active',
+          createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+          lastLoginAt: new Date(Date.now() - 3_600_000).toISOString(),
+          mfaEnabled: true,
+          roleIds: ['user'],
+          groupMemberships: toGroupMemberships('security-audit@example.net'),
+        },
+      ];
+    },
+    listGroupsForUser() {
+      return WORKSPACE_GROUPS.map(group => {
+        const appGrants = WORKSPACE_APPS.filter(app => app.grantedGroupIds.includes(group.id)).map(app => ({
+          id: app.id,
+          slug: app.slug,
+          name: app.name,
+          shortCode: app.shortCode,
+          status: app.status,
+        }));
+
+        return {
+          ...group,
+          memberCount: group.id === 'grp_security' ? 1 : 2,
+          managerCount: 1,
+          primaryMemberCount: 1,
+          appGrants,
+        };
+      });
+    },
+    listAppsForUser() {
+      return WORKSPACE_APPS.map(app => ({
+        id: app.id,
+        slug: app.slug,
+        name: app.name,
+        summary: app.summary,
+        kind: app.kind,
+        status: app.status,
+        shortCode: app.shortCode,
+        launchCost: app.launchCost,
+        grantedGroups: app.grantedGroupIds.flatMap(groupId => {
+          const group = WORKSPACE_GROUPS.find(candidate => candidate.id === groupId);
+
+          return group ? [{ id: group.id, name: group.name }] : [];
+        }),
+        grantedRoleIds: app.grantedRoleIds,
+        directUserGrantCount: 0,
+        denyGrantCount: 0,
+        launchCount: app.id === 'app_policy_watch' ? 4 : 0,
+        lastLaunchedAt:
+          app.id === 'app_policy_watch' ? new Date(Date.now() - 15 * 60_000).toISOString() : null,
+      }));
+    },
+    listAuditForUser(user) {
+      const events = [
+        buildInMemoryAuditEvent({
+          tenantId: user.tenantId,
+          actorUserId: user.id,
+          action: 'auth.login.succeeded',
+          entityType: 'session',
+          entityId: 'mem-session-1',
+          payload: {
+            email: user.email,
+            authMethod: 'password',
+          },
+          occurredAtOffsetMs: 5 * 60_000,
+        }),
+        buildInMemoryAuditEvent({
+          tenantId: user.tenantId,
+          actorUserId: user.id,
+          action: 'auth.mfa.enabled',
+          entityType: 'user',
+          entityId: user.id,
+          payload: {
+            email: user.email,
+          },
+          occurredAtOffsetMs: 35 * 60_000,
+        }),
+        buildInMemoryAuditEvent({
+          tenantId: user.tenantId,
+          actorUserId: null,
+          action: 'auth.login.failed',
+          entityType: 'user',
+          entityId: 'usr_pending_reviewer',
+          payload: {
+            email: 'pending-review@example.net',
+          },
+          level: 'warning',
+          occurredAtOffsetMs: 50 * 60_000,
+        }),
+      ];
+
+      return {
+        countsByAction: [
+          {
+            action: 'auth.login.succeeded',
+            count: 1,
+          },
+          {
+            action: 'auth.mfa.enabled',
+            count: 1,
+          },
+          {
+            action: 'auth.login.failed',
+            count: 1,
+          },
+        ],
+        events,
+      };
+    },
+  };
+}
+
+export type { AdminService };

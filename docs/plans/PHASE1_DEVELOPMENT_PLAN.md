@@ -110,10 +110,15 @@
   - 每次新的 completion 已生成独立 run
   - `/workspace/conversations/:conversationId/runs` 与 `/workspace/runs/:runId` 已可查询
   - Web `/chat/[conversationId]` 已显示 run history / replay 视图
+- `S3-1 / S3-2` 已完成第一版真实后台只读读模型
+  - Gateway 已新增 `/admin/users`、`/admin/groups`、`/admin/apps`、`/admin/audit`
+  - `tenant_admin` 已成为后台读路径的真实鉴权边界
+  - Web `/admin/*` 已从占位页切到真实只读数据页
+  - 后台可读出用户状态 / MFA / 群组成员关系 / 应用授权 / 审计事件 / 启动活跃度
 - 生产构建下的 Gateway 启动链路已修复 workspace package ESM 导出问题
 - 已建立真实浏览器 E2E 回归基线
   - `npm run test:e2e` 会自动拉起隔离的 Web/Gateway 进程
-  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异、工作台 launch -> chat streaming/stop/run replay 和后台占位页
+  - 已覆盖注册、登录、SSO pending、邀请激活、MFA、RBAC 工作台差异、工作台 launch -> chat streaming/stop/run replay 和后台只读页
   - Linux 环境下会自动准备 Playwright 所需运行库并绕过本地代理干扰
 
 当前未完成：
@@ -121,6 +126,9 @@
 - `S1-2` Manager 授权边界、Break-glass、授权管理写接口和审计收口
 - `S1-3` 的真实 quota service 与历史列表衔接
 - `S2-2 / S2-3` 的文件上传、分享和更细粒度执行时间线
+- `S3-1` 后台写接口、审批流和批量治理动作
+- `S3-2` 审计导出、PII 标记和 run-aware 合规视图
+- 稳定公网接入（`80/443` 反向代理）仍未产品化，当前仅有临时 tunnel 手测方案
 - CI 细化
 
 ## 5. 里程碑计划
@@ -467,11 +475,16 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - Gateway 已支持读取 conversation 维度 run history 与单 run 详情
   - Web `/chat/[conversationId]` 已显示 run history、usage 和 replay snapshot
   - 浏览器与真实 HTTP 冒烟已验证“第二次 completion 新建 run 并可查询回放”
+- `R10-A` `S3-1 / S3-2` 后台读模型
+  - Gateway 已新增 `/admin/users`、`/admin/groups`、`/admin/apps`、`/admin/audit`
+  - `tenant_admin` 或 `root_admin` 已可读后台真实数据，而非进入占位页
+  - Web `/admin/*` 已能查看用户状态、群组聚合、应用授权概览和租户审计事件
+  - E2E 已切到真实后台数据验证，不再只验证“页面可打开”
 
 下一个激活项：
 
-- `R10` `S3-*` 治理闭环
-  - 进入后台、审计、平台管理能力的真实闭环
+- `R10-B` `S3-1` 后台治理写路径
+  - 基于当前只读后台继续补授权写接口、Manager 边界、Break-glass 和后台动作审计
   - 保留文件上传、分享和更细粒度执行时间线为 `S2` 残余 backlog
   - 以现有 conversation/run 持久化边界作为后续治理与观测基础
 
@@ -488,7 +501,11 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 | R7 | `S2-1` 网关协议 | 定义统一模型调用协议、错误结构和 trace | 网关最小协议可被 web 调用 |
 | R8 | `S2-2` 对话主链路 | 接入流式对话、停止生成和消息状态 | 首条真实对话链路完成 |
 | R9 | `S2-3` Run 追踪 | 让会话、执行和状态追踪闭环 | 运行态可查询、可回放 |
-| R10 | `S3-*` 治理闭环 | 进入后台、审计、平台管理能力 | 达到 Phase 1 发布门槛 |
+| R10-A | `S3-1 / S3-2` 后台读模型 | 用真实数据替换 `/admin/*` 占位页，建立只读治理面 | 已完成 |
+| R10-B | `S3-1` 后台写路径 | 补授权管理、Manager/Break-glass、批量治理动作 | 后台不再只有读能力 |
+| R11 | `S3-2` 审计合规深化 | 补审计导出、PII 标记、run-aware 合规视图 | 审计可查询、可导出、可挂 run |
+| R12 | `S2` 残余 backlog | 文件上传、分享、细粒度执行时间线与历史衔接 | 对话主链路的残余 AC 收口 |
+| R13 | `S3-3` 平台管理与发布硬化 | 平台管理、稳定公网入口、CI/观测/发布验证 | 达到 Phase 1 发布门槛 |
 
 ### 12.3 每一轮固定质量门槛
 
@@ -509,6 +526,41 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 2. 不允许完成代码但不补测试、文档和提交。
 3. 不允许为了赶进度跳过长期计划中前一轮的退出条件。
 4. 若某一轮被环境阻塞，转入同阶段内的次优先项，但必须把阻塞写入 dev-log。
+
+### 12.5 长期执行路线
+
+在 `R10-A` 完成后，后续按下面顺序持续推进，不再回到“先搭占位页”的模式：
+
+1. `R10-B`
+   - 后台从只读进入可治理状态
+   - 优先补 `workspace_app_access_grants` 写接口、Manager 边界、Break-glass 和后台动作审计
+2. `R11`
+   - 把当前 `auth` 审计事件和 `run`/`trace` 数据面汇总到统一审计检索与导出能力
+   - 为后续 PII 标记和合规导出建立稳定合同
+3. `R12`
+   - 回补 `S2` 剩余 backlog：文件上传、分享、执行时间线、会话历史回源
+4. `R13`
+   - 平台管理与发布硬化
+   - 包括稳定公网入口、CI 深化、运维可观测性和发布前容量验证
+
+### 12.6 公网手测入口策略
+
+当前仓库的浏览器/公网验证按两层策略执行：
+
+1. 开发态直连
+   - Web 直接监听 `3112`
+   - Gateway 直接监听 `4214`
+   - 适合服务器本机或 SSH 隧道访问
+2. 临时公网验证
+   - 当服务器已有 `80/443` 反向代理、且当前用户没有 root 权限时，使用 `cloudflared tunnel --url http://127.0.0.1:3112 --no-autoupdate`
+   - 该入口用于手工浏览器验证，不作为稳定发布入口
+
+稳定公网方案仍要求后续 `R13` 收口：
+
+- 在现有 `nginx` / `80/443` 下挂正式域名或路径前缀
+- Web 反代到本地 Next 进程
+- `/api/gateway/*` 反代到本地 Gateway 进程
+- 将临时 tunnel 从“测试 workaround”升级为“正式入口配置文档”
 
 ## 13. 2026-03-12 进度快照
 
@@ -558,6 +610,13 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 - `S1-3` / `S2-*` 仍未完成真实 quota service、消息持久化、渐进式流式渲染与历史列表衔接。
 - `S1-2` 已具备第一版角色体系、显式 deny 优先级和用户直授例外授权。
 - `S1-2` 仍未完成 Manager 授权路径、Break-glass 和授权写接口。
+- `S3-1 / S3-2` 已完成后台只读治理面：
+  - `/admin/users`、`/admin/groups`、`/admin/apps`、`/admin/audit` 已接真实数据
+  - 浏览器回归已覆盖后台真实数据而非占位页
+- 后续治理主线已切到 `R10-B`：
+  - 后台写接口
+  - Manager / Break-glass
+  - 审计导出与更细的合规视图
 
 ## 14. 关联文档
 

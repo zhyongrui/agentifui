@@ -19,7 +19,12 @@ export type AuthMfaTicket = {
   createdAt: string;
 };
 
-export type ProtectedPath = '/apps' | '/chat' | '/settings/profile' | '/settings/security';
+export type ProtectedPath =
+  | '/admin'
+  | '/apps'
+  | '/chat'
+  | '/settings/profile'
+  | '/settings/security';
 
 type SessionPayload =
   | LoginResponse['data']
