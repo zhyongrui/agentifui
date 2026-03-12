@@ -2,6 +2,7 @@ import type {
   WorkspaceAppLaunchRequest,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceConversationResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
@@ -211,6 +212,42 @@ export async function registerWorkspaceRoutes(
     }
 
     const response: WorkspaceAppLaunchResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.get('/workspace/conversations/:conversationId', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+
+    if (!conversationId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace conversation lookup requires a conversation id.'
+      );
+    }
+
+    const result = await workspaceService.getConversationForUser(access.user, conversationId);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationResponse = {
       ok: true,
       data: result.data,
     };

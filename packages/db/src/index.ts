@@ -18,6 +18,8 @@ export const schemaModules = [
   'workspace_app_access_grants',
   'workspace_group_app_grants',
   'workspace_user_preferences',
+  'conversations',
+  'runs',
   'workspace_app_launches',
 ] as const;
 

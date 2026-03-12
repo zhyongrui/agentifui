@@ -1,6 +1,7 @@
 import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceConversationResponse,
   WorkspacePreferencesResponse,
 } from '@agentifui/shared/apps';
 import { describe, expect, it } from 'vitest';
@@ -303,7 +304,7 @@ describe('workspace routes', () => {
     }
   });
 
-  it('creates a launch handoff for an authorized app and records it as recent', async () => {
+  it('creates a conversation-backed launch for an authorized app and records it as recent', async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
 
@@ -344,7 +345,10 @@ describe('workspace routes', () => {
       expect(body).toMatchObject({
         ok: true,
         data: {
-          status: 'handoff_ready',
+          status: 'conversation_ready',
+          conversationId: expect.any(String),
+          runId: expect.any(String),
+          traceId: expect.any(String),
           app: {
             id: 'app_policy_watch',
           },
@@ -353,7 +357,19 @@ describe('workspace routes', () => {
           },
         },
       });
-      expect(body.data.launchUrl).toContain('/apps?');
+      expect(body.data.launchUrl).toContain('/chat/');
+
+      const conversationId = body.data.conversationId;
+      const runId = body.data.runId;
+      const traceId = body.data.traceId;
+
+      expect(conversationId).toBeTruthy();
+      expect(runId).toBeTruthy();
+      expect(traceId).toBeTruthy();
+
+      if (!conversationId || !runId || !traceId) {
+        throw new Error('expected launch payload to include conversation, run and trace ids');
+      }
 
       const catalogResponse = await app.inject({
         method: 'GET',
@@ -367,6 +383,48 @@ describe('workspace routes', () => {
       expect((catalogResponse.json() as WorkspaceCatalogResponse).data.recentAppIds).toEqual([
         'app_policy_watch',
       ]);
+
+      const conversationResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversationResponse.statusCode).toBe(200);
+      expect(conversationResponse.json()).toEqual({
+        ok: true,
+        data: {
+          id: conversationId,
+          title: 'Policy Watch',
+          status: 'active',
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+          launchId: body.data.id,
+          app: {
+            id: 'app_policy_watch',
+            slug: 'policy-watch',
+            name: 'Policy Watch',
+            summary: '跟踪政策变化、合规要求和影响说明。',
+            kind: 'governance',
+            status: 'ready',
+            shortCode: 'PW',
+          },
+          activeGroup: {
+            id: 'grp_research',
+            name: 'Research Lab',
+            description: '负责分析洞察、策略研究和知识整理。',
+          },
+          run: {
+            id: runId,
+            type: 'agent',
+            status: 'pending',
+            traceId,
+            createdAt: expect.any(String),
+          },
+        },
+      } satisfies WorkspaceConversationResponse);
     } finally {
       await app.close();
     }

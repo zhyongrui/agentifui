@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -21,6 +22,20 @@ export const workspaceAppKindEnum = pgEnum('workspace_app_kind', [
 export const workspaceAppStatusEnum = pgEnum('workspace_app_status', ['ready', 'beta']);
 export const workspaceAppLaunchStatusEnum = pgEnum('workspace_app_launch_status', [
   'handoff_ready',
+  'conversation_ready',
+]);
+export const conversationStatusEnum = pgEnum('conversation_status', [
+  'active',
+  'archived',
+  'deleted',
+]);
+export const runTypeEnum = pgEnum('run_type', ['workflow', 'agent', 'generation']);
+export const runStatusEnum = pgEnum('run_status', [
+  'pending',
+  'running',
+  'succeeded',
+  'failed',
+  'stopped',
 ]);
 
 export const workspaceApps = pgTable(
@@ -102,6 +117,85 @@ export const workspaceUserPreferences = pgTable(
   })
 );
 
+export const conversations = pgTable(
+  'conversations',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    appId: varchar('app_id', { length: 120 })
+      .notNull()
+      .references(() => workspaceApps.id, { onDelete: 'cascade' }),
+    activeGroupId: varchar('active_group_id', { length: 120 }).references(() => groups.id, {
+      onDelete: 'set null',
+    }),
+    externalId: varchar('external_id', { length: 255 }),
+    title: varchar('title', { length: 512 }).notNull(),
+    status: conversationStatusEnum('status').notNull().default('active'),
+    pinned: boolean('pinned').notNull().default(false),
+    clientId: text('client_id'),
+    inputs: jsonb('inputs').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    conversationsTenantUserIndex: index('conversations_tenant_user_idx').on(
+      table.tenantId,
+      table.userId
+    ),
+    conversationsAppIndex: index('conversations_app_idx').on(table.appId),
+    conversationsUserUpdatedIndex: index('conversations_user_updated_idx').on(
+      table.userId,
+      table.updatedAt
+    ),
+    conversationsClientIdUnique: uniqueIndex('conversations_client_id_unique').on(table.clientId),
+  })
+);
+
+export const runs = pgTable(
+  'runs',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    conversationId: varchar('conversation_id', { length: 120 })
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    appId: varchar('app_id', { length: 120 })
+      .notNull()
+      .references(() => workspaceApps.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    activeGroupId: varchar('active_group_id', { length: 120 }).references(() => groups.id, {
+      onDelete: 'set null',
+    }),
+    type: runTypeEnum('type').notNull(),
+    triggeredFrom: varchar('triggered_from', { length: 32 }).notNull().default('app_launch'),
+    status: runStatusEnum('status').notNull().default('pending'),
+    inputs: jsonb('inputs').$type<Record<string, unknown>>().notNull().default({}),
+    outputs: jsonb('outputs').$type<Record<string, unknown>>().notNull().default({}),
+    error: text('error'),
+    elapsedTime: integer('elapsed_time').notNull().default(0),
+    totalTokens: integer('total_tokens').notNull().default(0),
+    totalSteps: integer('total_steps').notNull().default(0),
+    traceId: varchar('trace_id', { length: 64 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  table => ({
+    runsTenantAppIndex: index('runs_tenant_app_idx').on(table.tenantId, table.appId),
+    runsConversationIndex: index('runs_conversation_idx').on(table.conversationId),
+    runsTraceIndex: uniqueIndex('runs_trace_id_unique').on(table.traceId),
+    runsUserCreatedIndex: index('runs_user_created_idx').on(table.userId, table.createdAt),
+  })
+);
+
 export const workspaceAppLaunches = pgTable(
   'workspace_app_launches',
   {
@@ -119,6 +213,13 @@ export const workspaceAppLaunches = pgTable(
       .notNull()
       .references(() => groups.id, { onDelete: 'restrict' }),
     status: workspaceAppLaunchStatusEnum('status').notNull().default('handoff_ready'),
+    conversationId: varchar('conversation_id', { length: 120 }).references(() => conversations.id, {
+      onDelete: 'set null',
+    }),
+    runId: varchar('run_id', { length: 120 }).references(() => runs.id, {
+      onDelete: 'set null',
+    }),
+    traceId: varchar('trace_id', { length: 64 }),
     launchUrl: text('launch_url').notNull(),
     launchedAt: timestamp('launched_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -127,5 +228,8 @@ export const workspaceAppLaunches = pgTable(
     workspaceAppLaunchesTenantIndex: index('workspace_app_launches_tenant_idx').on(table.tenantId),
     workspaceAppLaunchesUserIndex: index('workspace_app_launches_user_idx').on(table.userId),
     workspaceAppLaunchesAppIndex: index('workspace_app_launches_app_idx').on(table.appId),
+    workspaceAppLaunchesConversationIndex: index('workspace_app_launches_conversation_idx').on(
+      table.conversationId
+    ),
   })
 );

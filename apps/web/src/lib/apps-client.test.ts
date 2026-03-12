@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  fetchWorkspaceConversation,
   fetchWorkspaceCatalog,
   launchWorkspaceApp,
   updateWorkspacePreferences,
@@ -181,9 +182,12 @@ describe('apps client', () => {
           ok: true,
           data: {
             id: 'launch-123',
-            status: 'handoff_ready',
-            launchUrl: '/apps?app=market-brief&launchId=launch-123',
+            status: 'conversation_ready',
+            launchUrl: '/chat/conv-123',
             launchedAt: '2026-03-12T10:05:00.000Z',
+            conversationId: 'conv-123',
+            runId: 'run-123',
+            traceId: 'trace-123',
             app: {
               id: 'app_market_brief',
               slug: 'market-brief',
@@ -225,9 +229,72 @@ describe('apps client', () => {
       ok: true,
       data: {
         id: 'launch-123',
-        status: 'handoff_ready',
+        status: 'conversation_ready',
+        conversationId: 'conv-123',
+        runId: 'run-123',
+        traceId: 'trace-123',
         attributedGroup: {
           id: 'grp_product',
+        },
+      },
+    });
+  });
+
+  it('loads a workspace conversation from the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'conv-123',
+            title: 'Market Brief',
+            status: 'active',
+            createdAt: '2026-03-12T10:05:00.000Z',
+            updatedAt: '2026-03-12T10:05:00.000Z',
+            launchId: 'launch-123',
+            app: {
+              id: 'app_market_brief',
+              slug: 'market-brief',
+              name: 'Market Brief',
+              summary: 'summary',
+              kind: 'analysis',
+              status: 'ready',
+              shortCode: 'MB',
+            },
+            activeGroup: {
+              id: 'grp_product',
+              name: 'Product Studio',
+              description: 'desc',
+            },
+            run: {
+              id: 'run-123',
+              type: 'agent',
+              status: 'pending',
+              traceId: 'trace-123',
+              createdAt: '2026-03-12T10:05:00.000Z',
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceConversation('session-123', 'conv-123');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/conversations/conv-123', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      body: undefined,
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        id: 'conv-123',
+        run: {
+          traceId: 'trace-123',
         },
       },
     });

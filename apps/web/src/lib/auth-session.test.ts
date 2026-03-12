@@ -67,13 +67,16 @@ describe('auth session helpers', () => {
   it('allows pending users to access only the profile page', () => {
     expect(canAccessProtectedPath('/settings/profile', 'pending')).toBe(true);
     expect(canAccessProtectedPath('/apps', 'pending')).toBe(false);
+    expect(canAccessProtectedPath('/chat', 'pending')).toBe(false);
     expect(canAccessProtectedPath('/settings/security', 'pending')).toBe(false);
   });
 
   it('returns the correct redirects for protected routes', () => {
     expect(getProtectedRedirect('/apps', null)).toBe('/login');
     expect(getProtectedRedirect('/apps', pendingSession)).toBe('/auth/pending');
+    expect(getProtectedRedirect('/chat', pendingSession)).toBe('/auth/pending');
     expect(getProtectedRedirect('/settings/profile', pendingSession)).toBeNull();
+    expect(getProtectedRedirect('/chat', activeSession)).toBeNull();
     expect(getProtectedRedirect('/apps', activeSession)).toBeNull();
   });
 

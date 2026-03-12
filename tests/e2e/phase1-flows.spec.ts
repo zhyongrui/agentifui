@@ -145,6 +145,14 @@ async function expectAppsWorkspace(page: Page) {
   });
 }
 
+async function expectConversationSurface(page: Page, appName: string) {
+  await expect(page).toHaveURL(/\/chat\/conv_/);
+  await expect(page.getByRole('heading', { name: appName })).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByText('Bootstrap context')).toBeVisible();
+}
+
 async function seedInvitation(email: string) {
   const token = randomUUID();
   const tokenHash = createHash('sha256').update(token).digest('hex');
@@ -241,7 +249,10 @@ test('register/login/workspace controls work for a normal active user', async ({
   await expect(page.getByLabel('Working group')).toHaveValue('grp_research');
 
   await appCard(page, 'Policy Watch').getByRole('button', { name: '打开应用' }).click();
-  await expect(page.getByText('Policy Watch 已进入启动准备态。')).toBeVisible();
+  await expectConversationSurface(page, 'Policy Watch');
+  await expect(page.getByText('Run status')).toBeVisible();
+  await page.getByRole('link', { name: 'Back to Apps workspace' }).click();
+  await expectAppsWorkspace(page);
   await expect(
     page.locator('section.workspace-section').filter({
       has: page.getByRole('heading', { name: 'Recent' }),

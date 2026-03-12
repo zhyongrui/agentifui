@@ -16,7 +16,6 @@ import { useRouter } from 'next/navigation';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 
 import {
-  recordRecentApp,
   resolveActiveGroupId,
   toggleFavoriteApp,
 } from '../../../lib/apps-workspace';
@@ -473,23 +472,7 @@ export default function AppsPage() {
       return;
     }
 
-    const nextRecentIds = recordRecentApp(recentIds, app.id);
-
-    setRecentIds(nextRecentIds);
-    setActiveGroupId(result.data.attributedGroup.id);
-    setWorkspace(currentWorkspace =>
-      currentWorkspace
-        ? {
-            ...currentWorkspace,
-            recentAppIds: nextRecentIds,
-            defaultActiveGroupId: result.data.attributedGroup.id,
-          }
-        : currentWorkspace
-    );
-    setNotice({
-      tone: 'success',
-      message: `${result.data.app.name} 已进入启动准备态。Handoff 已创建，当前配额归因到 ${result.data.attributedGroup.name}，真实会话入口会在 R6-B / S2-2 接入。`,
-    });
+    router.push(result.data.launchUrl);
   }
 
   return (

@@ -3,6 +3,7 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceApp,
   WorkspaceCatalogResponse,
+  WorkspaceConversationResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
@@ -110,4 +111,17 @@ export async function launchWorkspaceApp(
     sessionToken,
     body: input,
   });
+}
+
+export async function fetchWorkspaceConversation(
+  sessionToken: string,
+  conversationId: string
+): Promise<WorkspaceConversationResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationResponse>(
+    `/workspace/conversations/${conversationId}`,
+    {
+      method: 'GET',
+      sessionToken,
+    }
+  );
 }

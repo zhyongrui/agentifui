@@ -3,10 +3,11 @@ import type { AuthUser } from '@agentifui/shared/auth';
 import {
   evaluateAppLaunch,
   type WorkspaceApp,
-  type WorkspaceCatalog,
+  type WorkspaceConversation,
   type WorkspaceGroup,
   type WorkspacePreferences,
   type WorkspacePreferencesUpdateRequest,
+  type WorkspaceRunType,
 } from '@agentifui/shared/apps';
 import { randomUUID } from 'node:crypto';
 
@@ -18,7 +19,11 @@ import {
   resolveDefaultMemberGroupIds,
   resolveDefaultRoleIds,
 } from './workspace-catalog-fixtures.js';
-import type { WorkspaceLaunchResult, WorkspaceService } from './workspace-service.js';
+import type {
+  WorkspaceConversationResult,
+  WorkspaceLaunchResult,
+  WorkspaceService,
+} from './workspace-service.js';
 
 type GroupRow = {
   description: string | null;
@@ -62,6 +67,30 @@ type WorkspaceContext = {
   apps: WorkspaceApp[];
   groups: WorkspaceGroup[];
   memberGroupIds: string[];
+};
+
+type ConversationRow = {
+  active_group_description: string | null;
+  active_group_id: string | null;
+  active_group_name: string | null;
+  app_id: string;
+  app_kind: WorkspaceApp['kind'];
+  app_name: string;
+  app_short_code: string;
+  app_slug: string;
+  app_status: WorkspaceApp['status'];
+  app_summary: string;
+  created_at: Date | string;
+  id: string;
+  launch_id: string | null;
+  run_created_at: Date | string;
+  run_id: string;
+  run_status: WorkspaceConversation['run']['status'];
+  run_trace_id: string;
+  run_type: WorkspaceRunType;
+  status: WorkspaceConversation['status'];
+  title: string;
+  updated_at: Date | string;
 };
 
 async function listMemberGroupIds(database: DatabaseClient, userId: string) {
@@ -421,13 +450,24 @@ function recordRecentApp(currentIds: string[], appId: string, limit = 4) {
   return [appId, ...currentIds.filter(currentId => currentId !== appId)].slice(0, limit);
 }
 
-function buildLaunchUrl(appSlug: string, launchId: string) {
-  const params = new URLSearchParams({
-    app: appSlug,
-    launchId,
-  });
+function buildLaunchUrl(conversationId: string) {
+  return `/chat/${conversationId}`;
+}
 
-  return `/apps?${params.toString()}`;
+function buildTraceId() {
+  return randomUUID().replace(/-/g, '');
+}
+
+function resolveRunType(kind: WorkspaceApp['kind']): WorkspaceRunType {
+  if (kind === 'automation') {
+    return 'workflow';
+  }
+
+  if (kind === 'chat') {
+    return 'generation';
+  }
+
+  return 'agent';
 }
 
 function buildEmptyPreferences(): WorkspacePreferences {
@@ -468,6 +508,38 @@ function sanitizeWorkspacePreferences(
         ? input.defaultActiveGroupId
         : null,
     updatedAt: input.updatedAt,
+  };
+}
+
+function toWorkspaceConversation(row: ConversationRow): WorkspaceConversation {
+  return {
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    createdAt: toIso(row.created_at)!,
+    updatedAt: toIso(row.updated_at)!,
+    launchId: row.launch_id,
+    app: {
+      id: row.app_id,
+      slug: row.app_slug,
+      name: row.app_name,
+      summary: row.app_summary,
+      kind: row.app_kind,
+      status: row.app_status,
+      shortCode: row.app_short_code,
+    },
+    activeGroup: {
+      id: row.active_group_id ?? '',
+      name: row.active_group_name ?? 'Unknown group',
+      description: row.active_group_description ?? '',
+    },
+    run: {
+      id: row.run_id,
+      type: row.run_type,
+      status: row.run_status,
+      traceId: row.run_trace_id,
+      createdAt: toIso(row.run_created_at)!,
+    },
   };
 }
 
@@ -621,6 +693,48 @@ async function upsertWorkspacePreferences(
   return nextPreferences;
 }
 
+async function readConversationForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  conversationId: string
+): Promise<WorkspaceConversation | null> {
+  const [row] = await database<ConversationRow[]>`
+    select
+      c.id,
+      c.title,
+      c.status,
+      c.created_at,
+      c.updated_at,
+      l.id as launch_id,
+      a.id as app_id,
+      a.slug as app_slug,
+      a.name as app_name,
+      a.summary as app_summary,
+      a.kind as app_kind,
+      a.status as app_status,
+      a.short_code as app_short_code,
+      g.id as active_group_id,
+      g.name as active_group_name,
+      g.description as active_group_description,
+      r.id as run_id,
+      r.type as run_type,
+      r.status as run_status,
+      r.trace_id as run_trace_id,
+      r.created_at as run_created_at
+    from conversations c
+    inner join workspace_apps a on a.id = c.app_id
+    left join groups g on g.id = c.active_group_id
+    inner join runs r on r.conversation_id = c.id
+    left join workspace_app_launches l on l.conversation_id = c.id
+    where c.id = ${conversationId}
+      and c.user_id = ${user.id}
+    order by r.created_at desc
+    limit 1
+  `;
+
+  return row ? toWorkspaceConversation(row) : null;
+}
+
 export function createPersistentWorkspaceService(database: DatabaseClient): WorkspaceService {
   return {
     async getCatalogForUser(user) {
@@ -691,33 +805,113 @@ export function createPersistentWorkspaceService(database: DatabaseClient): Work
       }
 
       const launchId = randomUUID();
+      const conversationId = `conv_${randomUUID()}`;
+      const runId = `run_${randomUUID()}`;
+      const traceId = buildTraceId();
+      const runType = resolveRunType(app.kind);
       const launchedAt = new Date().toISOString();
-      const launchUrl = buildLaunchUrl(app.slug, launchId);
+      const launchUrl = buildLaunchUrl(conversationId);
 
-      await database`
-        insert into workspace_app_launches (
-          id,
-          tenant_id,
-          user_id,
-          app_id,
-          attributed_group_id,
-          status,
-          launch_url,
-          launched_at,
-          created_at
-        )
-        values (
-          ${launchId},
-          ${user.tenantId},
-          ${user.id},
-          ${app.id},
-          ${attributedGroup.id},
-          'handoff_ready',
-          ${launchUrl},
-          ${launchedAt}::timestamptz,
-          now()
-        )
-      `;
+      await database.begin(async transaction => {
+        const sql = transaction as unknown as DatabaseClient;
+
+        await sql`
+          insert into conversations (
+            id,
+            tenant_id,
+            user_id,
+            app_id,
+            active_group_id,
+            title,
+            status,
+            inputs,
+            created_at,
+            updated_at
+          )
+          values (
+            ${conversationId},
+            ${user.tenantId},
+            ${user.id},
+            ${app.id},
+            ${attributedGroup.id},
+            ${app.name},
+            'active',
+            '{}'::jsonb,
+            ${launchedAt}::timestamptz,
+            ${launchedAt}::timestamptz
+          )
+        `;
+
+        await sql`
+          insert into runs (
+            id,
+            tenant_id,
+            conversation_id,
+            app_id,
+            user_id,
+            active_group_id,
+            type,
+            triggered_from,
+            status,
+            inputs,
+            outputs,
+            elapsed_time,
+            total_tokens,
+            total_steps,
+            trace_id,
+            created_at
+          )
+          values (
+            ${runId},
+            ${user.tenantId},
+            ${conversationId},
+            ${app.id},
+            ${user.id},
+            ${attributedGroup.id},
+            ${runType},
+            'app_launch',
+            'pending',
+            '{}'::jsonb,
+            '{}'::jsonb,
+            0,
+            0,
+            0,
+            ${traceId},
+            ${launchedAt}::timestamptz
+          )
+        `;
+
+        await sql`
+          insert into workspace_app_launches (
+            id,
+            tenant_id,
+            user_id,
+            app_id,
+            attributed_group_id,
+            status,
+            conversation_id,
+            run_id,
+            trace_id,
+            launch_url,
+            launched_at,
+            created_at
+          )
+          values (
+            ${launchId},
+            ${user.tenantId},
+            ${user.id},
+            ${app.id},
+            ${attributedGroup.id},
+            'conversation_ready',
+            ${conversationId},
+            ${runId},
+            ${traceId},
+            ${launchUrl},
+            ${launchedAt}::timestamptz,
+            now()
+          )
+        `;
+      });
 
       const context = await resolveWorkspaceContext(database, user);
       await upsertWorkspacePreferences(database, user, context, {
@@ -730,9 +924,12 @@ export function createPersistentWorkspaceService(database: DatabaseClient): Work
         ok: true,
         data: {
           id: launchId,
-          status: 'handoff_ready',
+          status: 'conversation_ready',
           launchUrl,
           launchedAt,
+          conversationId,
+          runId,
+          traceId,
           app: {
             id: app.id,
             slug: app.slug,
@@ -745,6 +942,23 @@ export function createPersistentWorkspaceService(database: DatabaseClient): Work
           },
           attributedGroup,
         },
+      };
+    },
+    async getConversationForUser(user, conversationId): Promise<WorkspaceConversationResult> {
+      const conversation = await readConversationForUser(database, user, conversationId);
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: conversation,
       };
     },
   };

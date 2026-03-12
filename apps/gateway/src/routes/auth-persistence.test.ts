@@ -1,6 +1,7 @@
 import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceConversationResponse,
   WorkspacePreferencesResponse,
 } from '@agentifui/shared/apps';
 import { randomUUID } from 'node:crypto';
@@ -1005,7 +1006,10 @@ describe.sequential('persistent auth runtime', () => {
         expect(launchBody).toMatchObject({
           ok: true,
           data: {
-            status: 'handoff_ready',
+            status: 'conversation_ready',
+            conversationId: expect.any(String),
+            runId: expect.any(String),
+            traceId: expect.any(String),
             app: {
               id: 'app_policy_watch',
             },
@@ -1015,16 +1019,31 @@ describe.sequential('persistent auth runtime', () => {
           },
         });
 
+        const conversationId = launchBody.data.conversationId;
+        const runId = launchBody.data.runId;
+        const traceId = launchBody.data.traceId;
+
+        expect(conversationId).toBeTruthy();
+        expect(runId).toBeTruthy();
+        expect(traceId).toBeTruthy();
+
+        if (!conversationId || !runId || !traceId) {
+          throw new Error('expected launch payload to include conversation, run and trace ids');
+        }
+
         const runtimeDatabase = createPersistentTestDatabase();
 
         try {
           const [launchRow] = await runtimeDatabase<{
             app_id: string;
             attributed_group_id: string;
+            conversation_id: string | null;
             launch_url: string;
+            run_id: string | null;
             status: string;
+            trace_id: string | null;
           }[]>`
-            select app_id, attributed_group_id, status, launch_url
+            select app_id, attributed_group_id, status, launch_url, conversation_id, run_id, trace_id
             from workspace_app_launches
             where id = ${launchBody.data.id}
             limit 1
@@ -1041,7 +1060,10 @@ describe.sequential('persistent auth runtime', () => {
           expect(launchRow).toEqual({
             app_id: 'app_policy_watch',
             attributed_group_id: 'grp_research',
-            status: 'handoff_ready',
+            conversation_id: conversationId,
+            run_id: runId,
+            trace_id: traceId,
+            status: 'conversation_ready',
             launch_url: launchBody.data.launchUrl,
           });
 
@@ -1057,6 +1079,48 @@ describe.sequential('persistent auth runtime', () => {
         } finally {
           await runtimeDatabase.end({ timeout: 5 });
         }
+
+        const conversation = await app.inject({
+          method: 'GET',
+          url: `/workspace/conversations/${conversationId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(conversation.statusCode).toBe(200);
+        expect(conversation.json()).toEqual({
+          ok: true,
+          data: {
+            id: conversationId,
+            title: 'Policy Watch',
+            status: 'active',
+            createdAt: expect.any(String),
+            updatedAt: expect.any(String),
+            launchId: launchBody.data.id,
+            app: {
+              id: 'app_policy_watch',
+              slug: 'policy-watch',
+              name: 'Policy Watch',
+              summary: '跟踪政策变化、合规要求和影响说明。',
+              kind: 'governance',
+              status: 'ready',
+              shortCode: 'PW',
+            },
+            activeGroup: {
+              id: 'grp_research',
+              name: 'Research Lab',
+              description: '负责分析洞察、策略研究和知识整理。',
+            },
+            run: {
+              id: runId,
+              type: 'agent',
+              status: 'pending',
+              traceId,
+              createdAt: expect.any(String),
+            },
+          },
+        } satisfies WorkspaceConversationResponse);
       } finally {
         if (!appClosed) {
           await app.close();

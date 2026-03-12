@@ -2,8 +2,10 @@ import type { AuthUser } from '@agentifui/shared/auth';
 import type {
   WorkspaceAppLaunch,
   WorkspaceCatalog,
+  WorkspaceConversation,
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceRunType,
 } from '@agentifui/shared/apps';
 import { evaluateAppLaunch } from '@agentifui/shared/apps';
 import { randomUUID } from 'node:crypto';
@@ -23,12 +25,27 @@ type WorkspaceLaunchFailure = {
   details?: unknown;
 };
 
+type WorkspaceLookupFailure = {
+  ok: false;
+  statusCode: 404;
+  code: 'WORKSPACE_NOT_FOUND';
+  message: string;
+  details?: unknown;
+};
+
 type WorkspaceLaunchResult =
   | {
       ok: true;
       data: WorkspaceAppLaunch;
     }
   | WorkspaceLaunchFailure;
+
+type WorkspaceConversationResult =
+  | {
+      ok: true;
+      data: WorkspaceConversation;
+    }
+  | WorkspaceLookupFailure;
 
 type WorkspaceService = {
   getCatalogForUser(user: AuthUser): WorkspaceCatalog | Promise<WorkspaceCatalog>;
@@ -44,6 +61,14 @@ type WorkspaceService = {
       activeGroupId: string;
     }
   ): WorkspaceLaunchResult | Promise<WorkspaceLaunchResult>;
+  getConversationForUser(
+    user: AuthUser,
+    conversationId: string
+  ): WorkspaceConversationResult | Promise<WorkspaceConversationResult>;
+};
+
+type WorkspaceConversationRecord = WorkspaceConversation & {
+  userId: string;
 };
 
 function buildEmptyPreferences(): WorkspacePreferences {
@@ -63,17 +88,29 @@ function recordRecentApp(currentIds: string[], appId: string, limit = 4) {
   return [appId, ...currentIds.filter(currentId => currentId !== appId)].slice(0, limit);
 }
 
-function buildLaunchUrl(appSlug: string, launchId: string) {
-  const params = new URLSearchParams({
-    app: appSlug,
-    launchId,
-  });
+function buildLaunchUrl(conversationId: string) {
+  return `/chat/${conversationId}`;
+}
 
-  return `/apps?${params.toString()}`;
+function buildTraceId() {
+  return randomUUID().replace(/-/g, '');
+}
+
+function resolveRunType(kind: WorkspaceAppLaunch['app']['kind']): WorkspaceRunType {
+  if (kind === 'automation') {
+    return 'workflow';
+  }
+
+  if (kind === 'chat') {
+    return 'generation';
+  }
+
+  return 'agent';
 }
 
 export function createWorkspaceService(): WorkspaceService {
   const preferencesByUserId = new Map<string, WorkspacePreferences>();
+  const conversationsById = new Map<string, WorkspaceConversationRecord>();
 
   function getContextForUser(user: AuthUser) {
     const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
@@ -191,15 +228,49 @@ export function createWorkspaceService(): WorkspaceService {
       });
 
       const launchId = randomUUID();
+      const conversationId = `conv_${randomUUID()}`;
+      const runId = `run_${randomUUID()}`;
+      const traceId = buildTraceId();
       const launchedAt = new Date().toISOString();
+      const conversation: WorkspaceConversationRecord = {
+        id: conversationId,
+        title: app.name,
+        status: 'active',
+        createdAt: launchedAt,
+        updatedAt: launchedAt,
+        launchId,
+        userId: user.id,
+        app: {
+          id: app.id,
+          slug: app.slug,
+          name: app.name,
+          summary: app.summary,
+          kind: app.kind,
+          status: app.status,
+          shortCode: app.shortCode,
+        },
+        activeGroup: attributedGroup,
+        run: {
+          id: runId,
+          type: resolveRunType(app.kind),
+          status: 'pending',
+          traceId,
+          createdAt: launchedAt,
+        },
+      };
+
+      conversationsById.set(conversationId, conversation);
 
       return {
         ok: true,
         data: {
           id: launchId,
-          status: 'handoff_ready',
-          launchUrl: buildLaunchUrl(app.slug, launchId),
+          status: 'conversation_ready',
+          launchUrl: buildLaunchUrl(conversationId),
           launchedAt,
+          conversationId,
+          runId,
+          traceId,
           app: {
             id: app.id,
             slug: app.slug,
@@ -214,7 +285,26 @@ export function createWorkspaceService(): WorkspaceService {
         },
       };
     },
+    getConversationForUser(user, conversationId) {
+      const conversation = conversationsById.get(conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const { userId, ...conversationData } = conversation;
+
+      return {
+        ok: true,
+        data: conversationData,
+      };
+    },
   };
 }
 
-export type { WorkspaceLaunchResult, WorkspaceService };
+export type { WorkspaceConversationResult, WorkspaceLaunchResult, WorkspaceService };

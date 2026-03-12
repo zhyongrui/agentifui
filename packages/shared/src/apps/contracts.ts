@@ -96,13 +96,22 @@ export type WorkspaceAppLaunchRequest = {
   activeGroupId: string;
 };
 
-export type WorkspaceAppLaunchStatus = 'handoff_ready';
+export type WorkspaceAppLaunchStatus = 'handoff_ready' | 'conversation_ready';
+
+export type WorkspaceConversationStatus = 'active' | 'archived' | 'deleted';
+
+export type WorkspaceRunType = 'workflow' | 'agent' | 'generation';
+
+export type WorkspaceRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'stopped';
 
 export type WorkspaceAppLaunch = {
   id: string;
   status: WorkspaceAppLaunchStatus;
   launchUrl: string;
   launchedAt: string;
+  conversationId: string | null;
+  runId: string | null;
+  traceId: string | null;
   app: Pick<
     WorkspaceApp,
     'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode' | 'launchCost'
@@ -113,6 +122,32 @@ export type WorkspaceAppLaunch = {
 export type WorkspaceAppLaunchResponse = {
   ok: true;
   data: WorkspaceAppLaunch;
+};
+
+export type WorkspaceConversation = {
+  id: string;
+  title: string;
+  status: WorkspaceConversationStatus;
+  createdAt: string;
+  updatedAt: string;
+  launchId: string | null;
+  app: Pick<
+    WorkspaceApp,
+    'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode'
+  >;
+  activeGroup: WorkspaceGroup;
+  run: {
+    id: string;
+    type: WorkspaceRunType;
+    status: WorkspaceRunStatus;
+    traceId: string;
+    createdAt: string;
+  };
+};
+
+export type WorkspaceConversationResponse = {
+  ok: true;
+  data: WorkspaceConversation;
 };
 
 export type WorkspaceErrorCode =
