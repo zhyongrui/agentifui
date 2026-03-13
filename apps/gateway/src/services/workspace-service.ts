@@ -5,9 +5,11 @@ import type {
   WorkspaceCatalog,
   WorkspaceConversationAttachment,
   WorkspaceConversation,
+  WorkspaceConversationMessageFeedback,
   WorkspaceConversationListItem,
   WorkspaceConversationShare,
   WorkspaceConversationMessage,
+  WorkspaceMessageFeedbackRating,
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
   WorkspaceRun,
@@ -116,6 +118,12 @@ type WorkspaceConversationUploadInput = {
   bytes: Buffer;
 };
 
+type WorkspaceConversationMessageFeedbackUpdateInput = {
+  conversationId: string;
+  messageId: string;
+  rating: WorkspaceMessageFeedbackRating | null;
+};
+
 type WorkspaceConversationAttachmentLookupInput = {
   conversationId: string;
   fileIds: string[];
@@ -156,6 +164,16 @@ type WorkspaceConversationUploadResult =
   | {
       ok: true;
       data: WorkspaceConversationAttachment;
+    }
+  | WorkspaceLookupFailure;
+
+type WorkspaceConversationMessageFeedbackResult =
+  | {
+      ok: true;
+      data: {
+        conversationId: string;
+        message: WorkspaceConversationMessage;
+      };
     }
   | WorkspaceLookupFailure;
 
@@ -231,6 +249,10 @@ type WorkspaceService = {
     user: AuthUser,
     input: WorkspaceConversationUploadInput
   ): WorkspaceConversationUploadResult | Promise<WorkspaceConversationUploadResult>;
+  updateMessageFeedbackForUser(
+    user: AuthUser,
+    input: WorkspaceConversationMessageFeedbackUpdateInput
+  ): WorkspaceConversationMessageFeedbackResult | Promise<WorkspaceConversationMessageFeedbackResult>;
   listConversationAttachmentsForUser(
     user: AuthUser,
     input: WorkspaceConversationAttachmentLookupInput
@@ -418,6 +440,19 @@ function buildConversationPreview(messages: WorkspaceConversationMessage[]) {
   return {
     lastMessagePreview: normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized,
     messageCount: messages.length,
+  };
+}
+
+function buildMessageFeedback(
+  rating: WorkspaceMessageFeedbackRating | null
+): WorkspaceConversationMessageFeedback | null {
+  if (!rating) {
+    return null;
+  }
+
+  return {
+    rating,
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -1004,6 +1039,61 @@ export function createWorkspaceService(options: {
         data: attachment,
       };
     },
+    updateMessageFeedbackForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const messageIndex = conversation.messages.findIndex(
+        message => message.id === input.messageId && message.role === 'assistant'
+      );
+
+      if (messageIndex < 0) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace message could not be found.',
+        };
+      }
+
+      const currentMessage = conversation.messages[messageIndex];
+
+      if (!currentMessage) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace message could not be found.',
+        };
+      }
+
+      const nextFeedback = buildMessageFeedback(input.rating);
+      const nextMessage: WorkspaceConversationMessage = {
+        ...currentMessage,
+        feedback: nextFeedback,
+      };
+
+      conversation.messages = conversation.messages.map((message, index) =>
+        index === messageIndex ? nextMessage : message
+      );
+      conversation.updatedAt = nextFeedback?.updatedAt ?? new Date().toISOString();
+
+      return {
+        ok: true,
+        data: {
+          conversationId: input.conversationId,
+          message: nextMessage,
+        },
+      };
+    },
     listConversationAttachmentsForUser(user, input) {
       const conversation = conversationsById.get(input.conversationId);
 
@@ -1357,6 +1447,8 @@ export function createWorkspaceService(options: {
 export type {
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
+  WorkspaceConversationMessageFeedbackResult,
+  WorkspaceConversationMessageFeedbackUpdateInput,
   WorkspaceConversationListInput,
   WorkspaceConversationListResult,
   WorkspaceConversationResult,

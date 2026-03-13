@@ -7,6 +7,8 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationListResponse,
+  WorkspaceConversationMessageFeedbackRequest,
+  WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
   WorkspaceConversationShareCreateRequest,
   WorkspaceConversationShareResponse,
@@ -62,6 +64,10 @@ function isStringArray(value: unknown): value is string[] {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function isMessageFeedbackRating(value: unknown): value is 'positive' | 'negative' | null {
+  return value === null || value === 'positive' || value === 'negative';
 }
 
 function readSingleQueryValue(value: unknown): string | null {
@@ -409,6 +415,63 @@ export async function registerWorkspaceRoutes(
       ok: true,
       data: result.data,
     };
+
+    return response;
+  });
+
+  app.put('/workspace/conversations/:conversationId/messages/:messageId/feedback', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+      messageId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+    const messageId = params.messageId?.trim();
+    const body = (request.body ?? {}) as Partial<WorkspaceConversationMessageFeedbackRequest>;
+
+    if (!conversationId || !messageId || !isMessageFeedbackRating(body.rating)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace message feedback requires a conversation id, message id and nullable positive/negative rating.'
+      );
+    }
+
+    const result = await workspaceService.updateMessageFeedbackForUser(access.user, {
+      conversationId,
+      messageId,
+      rating: body.rating,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationMessageFeedbackResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.message.feedback.updated',
+      entityType: 'conversation_message',
+      entityId: messageId,
+      ipAddress: request.ip,
+      payload: {
+        conversationId,
+        messageId,
+        rating: body.rating,
+      },
+    });
 
     return response;
   });

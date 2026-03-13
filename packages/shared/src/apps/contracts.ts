@@ -149,6 +149,13 @@ export type WorkspaceConversationAttachment = {
   uploadedAt: string;
 };
 
+export type WorkspaceMessageFeedbackRating = 'positive' | 'negative';
+
+export type WorkspaceConversationMessageFeedback = {
+  rating: WorkspaceMessageFeedbackRating;
+  updatedAt: string;
+};
+
 export type WorkspaceConversationMessage = {
   id: string;
   role: 'user' | 'assistant';
@@ -156,6 +163,7 @@ export type WorkspaceConversationMessage = {
   status: WorkspaceConversationMessageStatus;
   createdAt: string;
   attachments?: WorkspaceConversationAttachment[];
+  feedback?: WorkspaceConversationMessageFeedback | null;
 };
 
 export type WorkspaceRunUsage = {
@@ -253,6 +261,18 @@ export type WorkspaceConversationListItem = {
 export type WorkspaceConversationResponse = {
   ok: true;
   data: WorkspaceConversation;
+};
+
+export type WorkspaceConversationMessageFeedbackRequest = {
+  rating: WorkspaceMessageFeedbackRating | null;
+};
+
+export type WorkspaceConversationMessageFeedbackResponse = {
+  ok: true;
+  data: {
+    conversationId: string;
+    message: WorkspaceConversationMessage;
+  };
 };
 
 export type WorkspaceConversationListResponse = {

@@ -320,6 +320,29 @@ test('register/login/workspace controls work for a normal active user', async ({
     timeout: 60_000,
   });
   await expect(page.locator('.run-replay-stack').getByText('Attached files')).toBeVisible();
+  const firstAssistantReply = page.locator('article.chat-bubble.assistant').first();
+  await firstAssistantReply.getByRole('button', { name: 'Helpful' }).click();
+  await expect(firstAssistantReply.getByRole('button', { name: 'Helpful' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await page.reload();
+  await expectConversationSurface(page, 'Policy Watch');
+  await expect(
+    page.locator('article.chat-bubble.assistant').first().getByRole('button', { name: 'Helpful' })
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    page.locator('article.chat-bubble.assistant').first().getByRole('button', { name: 'Regenerate' })
+  ).toBeVisible();
+  await page.locator('article.chat-bubble.user').first().getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByLabel('Message')).toHaveValue(
+    'Summarize the current policy changes for my group.'
+  );
+  await page.getByLabel('Message').fill('');
+  await page.locator('article.chat-bubble.assistant').first().getByRole('button', { name: 'Quote' }).click();
+  await expect(page.getByLabel('Message')).toHaveValue(
+    /> Policy Watch is now reachable through the AgentifUI gateway\./
+  );
 
   await page.getByLabel('Message').fill(buildLongStopPrompt());
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -804,9 +827,21 @@ test('root admins can open the platform tenant inventory page', async ({ page })
   });
   await expectAppsWorkspace(page);
 
-  await page.getByRole('link', { name: 'Admin preview' }).click();
+  await Promise.all([
+    page.waitForResponse(
+      response =>
+        response.request().method() === 'GET' &&
+        response.url().includes('/api/gateway/admin/context'),
+      {
+        timeout: 60_000,
+      }
+    ),
+    page.getByRole('link', { name: 'Admin preview' }).click(),
+  ]);
   await expect(page).toHaveURL(/\/admin\/users$/);
-  await expect(page.getByRole('link', { name: 'Tenants' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Tenants' })).toBeVisible({
+    timeout: 20_000,
+  });
 
   await page.getByRole('link', { name: 'Tenants' }).click();
   await expect(page).toHaveURL(/\/admin\/tenants$/);

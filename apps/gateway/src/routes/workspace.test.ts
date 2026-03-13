@@ -2,6 +2,7 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationListResponse,
+  WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
   WorkspaceConversationShareResponse,
   WorkspaceConversationSharesResponse,
@@ -624,6 +625,156 @@ describe('workspace routes', () => {
             entityId: 'app_release_radar',
             payload: expect.objectContaining({
               reason: 'quota_exceeded',
+            }),
+          }),
+        ])
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('updates persisted assistant message feedback for a workspace conversation', async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
+
+    authService.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Developer',
+    });
+
+    const login = authService.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected active login to succeed');
+    }
+
+    try {
+      const launch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_research',
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      expect(conversationId).toBeTruthy();
+
+      if (!conversationId) {
+        throw new Error('expected launch to return a conversation id');
+      }
+
+      const completion = await app.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: 'app_policy_watch',
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: 'user',
+              content: 'Summarize the latest policy changes.',
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const conversation = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversation.statusCode).toBe(200);
+
+      const assistantMessage = (conversation.json() as WorkspaceConversationResponse).data.messages.find(
+        message => message.role === 'assistant'
+      );
+
+      expect(assistantMessage?.id).toBeTruthy();
+
+      if (!assistantMessage) {
+        throw new Error('expected assistant message to exist');
+      }
+
+      const feedback = await app.inject({
+        method: 'PUT',
+        url: `/workspace/conversations/${conversationId}/messages/${assistantMessage.id}/feedback`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          rating: 'positive',
+        },
+      });
+
+      expect(feedback.statusCode).toBe(200);
+      expect(feedback.json()).toMatchObject({
+        ok: true,
+        data: {
+          conversationId,
+          message: expect.objectContaining({
+            id: assistantMessage.id,
+            feedback: {
+              rating: 'positive',
+              updatedAt: expect.any(String),
+            },
+          }),
+        },
+      } satisfies WorkspaceConversationMessageFeedbackResponse);
+
+      const refreshedConversation = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(refreshedConversation.statusCode).toBe(200);
+      expect((refreshedConversation.json() as WorkspaceConversationResponse).data.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: assistantMessage.id,
+            feedback: expect.objectContaining({
+              rating: 'positive',
+            }),
+          }),
+        ])
+      );
+
+      expect(await auditService.listEvents({ actorUserId: login.data.user.id })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'workspace.message.feedback.updated',
+            entityType: 'conversation_message',
+            entityId: assistantMessage.id,
+            payload: expect.objectContaining({
+              conversationId,
+              rating: 'positive',
             }),
           }),
         ])

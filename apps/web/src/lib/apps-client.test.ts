@@ -7,6 +7,7 @@ import {
   fetchWorkspaceCatalog,
   fetchWorkspaceRun,
   launchWorkspaceApp,
+  updateWorkspaceConversationMessageFeedback,
   updateWorkspacePreferences,
 } from './apps-client.js';
 
@@ -304,6 +305,67 @@ describe('apps client', () => {
         id: 'conv-123',
         run: {
           traceId: 'trace-123',
+        },
+      },
+    });
+  });
+
+  it('updates assistant message feedback through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            message: {
+              id: 'msg-456',
+              role: 'assistant',
+              content: 'Policy summary',
+              status: 'completed',
+              createdAt: '2026-03-13T12:00:00.000Z',
+              feedback: {
+                rating: 'positive',
+                updatedAt: '2026-03-13T12:01:00.000Z',
+              },
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await updateWorkspaceConversationMessageFeedback(
+      'session-123',
+      'conv-123',
+      'msg-456',
+      {
+        rating: 'positive',
+      }
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/gateway/workspace/conversations/conv-123/messages/msg-456/feedback',
+      {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer session-123',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          rating: 'positive',
+        }),
+        cache: 'no-store',
+      }
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        conversationId: 'conv-123',
+        message: {
+          id: 'msg-456',
+          feedback: {
+            rating: 'positive',
+          },
         },
       },
     });

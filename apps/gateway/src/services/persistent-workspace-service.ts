@@ -6,10 +6,12 @@ import {
   type WorkspaceApp,
   type WorkspaceConversationAttachment,
   type WorkspaceConversation,
+  type WorkspaceConversationMessageFeedback,
   type WorkspaceConversationListItem,
   type WorkspaceConversationShare,
   type WorkspaceConversationMessage,
   type WorkspaceGroup,
+  type WorkspaceMessageFeedbackRating,
   type WorkspacePreferences,
   type WorkspacePreferencesUpdateRequest,
   type WorkspaceRun,
@@ -34,6 +36,8 @@ import type {
   WorkspaceConversationRunsResult,
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
+  WorkspaceConversationMessageFeedbackResult,
+  WorkspaceConversationMessageFeedbackUpdateInput,
   WorkspaceConversationListInput,
   WorkspaceConversationListResult,
   WorkspaceConversationShareCreateInput,
@@ -641,6 +645,28 @@ function toWorkspaceConversationAttachments(
   return attachments.length > 0 ? attachments : undefined;
 }
 
+function toWorkspaceConversationMessageFeedback(
+  value: unknown
+): WorkspaceConversationMessageFeedback | null | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  const feedback = value as Record<string, unknown>;
+
+  if (
+    (feedback.rating !== 'positive' && feedback.rating !== 'negative') ||
+    typeof feedback.updatedAt !== 'string'
+  ) {
+    return undefined;
+  }
+
+  return {
+    rating: feedback.rating,
+    updatedAt: feedback.updatedAt,
+  };
+}
+
 function toWorkspaceConversationMessages(
   value: Record<string, unknown> | string | null | undefined
 ): WorkspaceConversationMessage[] {
@@ -690,9 +716,23 @@ function toWorkspaceConversationMessages(
             : 'completed',
         createdAt: message.createdAt,
         attachments: toWorkspaceConversationAttachments(message.attachments),
+        feedback: toWorkspaceConversationMessageFeedback(message.feedback),
       },
     ];
   });
+}
+
+function buildMessageFeedback(
+  rating: WorkspaceMessageFeedbackRating | null
+): WorkspaceConversationMessageFeedback | null {
+  if (!rating) {
+    return null;
+  }
+
+  return {
+    rating,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function toWorkspaceConversationAttachment(row: WorkspaceUploadedFileRow): WorkspaceConversationAttachment {
@@ -2155,6 +2195,63 @@ async function updateConversationRunForUser(
   return readConversationForUser(database, user, input.conversationId);
 }
 
+async function updateConversationMessageFeedbackForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceConversationMessageFeedbackUpdateInput
+): Promise<{
+  conversationId: string;
+  message: WorkspaceConversationMessage;
+} | null> {
+  const conversation = await readConversationForUser(database, user, input.conversationId);
+
+  if (!conversation) {
+    return null;
+  }
+
+  const messageIndex = conversation.messages.findIndex(
+    message => message.id === input.messageId && message.role === 'assistant'
+  );
+
+  if (messageIndex < 0) {
+    return null;
+  }
+
+  const currentMessage = conversation.messages[messageIndex];
+
+  if (!currentMessage) {
+    return null;
+  }
+
+  const nextFeedback = buildMessageFeedback(input.rating);
+  const nextMessage: WorkspaceConversationMessage = {
+    ...currentMessage,
+    feedback: nextFeedback,
+  };
+  const nextMessageHistory = conversation.messages.map((message, index) =>
+    index === messageIndex ? nextMessage : message
+  );
+  const nextUpdatedAt = nextFeedback?.updatedAt ?? new Date().toISOString();
+
+  await database`
+    update conversations
+    set updated_at = ${nextUpdatedAt}::timestamptz,
+        inputs = jsonb_set(
+          coalesce(inputs, '{}'::jsonb),
+          '{messageHistory}',
+          ${nextMessageHistory}::jsonb,
+          true
+        )
+    where id = ${input.conversationId}
+      and user_id = ${user.id}
+  `;
+
+  return {
+    conversationId: input.conversationId,
+    message: nextMessage,
+  };
+}
+
 export function createPersistentWorkspaceService(
   database: DatabaseClient,
   options: {
@@ -2495,6 +2592,26 @@ export function createPersistentWorkspaceService(
     },
     async uploadConversationFileForUser(user, input): Promise<WorkspaceConversationUploadResult> {
       return uploadConversationFileForUser(database, user, input, options.fileStorage);
+    },
+    async updateMessageFeedbackForUser(
+      user,
+      input
+    ): Promise<WorkspaceConversationMessageFeedbackResult> {
+      const message = await updateConversationMessageFeedbackForUser(database, user, input);
+
+      if (!message) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace message could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: message,
+      };
     },
     async listConversationAttachmentsForUser(
       user,

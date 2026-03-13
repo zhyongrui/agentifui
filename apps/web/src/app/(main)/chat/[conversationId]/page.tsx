@@ -12,6 +12,7 @@ import type {
   WorkspaceConversation,
   WorkspaceConversationAttachment,
   WorkspaceConversationMessage,
+  WorkspaceMessageFeedbackRating,
   WorkspaceRun,
   WorkspaceRunSummary,
   WorkspaceRunTimelineEvent,
@@ -28,6 +29,7 @@ import {
   fetchWorkspaceConversation,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceRun,
+  updateWorkspaceConversationMessageFeedback,
   uploadWorkspaceConversationFile,
 } from '../../../../lib/apps-client';
 import { clearAuthSession } from '../../../../lib/auth-session';
@@ -111,6 +113,17 @@ function attachmentsToText(attachments: WorkspaceConversationAttachment[]) {
     attachment =>
       `${attachment.fileName} (${attachment.contentType}, ${formatAttachmentSize(attachment.sizeBytes)})`
   );
+}
+
+function describeFeedbackRating(rating: WorkspaceMessageFeedbackRating) {
+  return rating === 'positive' ? 'helpful' : 'needs work';
+}
+
+function quoteMessageContent(content: string) {
+  return content
+    .split('\n')
+    .map(line => `> ${line}`)
+    .join('\n');
 }
 
 async function fileToBase64(file: File) {
@@ -251,7 +264,11 @@ export default function ConversationPage() {
   const [isStopping, setIsStopping] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [isAwaitingRunMetadata, setIsAwaitingRunMetadata] = useState(false);
+  const [activeFeedbackMessageId, setActiveFeedbackMessageId] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const copiedMessageResetRef = useRef<number | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const stopRequestedRef = useRef(false);
@@ -373,12 +390,22 @@ export default function ConversationPage() {
     setDraftAttachments([]);
     setComposerError(null);
     setLastTraceId(null);
+    setActiveFeedbackMessageId(null);
+    setCopiedMessageId(null);
     activeAssistantMessageIdRef.current = null;
     activeRunIdRef.current = null;
     stopRequestedRef.current = false;
     setIsUploadingAttachments(false);
     setIsAwaitingRunMetadata(false);
   }, [conversationId]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedMessageResetRef.current) {
+        window.clearTimeout(copiedMessageResetRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!session || !conversationId) {
@@ -493,49 +520,30 @@ export default function ConversationPage() {
     );
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const nextDraft = draft.trim();
-    const nextAttachments = draftAttachments;
-
-    if (
-      !session ||
-      !conversation ||
-      isStreaming ||
-      isUploadingAttachments ||
-      (nextDraft.length === 0 && nextAttachments.length === 0)
-    ) {
+  async function runConversationStream(input: {
+    requestMessages: WorkspaceConversationMessage[];
+    optimisticMessages: WorkspaceConversationMessage[];
+    latestUserAttachments: WorkspaceConversationAttachment[];
+    failureMessages: WorkspaceConversationMessage[];
+  }) {
+    if (!session || !conversation) {
       return;
     }
 
-    const messageContent =
-      nextDraft.length > 0
-        ? nextDraft
-        : `Attached ${nextAttachments.length} file${nextAttachments.length === 1 ? '' : 's'}.`;
-    const userMessage = buildLocalMessage({
-      role: 'user',
-      content: messageContent,
-      status: 'completed',
-      attachments: nextAttachments,
-    });
-    const assistantMessage = buildLocalMessage({
-      role: 'assistant',
-      content: '',
-      status: 'streaming',
-    });
-    const nextMessages = [...messages, userMessage];
+    const assistantMessage = input.optimisticMessages[input.optimisticMessages.length - 1];
+
+    if (!assistantMessage || assistantMessage.role !== 'assistant') {
+      return;
+    }
 
     activeAssistantMessageIdRef.current = assistantMessage.id;
     activeRunIdRef.current = null;
     stopRequestedRef.current = false;
     setComposerError(null);
-    setDraft('');
-    setDraftAttachments([]);
     setIsStreaming(true);
     setIsStopping(false);
     setIsAwaitingRunMetadata(true);
-    setMessages([...nextMessages, assistantMessage]);
+    setMessages(input.optimisticMessages);
     setConversation(currentConversation =>
       currentConversation
         ? {
@@ -554,8 +562,8 @@ export default function ConversationPage() {
         {
           app_id: conversation.app.id,
           conversation_id: conversation.id,
-          messages: toGatewayMessages(nextMessages),
-          files: toGatewayFileReferences(nextAttachments),
+          messages: toGatewayMessages(input.requestMessages),
+          files: toGatewayFileReferences(input.latestUserAttachments),
         },
         {
           onMetadata: metadata => {
@@ -646,9 +654,7 @@ export default function ConversationPage() {
         setComposerError('The chat gateway stream failed. Please retry.');
       }
 
-      setMessages(currentMessages =>
-        currentMessages.filter(message => message.id !== activeAssistantMessageIdRef.current)
-      );
+      setMessages(input.failureMessages);
       setConversation(currentConversation =>
         currentConversation
           ? {
@@ -668,6 +674,49 @@ export default function ConversationPage() {
       setIsStopping(false);
       setIsAwaitingRunMetadata(false);
     }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const nextDraft = draft.trim();
+    const nextAttachments = draftAttachments;
+
+    if (
+      !session ||
+      !conversation ||
+      isStreaming ||
+      isUploadingAttachments ||
+      (nextDraft.length === 0 && nextAttachments.length === 0)
+    ) {
+      return;
+    }
+
+    const messageContent =
+      nextDraft.length > 0
+        ? nextDraft
+        : `Attached ${nextAttachments.length} file${nextAttachments.length === 1 ? '' : 's'}.`;
+    const userMessage = buildLocalMessage({
+      role: 'user',
+      content: messageContent,
+      status: 'completed',
+      attachments: nextAttachments,
+    });
+    const assistantMessage = buildLocalMessage({
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    });
+    const nextMessages = [...messages, userMessage];
+
+    setDraft('');
+    setDraftAttachments([]);
+    await runConversationStream({
+      requestMessages: nextMessages,
+      optimisticMessages: [...nextMessages, assistantMessage],
+      latestUserAttachments: nextAttachments,
+      failureMessages: messages,
+    });
   }
 
   async function handleStop() {
@@ -707,6 +756,193 @@ export default function ConversationPage() {
     }
 
     await loadRunDetail(session.sessionToken, runId);
+  }
+
+  async function handleCopyMessage(messageId: string, content: string) {
+    if (!content.trim()) {
+      return;
+    }
+
+    if (!navigator.clipboard?.writeText) {
+      setComposerError('Clipboard access is unavailable in this browser.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+
+      if (copiedMessageResetRef.current) {
+        window.clearTimeout(copiedMessageResetRef.current);
+      }
+
+      copiedMessageResetRef.current = window.setTimeout(() => {
+        setCopiedMessageId(currentMessageId =>
+          currentMessageId === messageId ? null : currentMessageId
+        );
+        copiedMessageResetRef.current = null;
+      }, 1500);
+    } catch {
+      setComposerError('Copying message content failed. Please retry.');
+    }
+  }
+
+  function handleQuoteMessage(message: WorkspaceConversationMessage) {
+    if (!message.content.trim()) {
+      return;
+    }
+
+    const quotedMessage = quoteMessageContent(message.content);
+
+    setDraft(currentDraft =>
+      currentDraft.trim().length > 0
+        ? `${currentDraft.trim()}\n\n${quotedMessage}`
+        : `${quotedMessage}\n\n`
+    );
+    setComposerError(null);
+    composerInputRef.current?.focus();
+  }
+
+  function handleRetryMessage(message: WorkspaceConversationMessage) {
+    if (message.role !== 'user') {
+      return;
+    }
+
+    setDraft(message.content);
+    setDraftAttachments(message.attachments ?? []);
+    setComposerError(null);
+    composerInputRef.current?.focus();
+  }
+
+  async function handleRegenerateMessage(messageId: string) {
+    if (!conversation || isStreaming || isUploadingAttachments) {
+      return;
+    }
+
+    const assistantIndex = messages.findIndex(
+      message =>
+        message.id === messageId &&
+        message.role === 'assistant' &&
+        message.status === 'completed'
+    );
+
+    if (assistantIndex < 0 || assistantIndex !== messages.length - 1) {
+      setComposerError('Only the latest completed assistant reply can be regenerated right now.');
+      return;
+    }
+
+    const requestMessages = messages.slice(0, assistantIndex);
+    const latestUserMessage = [...requestMessages].reverse().find(message => message.role === 'user');
+
+    if (!latestUserMessage) {
+      setComposerError('No user message is available to regenerate.');
+      return;
+    }
+
+    const assistantMessage = buildLocalMessage({
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    });
+
+    await runConversationStream({
+      requestMessages,
+      optimisticMessages: [...requestMessages, assistantMessage],
+      latestUserAttachments: latestUserMessage.attachments ?? [],
+      failureMessages: messages,
+    });
+  }
+
+  function setMessageFeedback(
+    messageId: string,
+    feedback: WorkspaceConversationMessage['feedback'] | null
+  ) {
+    setMessages(currentMessages =>
+      currentMessages.map(message => (message.id === messageId ? { ...message, feedback } : message))
+    );
+    setConversation(currentConversation =>
+      currentConversation
+        ? {
+            ...currentConversation,
+            updatedAt: new Date().toISOString(),
+            messages: currentConversation.messages.map(message =>
+              message.id === messageId ? { ...message, feedback } : message
+            ),
+          }
+        : currentConversation
+    );
+  }
+
+  async function handleFeedback(messageId: string, rating: WorkspaceMessageFeedbackRating) {
+    if (!session || !conversation) {
+      return;
+    }
+
+    const message = messages.find(entry => entry.id === messageId);
+
+    if (!message || message.role !== 'assistant' || message.status !== 'completed') {
+      return;
+    }
+
+    const nextRating = message.feedback?.rating === rating ? null : rating;
+    const previousFeedback = message.feedback ?? null;
+
+    setComposerError(null);
+    setActiveFeedbackMessageId(messageId);
+    setMessageFeedback(
+      messageId,
+      nextRating
+        ? {
+            rating: nextRating,
+            updatedAt: new Date().toISOString(),
+          }
+        : null
+    );
+
+    try {
+      const result = await updateWorkspaceConversationMessageFeedback(
+        session.sessionToken,
+        conversation.id,
+        messageId,
+        {
+          rating: nextRating,
+        }
+      );
+
+      if (!result.ok) {
+        setMessageFeedback(messageId, previousFeedback);
+
+        if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+          clearAuthSession(window.sessionStorage);
+          router.replace('/login');
+          return;
+        }
+
+        if (result.error.code === 'WORKSPACE_FORBIDDEN') {
+          router.replace('/auth/pending');
+          return;
+        }
+
+        if (result.error.code === 'WORKSPACE_NOT_FOUND') {
+          setConversationError(
+            'This conversation is no longer available. Return to the apps workspace and relaunch it.'
+          );
+          return;
+        }
+
+        setComposerError(result.error.message);
+        return;
+      }
+
+      setMessageFeedback(messageId, result.data.message.feedback ?? null);
+    } catch {
+      setMessageFeedback(messageId, previousFeedback);
+      setComposerError('Saving message feedback failed. Please retry.');
+    } finally {
+      setActiveFeedbackMessageId(currentMessageId =>
+        currentMessageId === messageId ? null : currentMessageId
+      );
+    }
   }
 
   if (isLoading) {
@@ -881,7 +1117,7 @@ export default function ConversationPage() {
           </div>
         ) : (
           <div className="chat-placeholder">
-            {messages.map(message => (
+            {messages.map((message, index) => (
               <article key={message.id} className={`chat-bubble ${message.role}`}>
                 <div className="chat-bubble-meta">
                   <span className="chat-bubble-label">
@@ -892,6 +1128,46 @@ export default function ConversationPage() {
                   </span>
                 </div>
                 <p>{message.content || (message.status === 'streaming' ? 'Streaming...' : '')}</p>
+                <div className="chat-message-actions">
+                  <button
+                    type="button"
+                    className="message-action-button"
+                    onClick={() => void handleCopyMessage(message.id, message.content)}
+                    disabled={message.content.trim().length === 0}
+                  >
+                    {copiedMessageId === message.id ? 'Copied' : 'Copy'}
+                  </button>
+                  <button
+                    type="button"
+                    className="message-action-button"
+                    onClick={() => handleQuoteMessage(message)}
+                    disabled={message.content.trim().length === 0}
+                  >
+                    Quote
+                  </button>
+                  {message.role === 'user' ? (
+                    <button
+                      type="button"
+                      className="message-action-button"
+                      onClick={() => handleRetryMessage(message)}
+                      disabled={isStreaming || isUploadingAttachments}
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                  {message.role === 'assistant' &&
+                  message.status === 'completed' &&
+                  index === messages.length - 1 ? (
+                    <button
+                      type="button"
+                      className="message-action-button"
+                      onClick={() => void handleRegenerateMessage(message.id)}
+                      disabled={isStreaming || isUploadingAttachments}
+                    >
+                      Regenerate
+                    </button>
+                  ) : null}
+                </div>
                 {message.attachments && message.attachments.length > 0 ? (
                   <ul className="chat-attachment-list">
                     {message.attachments.map(attachment => (
@@ -901,6 +1177,37 @@ export default function ConversationPage() {
                       </li>
                     ))}
                   </ul>
+                ) : null}
+                {message.role === 'assistant' && message.status === 'completed' ? (
+                  <div className="chat-feedback-row">
+                    <span className="chat-feedback-note">
+                      {activeFeedbackMessageId === message.id
+                        ? 'Saving feedback...'
+                        : message.feedback
+                          ? `Marked ${describeFeedbackRating(message.feedback.rating)}.`
+                          : 'Rate this reply.'}
+                    </span>
+                    <div className="chat-feedback-actions">
+                      <button
+                        type="button"
+                        className="feedback-button"
+                        aria-pressed={message.feedback?.rating === 'positive'}
+                        onClick={() => void handleFeedback(message.id, 'positive')}
+                        disabled={activeFeedbackMessageId !== null}
+                      >
+                        Helpful
+                      </button>
+                      <button
+                        type="button"
+                        className="feedback-button"
+                        aria-pressed={message.feedback?.rating === 'negative'}
+                        onClick={() => void handleFeedback(message.id, 'negative')}
+                        disabled={activeFeedbackMessageId !== null}
+                      >
+                        Needs work
+                      </button>
+                    </div>
+                  </div>
                 ) : null}
               </article>
             ))}
@@ -913,6 +1220,7 @@ export default function ConversationPage() {
           </label>
           <textarea
             id="chat-message"
+            ref={composerInputRef}
             className="chat-composer-input"
             rows={4}
             placeholder={`Ask ${conversation.app.name} to work on something concrete...`}

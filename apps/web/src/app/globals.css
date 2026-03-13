@@ -768,6 +768,71 @@ button:disabled {
   color: var(--muted);
 }
 
+.chat-feedback-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.chat-feedback-note {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.chat-feedback-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-message-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.feedback-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.feedback-button:hover,
+.message-action-button:hover {
+  background: rgba(255, 255, 255, 1);
+}
+
+.feedback-button[aria-pressed='true'] {
+  border-color: rgba(13, 107, 77, 0.36);
+  background: rgba(13, 107, 77, 0.12);
+  color: var(--accent-strong);
+}
+
+.message-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .chat-bubble.user {
   justify-self: end;
   background: rgba(13, 107, 77, 0.12);

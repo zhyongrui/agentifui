@@ -4,6 +4,8 @@ import type {
   WorkspaceApp,
   WorkspaceCatalogResponse,
   WorkspaceConversationListResponse,
+  WorkspaceConversationMessageFeedbackRequest,
+  WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
   WorkspaceConversationShareCreateRequest,
   WorkspaceConversationShareResponse,
@@ -131,6 +133,22 @@ export async function fetchWorkspaceConversation(
     {
       method: 'GET',
       sessionToken,
+    }
+  );
+}
+
+export async function updateWorkspaceConversationMessageFeedback(
+  sessionToken: string,
+  conversationId: string,
+  messageId: string,
+  input: WorkspaceConversationMessageFeedbackRequest
+): Promise<WorkspaceConversationMessageFeedbackResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationMessageFeedbackResponse>(
+    `/workspace/conversations/${conversationId}/messages/${messageId}/feedback`,
+    {
+      method: 'PUT',
+      sessionToken,
+      body: input,
     }
   );
 }
