@@ -3,8 +3,8 @@ import type {
   WorkspaceConversationAttachment,
   WorkspaceConversationMessage,
   WorkspaceConversationMessageStatus,
-} from '@agentifui/shared/apps';
-import type { AuthUser } from '@agentifui/shared/auth';
+} from "@agentifui/shared/apps";
+import type { AuthUser } from "@agentifui/shared/auth";
 import type {
   ChatCompletionChunk,
   ChatCompletionFileReference,
@@ -17,15 +17,15 @@ import type {
   ChatGatewayErrorType,
   ChatModel,
   ChatModelsResponse,
-} from '@agentifui/shared/chat';
-import type { FastifyInstance } from 'fastify';
-import { randomUUID } from 'node:crypto';
-import { Readable } from 'node:stream';
+} from "@agentifui/shared/chat";
+import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 
-import type { AuditService } from '../services/audit-service.js';
-import type { AuthService } from '../services/auth-service.js';
-import { calculateCompletionQuotaCost } from '../services/workspace-quota.js';
-import type { WorkspaceService } from '../services/workspace-service.js';
+import type { AuditService } from "../services/audit-service.js";
+import type { AuthService } from "../services/auth-service.js";
+import { calculateCompletionQuotaCost } from "../services/workspace-quota.js";
+import type { WorkspaceService } from "../services/workspace-service.js";
 
 type ActiveSessionResult =
   | {
@@ -46,7 +46,7 @@ const STREAM_CHUNK_DELAY_MS = 80;
 const activeStreams = new Map<string, ActiveStreamState>();
 
 function buildTraceId() {
-  return randomUUID().replace(/-/g, '');
+  return randomUUID().replace(/-/g, "");
 }
 
 function buildConversationMessageId() {
@@ -60,7 +60,7 @@ async function recordQuotaUsageAudit(input: {
   ipAddress: string;
   promptTokens: number;
   runId: string;
-  runStatus: WorkspaceConversation['run']['status'];
+  runStatus: WorkspaceConversation["run"]["status"];
   totalTokens: number;
   traceId: string;
   user: AuthUser;
@@ -74,8 +74,8 @@ async function recordQuotaUsageAudit(input: {
   await input.auditService.recordEvent({
     tenantId: input.user.tenantId,
     actorUserId: input.user.id,
-    action: 'workspace.quota.usage_recorded',
-    entityType: 'run',
+    action: "workspace.quota.usage_recorded",
+    entityType: "run",
     entityId: input.runId,
     ipAddress: input.ipAddress,
     payload: {
@@ -100,9 +100,9 @@ function readBearerToken(value: string | undefined): string | null {
     return null;
   }
 
-  const [scheme, token] = value.split(' ');
+  const [scheme, token] = value.split(" ");
 
-  if (scheme?.toLowerCase() !== 'bearer' || !token) {
+  if (scheme?.toLowerCase() !== "bearer" || !token) {
     return null;
   }
 
@@ -116,7 +116,7 @@ function buildErrorResponse(
     type: ChatGatewayErrorType;
     code: ChatGatewayErrorCode;
     param?: string;
-  }
+  },
 ): ChatGatewayErrorResponse {
   return {
     error: {
@@ -132,7 +132,7 @@ function buildErrorResponse(
 async function requireActiveSession(
   authService: AuthService,
   authorization: string | undefined,
-  traceId: string
+  traceId: string,
 ): Promise<ActiveSessionResult> {
   const sessionToken = readBearerToken(authorization);
 
@@ -141,9 +141,9 @@ async function requireActiveSession(
       ok: false,
       statusCode: 401,
       response: buildErrorResponse(traceId, {
-        type: 'authentication_error',
-        code: 'invalid_token',
-        message: 'A valid session token is required to call the chat gateway.',
+        type: "authentication_error",
+        code: "invalid_token",
+        message: "A valid session token is required to call the chat gateway.",
       }),
     };
   }
@@ -155,21 +155,21 @@ async function requireActiveSession(
       ok: false,
       statusCode: 401,
       response: buildErrorResponse(traceId, {
-        type: 'authentication_error',
-        code: 'invalid_token',
-        message: 'The current chat gateway session is missing or has expired.',
+        type: "authentication_error",
+        code: "invalid_token",
+        message: "The current chat gateway session is missing or has expired.",
       }),
     };
   }
 
-  if (user.status !== 'active') {
+  if (user.status !== "active") {
     return {
       ok: false,
       statusCode: 403,
       response: buildErrorResponse(traceId, {
-        type: 'permission_denied',
-        code: 'app_not_authorized',
-        message: 'Only active users can invoke workspace chat applications.',
+        type: "permission_denied",
+        code: "app_not_authorized",
+        message: "Only active users can invoke workspace chat applications.",
       }),
     };
   }
@@ -180,33 +180,31 @@ async function requireActiveSession(
   };
 }
 
-function isContentPart(
-  value: unknown
-): value is {
-  type: 'text' | 'image_url';
+function isContentPart(value: unknown): value is {
+  type: "text" | "image_url";
   text?: string;
   image_url?: {
     url: string;
-    detail?: 'auto' | 'low' | 'high';
+    detail?: "auto" | "low" | "high";
   };
 } {
-  if (typeof value !== 'object' || value === null) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
   const part = value as Record<string, unknown>;
 
-  if (part.type === 'text') {
-    return typeof part.text === 'string';
+  if (part.type === "text") {
+    return typeof part.text === "string";
   }
 
-  if (part.type === 'image_url') {
+  if (part.type === "image_url") {
     const imageUrl = part.image_url;
 
     return (
-      typeof imageUrl === 'object' &&
+      typeof imageUrl === "object" &&
       imageUrl !== null &&
-      typeof (imageUrl as Record<string, unknown>).url === 'string'
+      typeof (imageUrl as Record<string, unknown>).url === "string"
     );
   }
 
@@ -214,64 +212,93 @@ function isContentPart(
 }
 
 function isChatMessage(value: unknown): value is ChatCompletionMessage {
-  if (typeof value !== 'object' || value === null) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
   const message = value as Record<string, unknown>;
 
   if (
-    message.role !== 'system' &&
-    message.role !== 'user' &&
-    message.role !== 'assistant' &&
-    message.role !== 'tool'
+    message.role !== "system" &&
+    message.role !== "user" &&
+    message.role !== "assistant" &&
+    message.role !== "tool"
   ) {
     return false;
   }
 
-  if (typeof message.content === 'string') {
+  if (typeof message.content === "string") {
     return true;
   }
 
   return Array.isArray(message.content) && message.content.every(isContentPart);
 }
 
-function isChatFileReference(value: unknown): value is ChatCompletionFileReference {
-  if (typeof value !== 'object' || value === null) {
+function isChatFileReference(
+  value: unknown,
+): value is ChatCompletionFileReference {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
   const file = value as Record<string, unknown>;
 
   return (
-    (file.type === 'local' || file.type === 'remote') &&
-    (file.transfer_method === 'local_file' || file.transfer_method === 'remote_url') &&
-    (file.file_id === undefined || typeof file.file_id === 'string') &&
-    (file.url === undefined || typeof file.url === 'string')
+    (file.type === "local" || file.type === "remote") &&
+    (file.transfer_method === "local_file" ||
+      file.transfer_method === "remote_url") &&
+    (file.file_id === undefined || typeof file.file_id === "string") &&
+    (file.url === undefined || typeof file.url === "string")
   );
 }
 
 function extractMessageText(message: ChatCompletionMessage) {
-  if (typeof message.content === 'string') {
+  if (typeof message.content === "string") {
     return message.content.trim();
   }
 
   return message.content
-    .map(part => {
-      if (part.type === 'text') {
-        return part.text ?? '';
+    .map((part) => {
+      if (part.type === "text") {
+        return part.text ?? "";
       }
 
-      return `[image:${part.image_url?.url ?? 'unknown'}]`;
+      return `[image:${part.image_url?.url ?? "unknown"}]`;
     })
-    .join(' ')
+    .join(" ")
     .trim();
 }
 
 function extractLatestUserPrompt(messages: ChatCompletionMessage[]) {
-  const latestUserMessage = [...messages].reverse().find(message => message.role === 'user');
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === "user");
 
-  return latestUserMessage ? extractMessageText(latestUserMessage) : '';
+  return latestUserMessage ? extractMessageText(latestUserMessage) : "";
+}
+
+function normalizeSuggestedPrompts(prompts: string[]) {
+  return [
+    ...new Set(
+      prompts
+        .map((prompt) => prompt.replace(/\s+/g, " ").trim())
+        .filter(Boolean),
+    ),
+  ].slice(0, 3);
+}
+
+function buildSuggestedPrompts(latestPrompt: string) {
+  const normalizedPrompt = latestPrompt.replace(/\s+/g, " ").trim();
+  const topic =
+    normalizedPrompt.length > 0
+      ? normalizedPrompt.slice(0, 72)
+      : "this workspace task";
+
+  return normalizeSuggestedPrompts([
+    `Summarize the key takeaways about "${topic}".`,
+    `List the next checks I should run for "${topic}".`,
+    `Draft a short stakeholder update about "${topic}".`,
+  ]);
 }
 
 function estimateTokens(text: string) {
@@ -285,11 +312,11 @@ function chunkText(text: string, size = 32) {
     chunks.push(text.slice(index, index + size));
   }
 
-  return chunks.length > 0 ? chunks : [''];
+  return chunks.length > 0 ? chunks : [""];
 }
 
 function sleep(durationMs: number) {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     setTimeout(resolve, durationMs);
   });
 }
@@ -301,40 +328,51 @@ function buildPersistedHistory(
     assistantMessage?: {
       content: string;
       status: WorkspaceConversationMessageStatus;
+      suggestedPrompts?: string[];
     };
-  } = {}
+  } = {},
 ): WorkspaceConversationMessage[] {
   const baseTime = Date.now();
   const latestUserMessageIndex = [...messages]
-    .map(message => message.role)
-    .lastIndexOf('user');
-  const transcript: WorkspaceConversationMessage[] = messages.flatMap((message, index) => {
-    if (message.role !== 'user' && message.role !== 'assistant') {
-      return [];
-    }
+    .map((message) => message.role)
+    .lastIndexOf("user");
+  const transcript: WorkspaceConversationMessage[] = messages.flatMap(
+    (message, index) => {
+      if (message.role !== "user" && message.role !== "assistant") {
+        return [];
+      }
 
-    return [
-      {
-        id: buildConversationMessageId(),
-        role: message.role,
-        content: extractMessageText(message),
-        status: 'completed',
-        createdAt: new Date(baseTime + index).toISOString(),
-        attachments:
-          message.role === 'user' && index === latestUserMessageIndex
-            ? input.latestUserAttachments
-            : undefined,
-      } satisfies WorkspaceConversationMessage,
-    ];
-  });
+      return [
+        {
+          id: buildConversationMessageId(),
+          role: message.role,
+          content: extractMessageText(message),
+          status: "completed",
+          createdAt: new Date(baseTime + index).toISOString(),
+          attachments:
+            message.role === "user" && index === latestUserMessageIndex
+              ? input.latestUserAttachments
+              : undefined,
+        } satisfies WorkspaceConversationMessage,
+      ];
+    },
+  );
 
-  if (input.assistantMessage && input.assistantMessage.content.trim().length > 0) {
+  if (
+    input.assistantMessage &&
+    input.assistantMessage.content.trim().length > 0
+  ) {
     transcript.push({
       id: buildConversationMessageId(),
-      role: 'assistant',
+      role: "assistant",
       content: input.assistantMessage.content,
       status: input.assistantMessage.status,
       createdAt: new Date(baseTime + transcript.length).toISOString(),
+      suggestedPrompts:
+        input.assistantMessage.suggestedPrompts &&
+        input.assistantMessage.suggestedPrompts.length > 0
+          ? input.assistantMessage.suggestedPrompts
+          : undefined,
     });
   }
 
@@ -344,13 +382,13 @@ function buildPersistedHistory(
 function buildAssistantText(
   conversation: WorkspaceConversation,
   messages: ChatCompletionMessage[],
-  attachments: WorkspaceConversationAttachment[] = []
+  attachments: WorkspaceConversationAttachment[] = [],
 ) {
   const latestPrompt = extractLatestUserPrompt(messages);
-  const requestSummary = latestPrompt || 'Continue the current workspace task.';
+  const requestSummary = latestPrompt || "Continue the current workspace task.";
   const attachmentSummary =
     attachments.length > 0
-      ? `Attachments: ${attachments.map(file => `${file.fileName} (${file.contentType}, ${file.sizeBytes} bytes)`).join(', ')}.`
+      ? `Attachments: ${attachments.map((file) => `${file.fileName} (${file.contentType}, ${file.sizeBytes} bytes)`).join(", ")}.`
       : null;
 
   return [
@@ -358,33 +396,35 @@ function buildAssistantText(
     `Request: ${requestSummary}`,
     attachmentSummary,
     `Context: attributed group ${conversation.activeGroup.name}, trace ${conversation.run.traceId}.`,
-    'This is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.',
+    "This is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
   ]
     .filter((entry): entry is string => Boolean(entry))
-    .join('\n\n');
+    .join("\n\n");
 }
 
 function resolveModelName(
   body: ChatCompletionRequest,
-  conversation: WorkspaceConversation
+  conversation: WorkspaceConversation,
 ) {
   return body.model?.trim() || conversation.app.slug;
 }
 
-function mapAppKindToMode(appKind: WorkspaceConversation['app']['kind']): ChatModel['mode'] {
-  if (appKind === 'chat') {
-    return 'chat';
+function mapAppKindToMode(
+  appKind: WorkspaceConversation["app"]["kind"],
+): ChatModel["mode"] {
+  if (appKind === "chat") {
+    return "chat";
   }
 
-  if (appKind === 'automation') {
-    return 'workflow';
+  if (appKind === "automation") {
+    return "workflow";
   }
 
-  if (appKind === 'analysis') {
-    return 'completion';
+  if (appKind === "analysis") {
+    return "completion";
   }
 
-  return 'agent';
+  return "agent";
 }
 
 async function resolveConversation(
@@ -392,12 +432,12 @@ async function resolveConversation(
   user: AuthUser,
   body: ChatCompletionRequest,
   activeGroupId: string | undefined,
-  traceId: string
+  traceId: string,
 ) {
   if (body.conversation_id?.trim()) {
     const conversationResult = await workspaceService.getConversationForUser(
       user,
-      body.conversation_id.trim()
+      body.conversation_id.trim(),
     );
 
     if (!conversationResult.ok) {
@@ -405,10 +445,10 @@ async function resolveConversation(
         ok: false as const,
         statusCode: 404,
         response: buildErrorResponse(traceId, {
-          type: 'not_found_error',
-          code: 'conversation_not_found',
-          message: 'The target workspace conversation could not be found.',
-          param: 'conversation_id',
+          type: "not_found_error",
+          code: "conversation_not_found",
+          message: "The target workspace conversation could not be found.",
+          param: "conversation_id",
         }),
       };
     }
@@ -418,10 +458,11 @@ async function resolveConversation(
         ok: false as const,
         statusCode: 400,
         response: buildErrorResponse(traceId, {
-          type: 'invalid_request_error',
-          code: 'invalid_app_id',
-          message: 'The provided app_id does not match the existing conversation.',
-          param: 'app_id',
+          type: "invalid_request_error",
+          code: "invalid_app_id",
+          message:
+            "The provided app_id does not match the existing conversation.",
+          param: "app_id",
         }),
       };
     }
@@ -433,51 +474,54 @@ async function resolveConversation(
   }
 
   const catalog = await workspaceService.getCatalogForUser(user);
-  const nextActiveGroupId = activeGroupId?.trim() || catalog.defaultActiveGroupId;
+  const nextActiveGroupId =
+    activeGroupId?.trim() || catalog.defaultActiveGroupId;
   const launchResult = await workspaceService.launchAppForUser(user, {
     appId: body.app_id,
     activeGroupId: nextActiveGroupId,
   });
 
   if (!launchResult.ok) {
-    if (launchResult.code === 'WORKSPACE_NOT_FOUND') {
+    if (launchResult.code === "WORKSPACE_NOT_FOUND") {
       return {
         ok: false as const,
         statusCode: 404,
         response: buildErrorResponse(traceId, {
-          type: 'not_found_error',
-          code: 'app_not_found',
+          type: "not_found_error",
+          code: "app_not_found",
           message: launchResult.message,
-          param: 'app_id',
+          param: "app_id",
         }),
       };
     }
 
     const launchReason =
-      typeof launchResult.details === 'object' && launchResult.details !== null
+      typeof launchResult.details === "object" && launchResult.details !== null
         ? (launchResult.details as Record<string, unknown>).reason
         : null;
 
-    if (launchReason === 'quota_exceeded') {
+    if (launchReason === "quota_exceeded") {
       return {
         ok: false as const,
         statusCode: 429,
         response: buildErrorResponse(traceId, {
-          type: 'rate_limit_error',
-          code: 'quota_exceeded',
-          message: 'The workspace launch is blocked because the current quota is exhausted.',
+          type: "rate_limit_error",
+          code: "quota_exceeded",
+          message:
+            "The workspace launch is blocked because the current quota is exhausted.",
         }),
       };
     }
 
-    if (launchReason === 'quota_service_degraded') {
+    if (launchReason === "quota_service_degraded") {
       return {
         ok: false as const,
         statusCode: 503,
         response: buildErrorResponse(traceId, {
-          type: 'service_unavailable',
-          code: 'provider_unavailable',
-          message: 'The workspace quota service is degraded, so new conversations are temporarily blocked.',
+          type: "service_unavailable",
+          code: "provider_unavailable",
+          message:
+            "The workspace quota service is degraded, so new conversations are temporarily blocked.",
         }),
       };
     }
@@ -486,8 +530,8 @@ async function resolveConversation(
       ok: false as const,
       statusCode: 403,
       response: buildErrorResponse(traceId, {
-        type: 'permission_denied',
-        code: 'app_not_authorized',
+        type: "permission_denied",
+        code: "app_not_authorized",
         message: launchResult.message,
       }),
     };
@@ -498,16 +542,17 @@ async function resolveConversation(
       ok: false as const,
       statusCode: 500,
       response: buildErrorResponse(traceId, {
-        type: 'internal_error',
-        code: 'provider_error',
-        message: 'Workspace launch completed without a conversation identifier.',
+        type: "internal_error",
+        code: "provider_error",
+        message:
+          "Workspace launch completed without a conversation identifier.",
       }),
     };
   }
 
   const conversationResult = await workspaceService.getConversationForUser(
     user,
-    launchResult.data.conversationId
+    launchResult.data.conversationId,
   );
 
   if (!conversationResult.ok) {
@@ -515,9 +560,10 @@ async function resolveConversation(
       ok: false as const,
       statusCode: 500,
       response: buildErrorResponse(traceId, {
-        type: 'internal_error',
-        code: 'provider_error',
-        message: 'Workspace launch succeeded, but the conversation bootstrap could not be reloaded.',
+        type: "internal_error",
+        code: "provider_error",
+        message:
+          "Workspace launch succeeded, but the conversation bootstrap could not be reloaded.",
       }),
     };
   }
@@ -532,11 +578,11 @@ async function ensureConversationRun(
   workspaceService: WorkspaceService,
   user: AuthUser,
   conversation: WorkspaceConversation,
-  traceId: string
+  traceId: string,
 ) {
   if (
     conversation.messages.length === 0 &&
-    conversation.run.status === 'pending' &&
+    conversation.run.status === "pending" &&
     conversation.run.totalSteps === 0
   ) {
     return {
@@ -547,7 +593,7 @@ async function ensureConversationRun(
 
   const nextRun = await workspaceService.createConversationRunForUser(user, {
     conversationId: conversation.id,
-    triggeredFrom: 'chat_completion',
+    triggeredFrom: "chat_completion",
   });
 
   if (!nextRun.ok) {
@@ -555,10 +601,10 @@ async function ensureConversationRun(
       ok: false as const,
       statusCode: 404,
       response: buildErrorResponse(traceId, {
-        type: 'not_found_error',
-        code: 'conversation_not_found',
-        message: 'The target workspace conversation could not be found.',
-        param: 'conversation_id',
+        type: "not_found_error",
+        code: "conversation_not_found",
+        message: "The target workspace conversation could not be found.",
+        param: "conversation_id",
       }),
     };
   }
@@ -574,10 +620,14 @@ async function resolveConversationAttachments(
   user: AuthUser,
   conversationId: string,
   files: ChatCompletionFileReference[],
-  traceId: string
+  traceId: string,
 ) {
-  const localFileIds = files.flatMap(file => {
-    if (file.type !== 'local' || file.transfer_method !== 'local_file' || !file.file_id?.trim()) {
+  const localFileIds = files.flatMap((file) => {
+    if (
+      file.type !== "local" ||
+      file.transfer_method !== "local_file" ||
+      !file.file_id?.trim()
+    ) {
       return [];
     }
 
@@ -589,28 +639,29 @@ async function resolveConversationAttachments(
       ok: false as const,
       statusCode: 400,
       response: buildErrorResponse(traceId, {
-        type: 'invalid_request_error',
-        code: 'invalid_file_id',
-        message: 'Only local uploaded workspace file references are supported.',
-        param: 'files',
+        type: "invalid_request_error",
+        code: "invalid_file_id",
+        message: "Only local uploaded workspace file references are supported.",
+        param: "files",
       }),
     };
   }
 
-  const attachmentsResult = await workspaceService.listConversationAttachmentsForUser(user, {
-    conversationId,
-    fileIds: localFileIds,
-  });
+  const attachmentsResult =
+    await workspaceService.listConversationAttachmentsForUser(user, {
+      conversationId,
+      fileIds: localFileIds,
+    });
 
   if (!attachmentsResult.ok) {
     return {
       ok: false as const,
       statusCode: 404,
       response: buildErrorResponse(traceId, {
-        type: 'not_found_error',
-        code: 'conversation_not_found',
-        message: 'The target workspace conversation could not be found.',
-        param: 'conversation_id',
+        type: "not_found_error",
+        code: "conversation_not_found",
+        message: "The target workspace conversation could not be found.",
+        param: "conversation_id",
       }),
     };
   }
@@ -620,10 +671,11 @@ async function resolveConversationAttachments(
       ok: false as const,
       statusCode: 400,
       response: buildErrorResponse(traceId, {
-        type: 'invalid_request_error',
-        code: 'invalid_file_id',
-        message: 'One or more workspace file references could not be resolved for this conversation.',
-        param: 'files',
+        type: "invalid_request_error",
+        code: "invalid_file_id",
+        message:
+          "One or more workspace file references could not be resolved for this conversation.",
+        param: "files",
       }),
     };
   }
@@ -655,13 +707,14 @@ function buildStreamingChunk(input: {
   conversationId: string;
   traceId: string;
   content?: string;
-  finishReason?: ChatCompletionChunk['choices'][0]['finish_reason'];
+  finishReason?: ChatCompletionChunk["choices"][0]["finish_reason"];
   includeRole?: boolean;
-  usage?: ChatCompletionChunk['usage'];
+  usage?: ChatCompletionChunk["usage"];
+  suggestedPrompts?: string[];
 }): ChatCompletionChunk {
   return {
     id: input.id,
-    object: 'chat.completion.chunk',
+    object: "chat.completion.chunk",
     created: input.created,
     model: input.model,
     conversation_id: input.conversationId,
@@ -670,13 +723,16 @@ function buildStreamingChunk(input: {
       {
         index: 0,
         delta: {
-          ...(input.includeRole ? { role: 'assistant' as const } : {}),
+          ...(input.includeRole ? { role: "assistant" as const } : {}),
           ...(input.content ? { content: input.content } : {}),
         },
         finish_reason: input.finishReason ?? null,
       },
     ],
     ...(input.usage ? { usage: input.usage } : {}),
+    ...(input.suggestedPrompts && input.suggestedPrompts.length > 0
+      ? { suggested_prompts: input.suggestedPrompts }
+      : {}),
   };
 }
 
@@ -687,20 +743,22 @@ function buildBlockingResponse(input: {
   promptTokens: number;
   completionTokens: number;
   assistantText: string;
+  suggestedPrompts: string[];
 }): ChatCompletionResponse {
   return {
     id: input.conversation.run.id,
-    object: 'chat.completion',
+    object: "chat.completion",
     created: input.created,
     model: input.model,
     choices: [
       {
         index: 0,
         message: {
-          role: 'assistant',
+          role: "assistant",
           content: input.assistantText,
+          suggested_prompts: input.suggestedPrompts,
         },
-        finish_reason: 'stop',
+        finish_reason: "stop",
       },
     ],
     usage: {
@@ -727,13 +785,14 @@ async function* streamCompletionEvents(input: {
   model: string;
   promptTokens: number;
   assistantText: string;
+  suggestedPrompts: string[];
   messages: ChatCompletionMessage[];
   startedAt: number;
   user: AuthUser;
   workspaceService: WorkspaceService;
 }) {
   const streamState = activeStreams.get(input.conversation.run.id);
-  let assistantContent = '';
+  let assistantContent = "";
   let finalized = false;
 
   try {
@@ -748,7 +807,7 @@ async function* streamCompletionEvents(input: {
         conversationId: input.conversation.id,
         traceId: input.conversation.run.traceId,
         includeRole: true,
-      })
+      }),
     );
 
     for (const contentChunk of chunkText(input.assistantText)) {
@@ -765,7 +824,7 @@ async function* streamCompletionEvents(input: {
           conversationId: input.conversation.id,
           traceId: input.conversation.run.traceId,
           content: contentChunk,
-        })
+        }),
       );
 
       await sleep(STREAM_CHUNK_DELAY_MS);
@@ -773,34 +832,37 @@ async function* streamCompletionEvents(input: {
 
     const wasStopped = Boolean(streamState?.stopRequested);
     const completionTokens = estimateTokens(assistantContent);
-    const updateResult = await input.workspaceService.updateConversationRunForUser(input.user, {
-      conversationId: input.conversation.id,
-      runId: input.conversation.run.id,
-      status: wasStopped ? 'stopped' : 'succeeded',
-      messageHistory: buildPersistedHistory(input.messages, {
-        latestUserAttachments: input.attachments,
-        assistantMessage: {
-          content: assistantContent,
-          status: wasStopped ? 'stopped' : 'completed',
+    const updateResult =
+      await input.workspaceService.updateConversationRunForUser(input.user, {
+        conversationId: input.conversation.id,
+        runId: input.conversation.run.id,
+        status: wasStopped ? "stopped" : "succeeded",
+        messageHistory: buildPersistedHistory(input.messages, {
+          latestUserAttachments: input.attachments,
+          assistantMessage: {
+            content: assistantContent,
+            status: wasStopped ? "stopped" : "completed",
+            suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
+          },
+        }),
+        outputs: {
+          assistant: {
+            content: assistantContent,
+            finishReason: "stop",
+            status: wasStopped ? "stopped" : "completed",
+            suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
+          },
+          usage: {
+            promptTokens: input.promptTokens,
+            completionTokens,
+            totalTokens: input.promptTokens + completionTokens,
+          },
         },
-      }),
-      outputs: {
-        assistant: {
-          content: assistantContent,
-          finishReason: 'stop',
-          status: wasStopped ? 'stopped' : 'completed',
-        },
-        usage: {
-          promptTokens: input.promptTokens,
-          completionTokens,
-          totalTokens: input.promptTokens + completionTokens,
-        },
-      },
-      elapsedTime: Date.now() - input.startedAt,
-      totalTokens: input.promptTokens + completionTokens,
-      totalSteps: 1,
-      finishedAt: new Date().toISOString(),
-    });
+        elapsedTime: Date.now() - input.startedAt,
+        totalTokens: input.promptTokens + completionTokens,
+        totalSteps: 1,
+        finishedAt: new Date().toISOString(),
+      });
 
     finalized = true;
 
@@ -810,7 +872,8 @@ async function* streamCompletionEvents(input: {
       model: input.model,
       conversationId: input.conversation.id,
       traceId: input.conversation.run.traceId,
-      finishReason: 'stop',
+      finishReason: "stop",
+      suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
       usage: {
         prompt_tokens: input.promptTokens,
         completion_tokens: completionTokens,
@@ -819,7 +882,7 @@ async function* streamCompletionEvents(input: {
     });
 
     yield buildChunkEvent(finalChunk);
-    yield 'data: [DONE]\n\n';
+    yield "data: [DONE]\n\n";
 
     if (!updateResult.ok) {
       return;
@@ -832,7 +895,7 @@ async function* streamCompletionEvents(input: {
       ipAddress: input.ipAddress,
       promptTokens: input.promptTokens,
       runId: input.conversation.run.id,
-      runStatus: wasStopped ? 'stopped' : 'succeeded',
+      runStatus: wasStopped ? "stopped" : "succeeded",
       totalTokens: input.promptTokens + completionTokens,
       traceId: input.conversation.run.traceId,
       user: input.user,
@@ -842,35 +905,40 @@ async function* streamCompletionEvents(input: {
 
     if (!finalized) {
       const completionTokens = estimateTokens(assistantContent);
-      const fallbackResult = await input.workspaceService.updateConversationRunForUser(input.user, {
-        conversationId: input.conversation.id,
-        runId: input.conversation.run.id,
-        status: streamState?.stopRequested ? 'stopped' : 'failed',
-        messageHistory: buildPersistedHistory(input.messages, {
-          latestUserAttachments: input.attachments,
-          assistantMessage: {
-            content: assistantContent,
-            status: streamState?.stopRequested ? 'stopped' : 'failed',
+      const fallbackResult =
+        await input.workspaceService.updateConversationRunForUser(input.user, {
+          conversationId: input.conversation.id,
+          runId: input.conversation.run.id,
+          status: streamState?.stopRequested ? "stopped" : "failed",
+          messageHistory: buildPersistedHistory(input.messages, {
+            latestUserAttachments: input.attachments,
+            assistantMessage: {
+              content: assistantContent,
+              status: streamState?.stopRequested ? "stopped" : "failed",
+              suggestedPrompts: undefined,
+            },
+          }),
+          outputs: {
+            assistant: {
+              content: assistantContent,
+              finishReason: "stop",
+              status: streamState?.stopRequested ? "stopped" : "failed",
+              suggestedPrompts: undefined,
+            },
+            usage: {
+              promptTokens: input.promptTokens,
+              completionTokens,
+              totalTokens: input.promptTokens + completionTokens,
+            },
           },
-        }),
-        outputs: {
-          assistant: {
-            content: assistantContent,
-            finishReason: 'stop',
-            status: streamState?.stopRequested ? 'stopped' : 'failed',
-          },
-          usage: {
-            promptTokens: input.promptTokens,
-            completionTokens,
-            totalTokens: input.promptTokens + completionTokens,
-          },
-        },
-        error: streamState?.stopRequested ? undefined : 'The streaming response ended unexpectedly.',
-        elapsedTime: Date.now() - input.startedAt,
-        totalTokens: input.promptTokens + estimateTokens(assistantContent),
-        totalSteps: 1,
-        finishedAt: new Date().toISOString(),
-      });
+          error: streamState?.stopRequested
+            ? undefined
+            : "The streaming response ended unexpectedly.",
+          elapsedTime: Date.now() - input.startedAt,
+          totalTokens: input.promptTokens + estimateTokens(assistantContent),
+          totalSteps: 1,
+          finishedAt: new Date().toISOString(),
+        });
 
       if (fallbackResult.ok) {
         await recordQuotaUsageAudit({
@@ -880,7 +948,7 @@ async function* streamCompletionEvents(input: {
           ipAddress: input.ipAddress,
           promptTokens: input.promptTokens,
           runId: input.conversation.run.id,
-          runStatus: streamState?.stopRequested ? 'stopped' : 'failed',
+          runStatus: streamState?.stopRequested ? "stopped" : "failed",
           totalTokens: input.promptTokens + completionTokens,
           traceId: input.conversation.run.traceId,
           user: input.user,
@@ -894,13 +962,18 @@ export async function registerChatRoutes(
   app: FastifyInstance,
   authService: AuthService,
   workspaceService: WorkspaceService,
-  auditService: AuditService
+  auditService: AuditService,
 ) {
-  app.get('/v1/models', async (request, reply) => {
-    const traceId = request.headers['x-trace-id']?.toString().trim() || buildTraceId();
-    const access = await requireActiveSession(authService, request.headers.authorization, traceId);
+  app.get("/v1/models", async (request, reply) => {
+    const traceId =
+      request.headers["x-trace-id"]?.toString().trim() || buildTraceId();
+    const access = await requireActiveSession(
+      authService,
+      request.headers.authorization,
+      traceId,
+    );
 
-    reply.header('X-Trace-ID', traceId);
+    reply.header("X-Trace-ID", traceId);
 
     if (!access.ok) {
       reply.code(access.statusCode);
@@ -910,10 +983,10 @@ export async function registerChatRoutes(
     const catalog = await workspaceService.getCatalogForUser(access.user);
     const created = Math.floor(Date.now() / 1000);
     const response: ChatModelsResponse = {
-      object: 'list',
-      data: catalog.apps.map(chatApp => ({
+      object: "list",
+      data: catalog.apps.map((chatApp) => ({
         id: chatApp.id,
-        object: 'model',
+        object: "model",
         created,
         owned_by: access.user.tenantId,
         name: chatApp.name,
@@ -924,7 +997,8 @@ export async function registerChatRoutes(
           stop: true,
           tools: true,
           files: true,
-          citations: chatApp.kind === 'analysis' || chatApp.kind === 'governance',
+          citations:
+            chatApp.kind === "analysis" || chatApp.kind === "governance",
         },
       })),
     };
@@ -932,15 +1006,16 @@ export async function registerChatRoutes(
     return response;
   });
 
-  app.post('/v1/chat/completions', async (request, reply) => {
-    const fallbackTraceId = request.headers['x-trace-id']?.toString().trim() || buildTraceId();
+  app.post("/v1/chat/completions", async (request, reply) => {
+    const fallbackTraceId =
+      request.headers["x-trace-id"]?.toString().trim() || buildTraceId();
     const access = await requireActiveSession(
       authService,
       request.headers.authorization,
-      fallbackTraceId
+      fallbackTraceId,
     );
 
-    reply.header('X-Trace-ID', fallbackTraceId);
+    reply.header("X-Trace-ID", fallbackTraceId);
 
     if (!access.ok) {
       reply.code(access.statusCode);
@@ -953,50 +1028,62 @@ export async function registerChatRoutes(
     if (!appId) {
       reply.code(400);
       return buildErrorResponse(fallbackTraceId, {
-        type: 'invalid_request_error',
-        code: 'invalid_app_id',
-        message: 'Chat completions require a non-empty app_id.',
-        param: 'app_id',
+        type: "invalid_request_error",
+        code: "invalid_app_id",
+        message: "Chat completions require a non-empty app_id.",
+        param: "app_id",
       });
     }
 
-    if (!Array.isArray(body.messages) || body.messages.length === 0 || !body.messages.every(isChatMessage)) {
+    if (
+      !Array.isArray(body.messages) ||
+      body.messages.length === 0 ||
+      !body.messages.every(isChatMessage)
+    ) {
       reply.code(400);
       return buildErrorResponse(fallbackTraceId, {
-        type: 'invalid_request_error',
-        code: 'invalid_messages',
-        message: 'Chat completions require a non-empty OpenAI-compatible messages array.',
-        param: 'messages',
+        type: "invalid_request_error",
+        code: "invalid_messages",
+        message:
+          "Chat completions require a non-empty OpenAI-compatible messages array.",
+        param: "messages",
       });
     }
 
-    if (body.conversation_id !== undefined && typeof body.conversation_id !== 'string') {
+    if (
+      body.conversation_id !== undefined &&
+      typeof body.conversation_id !== "string"
+    ) {
       reply.code(400);
       return buildErrorResponse(fallbackTraceId, {
-        type: 'invalid_request_error',
-        code: 'invalid_conversation_id',
-        message: 'conversation_id must be a string when provided.',
-        param: 'conversation_id',
+        type: "invalid_request_error",
+        code: "invalid_conversation_id",
+        message: "conversation_id must be a string when provided.",
+        param: "conversation_id",
       });
     }
 
-    if (body.files !== undefined && (!Array.isArray(body.files) || !body.files.every(isChatFileReference))) {
+    if (
+      body.files !== undefined &&
+      (!Array.isArray(body.files) || !body.files.every(isChatFileReference))
+    ) {
       reply.code(400);
       return buildErrorResponse(fallbackTraceId, {
-        type: 'invalid_request_error',
-        code: 'invalid_file_id',
-        message: 'files must be an array of valid local or remote file references when provided.',
-        param: 'files',
+        type: "invalid_request_error",
+        code: "invalid_file_id",
+        message:
+          "files must be an array of valid local or remote file references when provided.",
+        param: "files",
       });
     }
 
     if ((body.files?.length ?? 0) > 0 && !body.conversation_id?.trim()) {
       reply.code(400);
       return buildErrorResponse(fallbackTraceId, {
-        type: 'invalid_request_error',
-        code: 'invalid_conversation_id',
-        message: 'Local workspace files require an existing conversation_id.',
-        param: 'conversation_id',
+        type: "invalid_request_error",
+        code: "invalid_conversation_id",
+        message: "Local workspace files require an existing conversation_id.",
+        param: "conversation_id",
       });
     }
 
@@ -1017,8 +1104,8 @@ export async function registerChatRoutes(
         inputs: body.inputs,
         files: body.files,
       },
-      request.headers['x-active-group-id']?.toString(),
-      fallbackTraceId
+      request.headers["x-active-group-id"]?.toString(),
+      fallbackTraceId,
     );
 
     if (!conversationResult.ok) {
@@ -1030,7 +1117,7 @@ export async function registerChatRoutes(
       workspaceService,
       access.user,
       conversationResult.conversation,
-      fallbackTraceId
+      fallbackTraceId,
     );
 
     if (!runPreparationResult.ok) {
@@ -1046,7 +1133,7 @@ export async function registerChatRoutes(
             access.user,
             conversation.id,
             body.files,
-            fallbackTraceId
+            fallbackTraceId,
           )
         : {
             ok: true as const,
@@ -1063,7 +1150,10 @@ export async function registerChatRoutes(
     const assistantText = buildAssistantText(
       conversation,
       body.messages,
-      attachmentResult.attachments
+      attachmentResult.attachments,
+    );
+    const suggestedPrompts = buildSuggestedPrompts(
+      extractLatestUserPrompt(body.messages),
     );
     const model = resolveModelName(
       {
@@ -1080,38 +1170,41 @@ export async function registerChatRoutes(
         inputs: body.inputs,
         files: body.files,
       },
-      conversation
+      conversation,
     );
     const promptTokens = body.messages.reduce(
       (total, message) => total + estimateTokens(extractMessageText(message)),
-      0
+      0,
     );
     const completionTokens = estimateTokens(assistantText);
     const created = Math.floor(Date.now() / 1000);
 
-    reply.header('X-Trace-ID', traceId);
+    reply.header("X-Trace-ID", traceId);
 
-    const runningResult = await workspaceService.updateConversationRunForUser(access.user, {
-      conversationId: conversation.id,
-      runId: conversation.run.id,
-      status: 'running',
-      inputs: {
-        messages: body.messages,
-        model,
-        stream: Boolean(body.stream),
-        variables: body.inputs ?? {},
-        files: body.files ?? [],
-        attachments: attachmentResult.attachments,
+    const runningResult = await workspaceService.updateConversationRunForUser(
+      access.user,
+      {
+        conversationId: conversation.id,
+        runId: conversation.run.id,
+        status: "running",
+        inputs: {
+          messages: body.messages,
+          model,
+          stream: Boolean(body.stream),
+          variables: body.inputs ?? {},
+          files: body.files ?? [],
+          attachments: attachmentResult.attachments,
+        },
+        totalSteps: 1,
       },
-      totalSteps: 1,
-    });
+    );
 
     if (!runningResult.ok) {
       reply.code(500);
       return buildErrorResponse(traceId, {
-        type: 'internal_error',
-        code: 'provider_error',
-        message: 'The conversation run could not be marked as running.',
+        type: "internal_error",
+        code: "provider_error",
+        message: "The conversation run could not be marked as running.",
       });
     }
 
@@ -1120,9 +1213,9 @@ export async function registerChatRoutes(
         stopRequested: false,
       });
 
-      reply.header('content-type', 'text/event-stream; charset=utf-8');
-      reply.header('cache-control', 'no-cache');
-      reply.header('connection', 'keep-alive');
+      reply.header("content-type", "text/event-stream; charset=utf-8");
+      reply.header("cache-control", "no-cache");
+      reply.header("connection", "keep-alive");
 
       return reply.send(
         Readable.from(
@@ -1135,50 +1228,57 @@ export async function registerChatRoutes(
             model,
             promptTokens,
             assistantText,
+            suggestedPrompts,
             messages: body.messages,
             startedAt,
             user: access.user,
             workspaceService,
-          })
-        )
+          }),
+        ),
       );
     }
 
-    const updateResult = await workspaceService.updateConversationRunForUser(access.user, {
-      conversationId: conversation.id,
-      runId: conversation.run.id,
-      status: 'succeeded',
-      messageHistory: buildPersistedHistory(body.messages, {
-        latestUserAttachments: attachmentResult.attachments,
-        assistantMessage: {
-          content: assistantText,
-          status: 'completed',
+    const updateResult = await workspaceService.updateConversationRunForUser(
+      access.user,
+      {
+        conversationId: conversation.id,
+        runId: conversation.run.id,
+        status: "succeeded",
+        messageHistory: buildPersistedHistory(body.messages, {
+          latestUserAttachments: attachmentResult.attachments,
+          assistantMessage: {
+            content: assistantText,
+            status: "completed",
+            suggestedPrompts,
+          },
+        }),
+        outputs: {
+          assistant: {
+            content: assistantText,
+            finishReason: "stop",
+            status: "completed",
+            suggestedPrompts,
+          },
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+          },
         },
-      }),
-      outputs: {
-        assistant: {
-          content: assistantText,
-          finishReason: 'stop',
-          status: 'completed',
-        },
-        usage: {
-          promptTokens,
-          completionTokens,
-          totalTokens: promptTokens + completionTokens,
-        },
+        elapsedTime: Date.now() - startedAt,
+        totalTokens: promptTokens + completionTokens,
+        totalSteps: 1,
+        finishedAt: new Date().toISOString(),
       },
-      elapsedTime: Date.now() - startedAt,
-      totalTokens: promptTokens + completionTokens,
-      totalSteps: 1,
-      finishedAt: new Date().toISOString(),
-    });
+    );
 
     if (!updateResult.ok) {
       reply.code(500);
       return buildErrorResponse(traceId, {
-        type: 'internal_error',
-        code: 'provider_error',
-        message: 'The conversation run could not be persisted after completion.',
+        type: "internal_error",
+        code: "provider_error",
+        message:
+          "The conversation run could not be persisted after completion.",
       });
     }
 
@@ -1189,7 +1289,7 @@ export async function registerChatRoutes(
       ipAddress: request.ip,
       promptTokens,
       runId: conversation.run.id,
-      runStatus: 'succeeded',
+      runStatus: "succeeded",
       totalTokens: promptTokens + completionTokens,
       traceId,
       user: access.user,
@@ -1202,14 +1302,20 @@ export async function registerChatRoutes(
       promptTokens,
       completionTokens,
       assistantText,
+      suggestedPrompts,
     });
   });
 
-  app.post('/v1/chat/completions/:taskId/stop', async (request, reply) => {
-    const traceId = request.headers['x-trace-id']?.toString().trim() || buildTraceId();
-    const access = await requireActiveSession(authService, request.headers.authorization, traceId);
+  app.post("/v1/chat/completions/:taskId/stop", async (request, reply) => {
+    const traceId =
+      request.headers["x-trace-id"]?.toString().trim() || buildTraceId();
+    const access = await requireActiveSession(
+      authService,
+      request.headers.authorization,
+      traceId,
+    );
 
-    reply.header('X-Trace-ID', traceId);
+    reply.header("X-Trace-ID", traceId);
 
     if (!access.ok) {
       reply.code(access.statusCode);
@@ -1223,10 +1329,10 @@ export async function registerChatRoutes(
     if (!params.taskId?.trim()) {
       reply.code(400);
       return buildErrorResponse(traceId, {
-        type: 'invalid_request_error',
-        code: 'invalid_task_id',
-        message: 'taskId is required to stop a chat completion.',
-        param: 'taskId',
+        type: "invalid_request_error",
+        code: "invalid_task_id",
+        message: "taskId is required to stop a chat completion.",
+        param: "taskId",
       });
     }
 
@@ -1238,8 +1344,8 @@ export async function registerChatRoutes(
     }
 
     const response: ChatCompletionStopResponse = {
-      result: 'success',
-      stop_type: streamState ? 'hard' : 'soft',
+      result: "success",
+      stop_type: streamState ? "hard" : "soft",
     };
 
     const runResult = await workspaceService.getRunForUser(access.user, taskId);
@@ -1248,7 +1354,7 @@ export async function registerChatRoutes(
       await workspaceService.appendRunTimelineEventForUser(access.user, {
         conversationId: runResult.data.conversationId,
         runId: taskId,
-        type: 'stop_requested',
+        type: "stop_requested",
         metadata: {
           stopType: response.stop_type,
         },
@@ -1258,11 +1364,11 @@ export async function registerChatRoutes(
     await auditService.recordEvent({
       tenantId: access.user.tenantId,
       actorUserId: access.user.id,
-      action: 'workspace.run.stop_requested',
-      entityType: 'run',
+      action: "workspace.run.stop_requested",
+      entityType: "run",
       entityId: taskId,
       ipAddress: request.ip,
-      level: streamState ? 'info' : 'warning',
+      level: streamState ? "info" : "warning",
       payload: {
         runId: taskId,
         stopType: response.stop_type,

@@ -1,11 +1,11 @@
-export type ChatCompletionRole = 'system' | 'user' | 'assistant' | 'tool';
+export type ChatCompletionRole = "system" | "user" | "assistant" | "tool";
 
 export type ChatCompletionContentPart = {
-  type: 'text' | 'image_url';
+  type: "text" | "image_url";
   text?: string;
   image_url?: {
     url: string;
-    detail?: 'auto' | 'low' | 'high';
+    detail?: "auto" | "low" | "high";
   };
 };
 
@@ -18,10 +18,10 @@ export type ChatCompletionMessage = {
 };
 
 export type ChatCompletionFileReference = {
-  type: 'local' | 'remote';
+  type: "local" | "remote";
   url?: string;
   file_id?: string;
-  transfer_method: 'local_file' | 'remote_url';
+  transfer_method: "local_file" | "remote_url";
 };
 
 export type ChatCompletionRequest = {
@@ -33,29 +33,30 @@ export type ChatCompletionRequest = {
   temperature?: number;
   top_p?: number;
   tools?: unknown[];
-  tool_choice?: 'auto' | 'none' | Record<string, unknown>;
+  tool_choice?: "auto" | "none" | Record<string, unknown>;
   conversation_id?: string;
   inputs?: Record<string, unknown>;
   files?: ChatCompletionFileReference[];
 };
 
 export type ChatCompletionFinishReason =
-  | 'stop'
-  | 'length'
-  | 'tool_calls'
-  | 'content_filter';
+  | "stop"
+  | "length"
+  | "tool_calls"
+  | "content_filter";
 
 export type ChatCompletionResponse = {
   id: string;
-  object: 'chat.completion';
+  object: "chat.completion";
   created: number;
   model: string;
   choices: Array<{
     index: 0;
     message: {
-      role: 'assistant';
+      role: "assistant";
       content: string | null;
       tool_calls?: unknown[];
+      suggested_prompts?: string[];
     };
     finish_reason: ChatCompletionFinishReason;
   }>;
@@ -75,13 +76,13 @@ export type ChatCompletionResponse = {
 
 export type ChatCompletionChunk = {
   id: string;
-  object: 'chat.completion.chunk';
+  object: "chat.completion.chunk";
   created: number;
   model: string;
   choices: Array<{
     index: 0;
     delta: {
-      role?: 'assistant';
+      role?: "assistant";
       content?: string;
     };
     finish_reason: ChatCompletionFinishReason | null;
@@ -93,18 +94,19 @@ export type ChatCompletionChunk = {
   };
   conversation_id?: string;
   trace_id?: string;
+  suggested_prompts?: string[];
 };
 
 export type ChatCompletionStopResponse = {
-  result: 'success';
-  stop_type: 'hard' | 'soft';
+  result: "success";
+  stop_type: "hard" | "soft";
 };
 
-export type ChatModelMode = 'chat' | 'workflow' | 'agent' | 'completion';
+export type ChatModelMode = "chat" | "workflow" | "agent" | "completion";
 
 export type ChatModel = {
   id: string;
-  object: 'model';
+  object: "model";
   created: number;
   owned_by: string;
   name: string;
@@ -121,33 +123,33 @@ export type ChatModel = {
 };
 
 export type ChatModelsResponse = {
-  object: 'list';
+  object: "list";
   data: ChatModel[];
 };
 
 export type ChatGatewayErrorType =
-  | 'invalid_request_error'
-  | 'authentication_error'
-  | 'permission_denied'
-  | 'not_found_error'
-  | 'rate_limit_error'
-  | 'internal_error'
-  | 'service_unavailable';
+  | "invalid_request_error"
+  | "authentication_error"
+  | "permission_denied"
+  | "not_found_error"
+  | "rate_limit_error"
+  | "internal_error"
+  | "service_unavailable";
 
 export type ChatGatewayErrorCode =
-  | 'invalid_app_id'
-  | 'invalid_conversation_id'
-  | 'invalid_file_id'
-  | 'invalid_task_id'
-  | 'invalid_messages'
-  | 'invalid_token'
-  | 'app_not_authorized'
-  | 'quota_exceeded'
-  | 'app_not_found'
-  | 'conversation_not_found'
-  | 'rate_limit_exceeded'
-  | 'provider_error'
-  | 'provider_unavailable';
+  | "invalid_app_id"
+  | "invalid_conversation_id"
+  | "invalid_file_id"
+  | "invalid_task_id"
+  | "invalid_messages"
+  | "invalid_token"
+  | "app_not_authorized"
+  | "quota_exceeded"
+  | "app_not_found"
+  | "conversation_not_found"
+  | "rate_limit_exceeded"
+  | "provider_error"
+  | "provider_unavailable";
 
 export type ChatGatewayErrorResponse = {
   error: {

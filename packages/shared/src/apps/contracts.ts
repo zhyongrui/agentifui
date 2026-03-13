@@ -1,6 +1,10 @@
-export type WorkspaceAppKind = 'chat' | 'analysis' | 'automation' | 'governance';
+export type WorkspaceAppKind =
+  | "chat"
+  | "analysis"
+  | "automation"
+  | "governance";
 
-export type WorkspaceAppStatus = 'ready' | 'beta';
+export type WorkspaceAppStatus = "ready" | "beta";
 
 export type WorkspaceGroup = {
   id: string;
@@ -21,9 +25,9 @@ export type WorkspaceApp = {
   launchCost: number;
 };
 
-export type QuotaScope = 'tenant' | 'group' | 'user';
+export type QuotaScope = "tenant" | "group" | "user";
 
-export type QuotaServiceState = 'available' | 'degraded';
+export type QuotaServiceState = "available" | "degraded";
 
 export type QuotaUsage = {
   scope: QuotaScope;
@@ -33,7 +37,7 @@ export type QuotaUsage = {
   limit: number;
 };
 
-export type QuotaSeverity = 'healthy' | 'warning' | 'critical' | 'blocked';
+export type QuotaSeverity = "healthy" | "warning" | "critical" | "blocked";
 
 export type WorkspaceSections = {
   recent: WorkspaceApp[];
@@ -42,11 +46,11 @@ export type WorkspaceSections = {
 };
 
 export type LaunchBlockReason =
-  | 'ok'
-  | 'not_authorized'
-  | 'group_switch_required'
-  | 'quota_exceeded'
-  | 'quota_service_degraded';
+  | "ok"
+  | "not_authorized"
+  | "group_switch_required"
+  | "quota_exceeded"
+  | "quota_service_degraded";
 
 export type AppLaunchGuard = {
   canLaunch: boolean;
@@ -96,46 +100,51 @@ export type WorkspaceAppLaunchRequest = {
   activeGroupId: string;
 };
 
-export type WorkspaceAppLaunchStatus = 'handoff_ready' | 'conversation_ready';
+export type WorkspaceAppLaunchStatus = "handoff_ready" | "conversation_ready";
 
-export type WorkspaceConversationStatus = 'active' | 'archived' | 'deleted';
-export type WorkspaceConversationShareStatus = 'active' | 'revoked';
-export type WorkspaceConversationShareAccess = 'read_only';
+export type WorkspaceConversationStatus = "active" | "archived" | "deleted";
+export type WorkspaceConversationShareStatus = "active" | "revoked";
+export type WorkspaceConversationShareAccess = "read_only";
 
-export type WorkspaceRunType = 'workflow' | 'agent' | 'generation';
+export type WorkspaceRunType = "workflow" | "agent" | "generation";
 
-export type WorkspaceRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'stopped';
+export type WorkspaceRunStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "stopped";
 
-export type WorkspaceRunTrigger = 'app_launch' | 'chat_completion';
+export type WorkspaceRunTrigger = "app_launch" | "chat_completion";
 
 export type WorkspaceRunTimelineEventType =
-  | 'run_created'
-  | 'input_recorded'
-  | 'run_started'
-  | 'stop_requested'
-  | 'output_recorded'
-  | 'run_succeeded'
-  | 'run_failed'
-  | 'run_stopped';
+  | "run_created"
+  | "input_recorded"
+  | "run_started"
+  | "stop_requested"
+  | "output_recorded"
+  | "run_succeeded"
+  | "run_failed"
+  | "run_stopped";
 
 export type WorkspaceConversationMessageStatus =
-  | 'completed'
-  | 'streaming'
-  | 'stopped'
-  | 'failed';
+  | "completed"
+  | "streaming"
+  | "stopped"
+  | "failed";
 
 export const WORKSPACE_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
 
 export const WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES = [
-  'application/json',
-  'application/pdf',
-  'image/gif',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'text/csv',
-  'text/markdown',
-  'text/plain',
+  "application/json",
+  "application/pdf",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/csv",
+  "text/markdown",
+  "text/plain",
 ] as const;
 
 export type WorkspaceAttachmentContentType =
@@ -149,7 +158,7 @@ export type WorkspaceConversationAttachment = {
   uploadedAt: string;
 };
 
-export type WorkspaceMessageFeedbackRating = 'positive' | 'negative';
+export type WorkspaceMessageFeedbackRating = "positive" | "negative";
 
 export type WorkspaceConversationMessageFeedback = {
   rating: WorkspaceMessageFeedbackRating;
@@ -158,12 +167,13 @@ export type WorkspaceConversationMessageFeedback = {
 
 export type WorkspaceConversationMessage = {
   id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
   status: WorkspaceConversationMessageStatus;
   createdAt: string;
   attachments?: WorkspaceConversationAttachment[];
   feedback?: WorkspaceConversationMessageFeedback | null;
+  suggestedPrompts?: string[];
 };
 
 export type WorkspaceRunUsage = {
@@ -196,7 +206,7 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   conversationId: string;
   app: Pick<
     WorkspaceApp,
-    'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode'
+    "id" | "slug" | "name" | "summary" | "kind" | "status" | "shortCode"
   >;
   activeGroup: WorkspaceGroup;
   error: string | null;
@@ -216,7 +226,14 @@ export type WorkspaceAppLaunch = {
   traceId: string | null;
   app: Pick<
     WorkspaceApp,
-    'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode' | 'launchCost'
+    | "id"
+    | "slug"
+    | "name"
+    | "summary"
+    | "kind"
+    | "status"
+    | "shortCode"
+    | "launchCost"
   >;
   attributedGroup: WorkspaceGroup;
 };
@@ -235,7 +252,7 @@ export type WorkspaceConversation = {
   launchId: string | null;
   app: Pick<
     WorkspaceApp,
-    'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode'
+    "id" | "slug" | "name" | "summary" | "kind" | "status" | "shortCode"
   >;
   activeGroup: WorkspaceGroup;
   messages: WorkspaceConversationMessage[];
@@ -252,7 +269,7 @@ export type WorkspaceConversationListItem = {
   lastMessagePreview: string | null;
   app: Pick<
     WorkspaceApp,
-    'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode'
+    "id" | "slug" | "name" | "summary" | "kind" | "status" | "shortCode"
   >;
   activeGroup: WorkspaceGroup;
   run: WorkspaceRunSummary;
@@ -349,12 +366,12 @@ export type WorkspaceRunResponse = {
 };
 
 export type WorkspaceErrorCode =
-  | 'WORKSPACE_UNAUTHORIZED'
-  | 'WORKSPACE_FORBIDDEN'
-  | 'WORKSPACE_INVALID_PAYLOAD'
-  | 'WORKSPACE_NOT_FOUND'
-  | 'WORKSPACE_LAUNCH_BLOCKED'
-  | 'WORKSPACE_UPLOAD_BLOCKED';
+  | "WORKSPACE_UNAUTHORIZED"
+  | "WORKSPACE_FORBIDDEN"
+  | "WORKSPACE_INVALID_PAYLOAD"
+  | "WORKSPACE_NOT_FOUND"
+  | "WORKSPACE_LAUNCH_BLOCKED"
+  | "WORKSPACE_UPLOAD_BLOCKED";
 
 export type WorkspaceErrorResponse = {
   ok: false;

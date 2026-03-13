@@ -1,28 +1,30 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
-import { MainSectionNav } from '../../../../../components/main-section-nav';
-import { fetchWorkspaceSharedConversation } from '../../../../../lib/apps-client';
-import { clearAuthSession } from '../../../../../lib/auth-session';
-import { useProtectedSession } from '../../../../../lib/use-protected-session';
+import { ChatMarkdown } from "../../../../../components/chat-markdown";
+import { MainSectionNav } from "../../../../../components/main-section-nav";
+import { fetchWorkspaceSharedConversation } from "../../../../../lib/apps-client";
+import { clearAuthSession } from "../../../../../lib/auth-session";
+import { useProtectedSession } from "../../../../../lib/use-protected-session";
 
 export default function SharedConversationPage() {
   const params = useParams<{ shareId: string }>();
   const router = useRouter();
-  const { session, isLoading } = useProtectedSession('/chat/shared');
+  const { session, isLoading } = useProtectedSession("/chat/shared");
   const [payload, setPayload] = useState<Awaited<
     ReturnType<typeof fetchWorkspaceSharedConversation>
   > | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const shareId = typeof params?.shareId === 'string' ? params.shareId.trim() : '';
+  const shareId =
+    typeof params?.shareId === "string" ? params.shareId.trim() : "";
 
   useEffect(() => {
     if (!session || !shareId) {
       setPayload(null);
-      setError(shareId ? null : 'Share id is missing.');
+      setError(shareId ? null : "Share id is missing.");
       return;
     }
 
@@ -32,16 +34,19 @@ export default function SharedConversationPage() {
       setError(null);
 
       try {
-        const result = await fetchWorkspaceSharedConversation(session.sessionToken, shareId);
+        const result = await fetchWorkspaceSharedConversation(
+          session.sessionToken,
+          shareId,
+        );
 
         if (cancelled) {
           return;
         }
 
         if (!result.ok) {
-          if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+          if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
             clearAuthSession(window.sessionStorage);
-            router.replace('/login');
+            router.replace("/login");
             return;
           }
 
@@ -52,7 +57,9 @@ export default function SharedConversationPage() {
         setPayload(result);
       } catch {
         if (!cancelled) {
-          setError('The shared conversation could not be loaded. Please retry.');
+          setError(
+            "The shared conversation could not be loaded. Please retry.",
+          );
         }
       }
     })();
@@ -95,8 +102,9 @@ export default function SharedConversationPage() {
           <span className="eyebrow">R12 Sharing</span>
           <h1>{conversation.title}</h1>
           <p className="lead">
-            This is a read-only shared workspace conversation. You can inspect the transcript and
-            attached files, but you cannot send new messages from this surface.
+            This is a read-only shared workspace conversation. You can inspect
+            the transcript and attached files, but you cannot send new messages
+            from this surface.
           </p>
         </div>
         <div className="workspace-badges">
@@ -110,27 +118,53 @@ export default function SharedConversationPage() {
         <div className="chat-panel-header">
           <div>
             <h2>Shared conversation</h2>
-            <p>This transcript is currently shared read-only with {share.group.name}.</p>
+            <p>
+              This transcript is currently shared read-only with{" "}
+              {share.group.name}.
+            </p>
           </div>
         </div>
 
         <div className="chat-placeholder">
-          {conversation.messages.map(message => (
+          {conversation.messages.map((message) => (
             <article key={message.id} className={`chat-bubble ${message.role}`}>
               <div className="chat-bubble-meta">
                 <span className="chat-bubble-label">
-                  {message.role === 'user' ? 'Workspace user' : conversation.app.name}
+                  {message.role === "user"
+                    ? "Workspace user"
+                    : conversation.app.name}
                 </span>
                 <span className={`chat-bubble-status status-${message.status}`}>
                   {message.status}
                 </span>
               </div>
-              <p>{message.content}</p>
+              <ChatMarkdown content={message.content} />
+              {message.role === "assistant" &&
+              message.status === "completed" &&
+              message.suggestedPrompts &&
+              message.suggestedPrompts.length > 0 ? (
+                <div className="chat-suggested-prompts">
+                  <span className="chat-suggested-prompts-label">
+                    Suggested next prompts
+                  </span>
+                  <div className="chat-suggested-prompt-list">
+                    {message.suggestedPrompts.map((prompt) => (
+                      <span
+                        key={`${message.id}-${prompt}`}
+                        className="suggested-prompt-chip"
+                      >
+                        {prompt}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {message.attachments && message.attachments.length > 0 ? (
                 <ul className="chat-attachment-list">
-                  {message.attachments.map(attachment => (
+                  {message.attachments.map((attachment) => (
                     <li key={attachment.id}>
-                      {attachment.fileName} · {attachment.contentType} · {attachment.sizeBytes} B
+                      {attachment.fileName} · {attachment.contentType} ·{" "}
+                      {attachment.sizeBytes} B
                     </li>
                   ))}
                 </ul>

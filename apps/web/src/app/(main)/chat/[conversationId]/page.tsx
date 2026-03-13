@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
 import {
   getQuotaSeverity,
   listQuotaAlerts,
   WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES,
   WORKSPACE_ATTACHMENT_MAX_BYTES,
-} from '@agentifui/shared/apps';
+} from "@agentifui/shared/apps";
 import type {
   QuotaServiceState,
   QuotaUsage,
@@ -16,14 +16,24 @@ import type {
   WorkspaceRun,
   WorkspaceRunSummary,
   WorkspaceRunTimelineEvent,
-} from '@agentifui/shared/apps';
-import type { ChatCompletionMessage, ChatGatewayErrorResponse } from '@agentifui/shared/chat';
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useRef, useState, type ChangeEvent } from 'react';
+} from "@agentifui/shared/apps";
+import type {
+  ChatCompletionMessage,
+  ChatGatewayErrorResponse,
+} from "@agentifui/shared/chat";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import {
+  FormEvent,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
 
-import { MainSectionNav } from '../../../../components/main-section-nav';
-import { ConversationSharePanel } from '../../../../components/conversation-share-panel';
+import { MainSectionNav } from "../../../../components/main-section-nav";
+import { ChatMarkdown } from "../../../../components/chat-markdown";
+import { ConversationSharePanel } from "../../../../components/conversation-share-panel";
 import {
   fetchWorkspaceCatalog,
   fetchWorkspaceConversation,
@@ -31,39 +41,48 @@ import {
   fetchWorkspaceRun,
   updateWorkspaceConversationMessageFeedback,
   uploadWorkspaceConversationFile,
-} from '../../../../lib/apps-client';
-import { clearAuthSession } from '../../../../lib/auth-session';
-import { stopChatCompletion, streamChatCompletion } from '../../../../lib/chat-client';
-import { useProtectedSession } from '../../../../lib/use-protected-session';
+} from "../../../../lib/apps-client";
+import { clearAuthSession } from "../../../../lib/auth-session";
+import {
+  stopChatCompletion,
+  streamChatCompletion,
+} from "../../../../lib/chat-client";
+import { useProtectedSession } from "../../../../lib/use-protected-session";
 
-function toGatewayMessages(messages: WorkspaceConversationMessage[]): ChatCompletionMessage[] {
-  return messages.map(message => ({
+function toGatewayMessages(
+  messages: WorkspaceConversationMessage[],
+): ChatCompletionMessage[] {
+  return messages.map((message) => ({
     role: message.role,
     content: message.content,
   }));
 }
 
-function toGatewayFileReferences(attachments: WorkspaceConversationAttachment[]) {
-  return attachments.map(attachment => ({
-    type: 'local' as const,
+function toGatewayFileReferences(
+  attachments: WorkspaceConversationAttachment[],
+) {
+  return attachments.map((attachment) => ({
+    type: "local" as const,
     file_id: attachment.id,
-    transfer_method: 'local_file' as const,
+    transfer_method: "local_file" as const,
   }));
 }
 
-function isGatewayErrorResponse(error: unknown): error is ChatGatewayErrorResponse {
+function isGatewayErrorResponse(
+  error: unknown,
+): error is ChatGatewayErrorResponse {
   return (
-    typeof error === 'object' &&
+    typeof error === "object" &&
     error !== null &&
-    'error' in error &&
-    typeof (error as { error?: unknown }).error === 'object'
+    "error" in error &&
+    typeof (error as { error?: unknown }).error === "object"
   );
 }
 
 function buildLocalMessage(
-  input: Pick<WorkspaceConversationMessage, 'role' | 'content' | 'status'> & {
+  input: Pick<WorkspaceConversationMessage, "role" | "content" | "status"> & {
     attachments?: WorkspaceConversationAttachment[];
-  }
+  },
 ): WorkspaceConversationMessage {
   return {
     id: `local_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
@@ -76,24 +95,26 @@ function buildLocalMessage(
 }
 
 function formatReplayContent(content: unknown): string {
-  if (typeof content === 'string') {
+  if (typeof content === "string") {
     return content;
   }
 
   if (!Array.isArray(content)) {
-    return '';
+    return "";
   }
 
   return content
-    .flatMap(part => {
-      if (typeof part !== 'object' || part === null) {
+    .flatMap((part) => {
+      if (typeof part !== "object" || part === null) {
         return [];
       }
 
       const value = part as Record<string, unknown>;
-      return value.type === 'text' && typeof value.text === 'string' ? [value.text] : [];
+      return value.type === "text" && typeof value.text === "string"
+        ? [value.text]
+        : [];
     })
-    .join('\n');
+    .join("\n");
 }
 
 function formatAttachmentSize(sizeBytes: number) {
@@ -110,26 +131,26 @@ function formatAttachmentSize(sizeBytes: number) {
 
 function attachmentsToText(attachments: WorkspaceConversationAttachment[]) {
   return attachments.map(
-    attachment =>
-      `${attachment.fileName} (${attachment.contentType}, ${formatAttachmentSize(attachment.sizeBytes)})`
+    (attachment) =>
+      `${attachment.fileName} (${attachment.contentType}, ${formatAttachmentSize(attachment.sizeBytes)})`,
   );
 }
 
 function describeFeedbackRating(rating: WorkspaceMessageFeedbackRating) {
-  return rating === 'positive' ? 'helpful' : 'needs work';
+  return rating === "positive" ? "helpful" : "needs work";
 }
 
 function quoteMessageContent(content: string) {
   return content
-    .split('\n')
-    .map(line => `> ${line}`)
-    .join('\n');
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
 }
 
 async function fileToBase64(file: File) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
-  let binary = '';
+  let binary = "";
 
   for (const byte of bytes) {
     binary += String.fromCharCode(byte);
@@ -138,7 +159,9 @@ async function fileToBase64(file: File) {
   return btoa(binary);
 }
 
-function buildReplayMessages(run: WorkspaceRun): Array<{ id: string; role: string; content: string }> {
+function buildReplayMessages(
+  run: WorkspaceRun,
+): Array<{ id: string; role: string; content: string }> {
   const rawMessages = run.inputs.messages;
 
   if (!Array.isArray(rawMessages)) {
@@ -146,13 +169,13 @@ function buildReplayMessages(run: WorkspaceRun): Array<{ id: string; role: strin
   }
 
   return rawMessages.flatMap((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) {
+    if (typeof entry !== "object" || entry === null) {
       return [];
     }
 
     const message = entry as Record<string, unknown>;
 
-    if (typeof message.role !== 'string') {
+    if (typeof message.role !== "string") {
       return [];
     }
 
@@ -169,35 +192,37 @@ function buildReplayMessages(run: WorkspaceRun): Array<{ id: string; role: strin
 function buildAssistantReplay(run: WorkspaceRun): string {
   const assistant = run.outputs.assistant;
 
-  if (typeof assistant !== 'object' || assistant === null) {
-    return '';
+  if (typeof assistant !== "object" || assistant === null) {
+    return "";
   }
 
   const content = (assistant as Record<string, unknown>).content;
 
-  return typeof content === 'string' ? content : '';
+  return typeof content === "string" ? content : "";
 }
 
-function buildReplayAttachments(run: WorkspaceRun): WorkspaceConversationAttachment[] {
+function buildReplayAttachments(
+  run: WorkspaceRun,
+): WorkspaceConversationAttachment[] {
   const rawAttachments = run.inputs.attachments;
 
   if (!Array.isArray(rawAttachments)) {
     return [];
   }
 
-  return rawAttachments.flatMap(entry => {
-    if (typeof entry !== 'object' || entry === null) {
+  return rawAttachments.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) {
       return [];
     }
 
     const attachment = entry as Record<string, unknown>;
 
     if (
-      typeof attachment.id !== 'string' ||
-      typeof attachment.fileName !== 'string' ||
-      typeof attachment.contentType !== 'string' ||
-      typeof attachment.sizeBytes !== 'number' ||
-      typeof attachment.uploadedAt !== 'string'
+      typeof attachment.id !== "string" ||
+      typeof attachment.fileName !== "string" ||
+      typeof attachment.contentType !== "string" ||
+      typeof attachment.sizeBytes !== "number" ||
+      typeof attachment.uploadedAt !== "string"
     ) {
       return [];
     }
@@ -214,57 +239,74 @@ function buildReplayAttachments(run: WorkspaceRun): WorkspaceConversationAttachm
   });
 }
 
-const RUN_TIMELINE_EVENT_LABELS: Record<WorkspaceRunTimelineEvent['type'], string> = {
-  run_created: 'Run created',
-  input_recorded: 'Inputs recorded',
-  run_started: 'Run started',
-  stop_requested: 'Stop requested',
-  output_recorded: 'Outputs recorded',
-  run_succeeded: 'Run succeeded',
-  run_failed: 'Run failed',
-  run_stopped: 'Run stopped',
+const RUN_TIMELINE_EVENT_LABELS: Record<
+  WorkspaceRunTimelineEvent["type"],
+  string
+> = {
+  run_created: "Run created",
+  input_recorded: "Inputs recorded",
+  run_started: "Run started",
+  stop_requested: "Stop requested",
+  output_recorded: "Outputs recorded",
+  run_succeeded: "Run succeeded",
+  run_failed: "Run failed",
+  run_stopped: "Run stopped",
 };
 
 function describeTimelineEvent(event: WorkspaceRunTimelineEvent) {
-  if (event.type === 'input_recorded' || event.type === 'output_recorded') {
+  if (event.type === "input_recorded" || event.type === "output_recorded") {
     const keys = Array.isArray(event.metadata.keys)
-      ? event.metadata.keys.filter((value): value is string => typeof value === 'string')
+      ? event.metadata.keys.filter(
+          (value): value is string => typeof value === "string",
+        )
       : [];
 
-    return keys.length > 0 ? keys.join(', ') : 'payload stored';
+    return keys.length > 0 ? keys.join(", ") : "payload stored";
   }
 
-  if (event.type === 'stop_requested') {
-    return typeof event.metadata.stopType === 'string' ? event.metadata.stopType : 'manual';
+  if (event.type === "stop_requested") {
+    return typeof event.metadata.stopType === "string"
+      ? event.metadata.stopType
+      : "manual";
   }
 
-  if (event.type === 'run_failed' && typeof event.metadata.error === 'string') {
+  if (event.type === "run_failed" && typeof event.metadata.error === "string") {
     return event.metadata.error;
   }
 
-  return typeof event.metadata.traceId === 'string' ? `trace ${event.metadata.traceId}` : '';
+  return typeof event.metadata.traceId === "string"
+    ? `trace ${event.metadata.traceId}`
+    : "";
 }
 
 export default function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
   const router = useRouter();
-  const { session, isLoading } = useProtectedSession('/chat');
-  const [conversation, setConversation] = useState<WorkspaceConversation | null>(null);
-  const [conversationError, setConversationError] = useState<string | null>(null);
+  const { session, isLoading } = useProtectedSession("/chat");
+  const [conversation, setConversation] =
+    useState<WorkspaceConversation | null>(null);
+  const [conversationError, setConversationError] = useState<string | null>(
+    null,
+  );
   const [isConversationLoading, setIsConversationLoading] = useState(false);
   const [messages, setMessages] = useState<WorkspaceConversationMessage[]>([]);
   const [runs, setRuns] = useState<WorkspaceRunSummary[]>([]);
   const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
   const [quotaUsages, setQuotaUsages] = useState<QuotaUsage[]>([]);
-  const [quotaServiceState, setQuotaServiceState] = useState<QuotaServiceState>('available');
-  const [draft, setDraft] = useState('');
-  const [draftAttachments, setDraftAttachments] = useState<WorkspaceConversationAttachment[]>([]);
+  const [quotaServiceState, setQuotaServiceState] =
+    useState<QuotaServiceState>("available");
+  const [draft, setDraft] = useState("");
+  const [draftAttachments, setDraftAttachments] = useState<
+    WorkspaceConversationAttachment[]
+  >([]);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [isAwaitingRunMetadata, setIsAwaitingRunMetadata] = useState(false);
-  const [activeFeedbackMessageId, setActiveFeedbackMessageId] = useState<string | null>(null);
+  const [activeFeedbackMessageId, setActiveFeedbackMessageId] = useState<
+    string | null
+  >(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -273,7 +315,9 @@ export default function ConversationPage() {
   const activeRunIdRef = useRef<string | null>(null);
   const stopRequestedRef = useRef(false);
   const conversationId =
-    typeof params?.conversationId === 'string' ? params.conversationId.trim() : '';
+    typeof params?.conversationId === "string"
+      ? params.conversationId.trim()
+      : "";
 
   async function loadRunDetail(sessionToken: string, runId: string) {
     const result = await fetchWorkspaceRun(sessionToken, runId);
@@ -286,8 +330,14 @@ export default function ConversationPage() {
     setSelectedRun(result.data);
   }
 
-  async function loadRunTracking(sessionToken: string, preferredRunId?: string | null) {
-    const result = await fetchWorkspaceConversationRuns(sessionToken, conversationId);
+  async function loadRunTracking(
+    sessionToken: string,
+    preferredRunId?: string | null,
+  ) {
+    const result = await fetchWorkspaceConversationRuns(
+      sessionToken,
+      conversationId,
+    );
 
     if (!result.ok) {
       setRuns([]);
@@ -297,7 +347,8 @@ export default function ConversationPage() {
 
     setRuns(result.data.runs);
 
-    const nextRunId = preferredRunId ?? selectedRun?.id ?? result.data.runs[0]?.id ?? null;
+    const nextRunId =
+      preferredRunId ?? selectedRun?.id ?? result.data.runs[0]?.id ?? null;
 
     if (!nextRunId) {
       setSelectedRun(null);
@@ -313,7 +364,7 @@ export default function ConversationPage() {
       withSpinner: boolean;
       syncMessages: boolean;
       preferredRunId?: string | null;
-    }
+    },
   ) {
     if (options.withSpinner) {
       setIsConversationLoading(true);
@@ -322,24 +373,29 @@ export default function ConversationPage() {
     setConversationError(null);
 
     try {
-      const result = await fetchWorkspaceConversation(sessionToken, conversationId);
+      const result = await fetchWorkspaceConversation(
+        sessionToken,
+        conversationId,
+      );
 
       if (!result.ok) {
         setConversation(null);
 
-        if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
           clearAuthSession(window.sessionStorage);
-          router.replace('/login');
+          router.replace("/login");
           return;
         }
 
-        if (result.error.code === 'WORKSPACE_FORBIDDEN') {
-          router.replace('/auth/pending');
+        if (result.error.code === "WORKSPACE_FORBIDDEN") {
+          router.replace("/auth/pending");
           return;
         }
 
-        if (result.error.code === 'WORKSPACE_NOT_FOUND') {
-          setConversationError('The requested workspace conversation could not be found.');
+        if (result.error.code === "WORKSPACE_NOT_FOUND") {
+          setConversationError(
+            "The requested workspace conversation could not be found.",
+          );
           return;
         }
 
@@ -353,11 +409,13 @@ export default function ConversationPage() {
         setQuotaServiceState(catalogResult.data.quotaServiceState);
         setQuotaUsages(
           catalogResult.data.quotaUsagesByGroupId[result.data.activeGroup.id] ??
-            catalogResult.data.quotaUsagesByGroupId[catalogResult.data.defaultActiveGroupId] ??
-            []
+            catalogResult.data.quotaUsagesByGroupId[
+              catalogResult.data.defaultActiveGroupId
+            ] ??
+            [],
         );
       } else {
-        setQuotaServiceState('available');
+        setQuotaServiceState("available");
         setQuotaUsages([]);
       }
 
@@ -369,10 +427,15 @@ export default function ConversationPage() {
         setMessages(result.data.messages);
       }
 
-      await loadRunTracking(sessionToken, options.preferredRunId ?? result.data.run.id);
+      await loadRunTracking(
+        sessionToken,
+        options.preferredRunId ?? result.data.run.id,
+      );
     } catch {
       setConversation(null);
-      setConversationError('Conversation bootstrap failed. Please retry from the apps workspace.');
+      setConversationError(
+        "Conversation bootstrap failed. Please retry from the apps workspace.",
+      );
     } finally {
       if (options.withSpinner) {
         setIsConversationLoading(false);
@@ -385,8 +448,8 @@ export default function ConversationPage() {
     setRuns([]);
     setSelectedRun(null);
     setQuotaUsages([]);
-    setQuotaServiceState('available');
-    setDraft('');
+    setQuotaServiceState("available");
+    setDraft("");
     setDraftAttachments([]);
     setComposerError(null);
     setLastTraceId(null);
@@ -410,7 +473,9 @@ export default function ConversationPage() {
   useEffect(() => {
     if (!session || !conversationId) {
       setConversation(null);
-      setConversationError(conversationId ? null : 'Conversation id is missing.');
+      setConversationError(
+        conversationId ? null : "Conversation id is missing.",
+      );
       return;
     }
 
@@ -426,7 +491,9 @@ export default function ConversationPage() {
       .catch(() => {
         if (!isCancelled) {
           setConversation(null);
-          setConversationError('Conversation bootstrap failed. Please retry from the apps workspace.');
+          setConversationError(
+            "Conversation bootstrap failed. Please retry from the apps workspace.",
+          );
         }
       })
       .finally(() => {
@@ -442,7 +509,7 @@ export default function ConversationPage() {
 
   async function handleAttachmentSelect(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
-    event.target.value = '';
+    event.target.value = "";
 
     if (!session || !conversation || selectedFiles.length === 0) {
       return;
@@ -459,7 +526,9 @@ export default function ConversationPage() {
 
         if (
           !contentType ||
-          !(WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES as readonly string[]).includes(contentType)
+          !(
+            WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES as readonly string[]
+          ).includes(contentType)
         ) {
           setComposerError(`Unsupported attachment type: ${file.name}.`);
           continue;
@@ -467,32 +536,36 @@ export default function ConversationPage() {
 
         if (file.size > WORKSPACE_ATTACHMENT_MAX_BYTES) {
           setComposerError(
-            `${file.name} exceeds the ${formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} limit.`
+            `${file.name} exceeds the ${formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} limit.`,
           );
           continue;
         }
 
-        const result = await uploadWorkspaceConversationFile(session.sessionToken, conversation.id, {
-          fileName: file.name,
-          contentType,
-          base64Data: await fileToBase64(file),
-        });
+        const result = await uploadWorkspaceConversationFile(
+          session.sessionToken,
+          conversation.id,
+          {
+            fileName: file.name,
+            contentType,
+            base64Data: await fileToBase64(file),
+          },
+        );
 
         if (!result.ok) {
-          if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+          if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
             clearAuthSession(window.sessionStorage);
-            router.replace('/login');
+            router.replace("/login");
             return;
           }
 
-          if (result.error.code === 'WORKSPACE_FORBIDDEN') {
-            router.replace('/auth/pending');
+          if (result.error.code === "WORKSPACE_FORBIDDEN") {
+            router.replace("/auth/pending");
             return;
           }
 
-          if (result.error.code === 'WORKSPACE_NOT_FOUND') {
+          if (result.error.code === "WORKSPACE_NOT_FOUND") {
             setConversationError(
-              'This conversation is no longer available. Return to the apps workspace and relaunch it.'
+              "This conversation is no longer available. Return to the apps workspace and relaunch it.",
             );
             return;
           }
@@ -505,18 +578,21 @@ export default function ConversationPage() {
       }
 
       if (uploadedAttachments.length > 0) {
-        setDraftAttachments(currentAttachments => [...currentAttachments, ...uploadedAttachments]);
+        setDraftAttachments((currentAttachments) => [
+          ...currentAttachments,
+          ...uploadedAttachments,
+        ]);
       }
     } catch {
-      setComposerError('The attachment upload failed. Please retry.');
+      setComposerError("The attachment upload failed. Please retry.");
     } finally {
       setIsUploadingAttachments(false);
     }
   }
 
   function handleAttachmentRemove(attachmentId: string) {
-    setDraftAttachments(currentAttachments =>
-      currentAttachments.filter(attachment => attachment.id !== attachmentId)
+    setDraftAttachments((currentAttachments) =>
+      currentAttachments.filter((attachment) => attachment.id !== attachmentId),
     );
   }
 
@@ -530,9 +606,10 @@ export default function ConversationPage() {
       return;
     }
 
-    const assistantMessage = input.optimisticMessages[input.optimisticMessages.length - 1];
+    const assistantMessage =
+      input.optimisticMessages[input.optimisticMessages.length - 1];
 
-    if (!assistantMessage || assistantMessage.role !== 'assistant') {
+    if (!assistantMessage || assistantMessage.role !== "assistant") {
       return;
     }
 
@@ -544,16 +621,16 @@ export default function ConversationPage() {
     setIsStopping(false);
     setIsAwaitingRunMetadata(true);
     setMessages(input.optimisticMessages);
-    setConversation(currentConversation =>
+    setConversation((currentConversation) =>
       currentConversation
         ? {
             ...currentConversation,
             run: {
               ...currentConversation.run,
-              status: 'running',
+              status: "running",
             },
           }
-        : currentConversation
+        : currentConversation,
     );
 
     try {
@@ -566,11 +643,11 @@ export default function ConversationPage() {
           files: toGatewayFileReferences(input.latestUserAttachments),
         },
         {
-          onMetadata: metadata => {
+          onMetadata: (metadata) => {
             setLastTraceId(metadata.traceId);
             activeRunIdRef.current = metadata.runId;
             setIsAwaitingRunMetadata(false);
-            setConversation(currentConversation =>
+            setConversation((currentConversation) =>
               currentConversation
                 ? {
                     ...currentConversation,
@@ -578,14 +655,14 @@ export default function ConversationPage() {
                       ...currentConversation.run,
                       id: metadata.runId,
                       traceId: metadata.traceId,
-                      status: 'running',
-                      triggeredFrom: 'chat_completion',
+                      status: "running",
+                      triggeredFrom: "chat_completion",
                     },
                   }
-                : currentConversation
+                : currentConversation,
             );
           },
-          onChunk: chunk => {
+          onChunk: (chunk) => {
             activeRunIdRef.current = chunk.id;
             setIsAwaitingRunMetadata(false);
 
@@ -595,38 +672,42 @@ export default function ConversationPage() {
 
             const delta = chunk.choices[0]?.delta;
             const finishReason = chunk.choices[0]?.finish_reason;
+            const suggestedPrompts = chunk.suggested_prompts;
 
-            if (delta?.content) {
-              setMessages(currentMessages =>
-                currentMessages.map(message =>
+            if (
+              delta?.content ||
+              finishReason ||
+              (suggestedPrompts && suggestedPrompts.length > 0)
+            ) {
+              setMessages((currentMessages) =>
+                currentMessages.map((message) =>
                   message.id === activeAssistantMessageIdRef.current
                     ? {
                         ...message,
-                        content: `${message.content}${delta.content ?? ''}`,
-                        status: 'streaming',
+                        content: delta?.content
+                          ? `${message.content}${delta.content}`
+                          : message.content,
+                        suggestedPrompts:
+                          suggestedPrompts && suggestedPrompts.length > 0
+                            ? suggestedPrompts
+                            : message.suggestedPrompts,
+                        status: finishReason
+                          ? stopRequestedRef.current
+                            ? "stopped"
+                            : "completed"
+                          : delta?.content
+                            ? "streaming"
+                            : message.status,
                       }
-                    : message
-                )
-              );
-            }
-
-            if (finishReason) {
-              setMessages(currentMessages =>
-                currentMessages.map(message =>
-                  message.id === activeAssistantMessageIdRef.current
-                    ? {
-                        ...message,
-                        status: stopRequestedRef.current ? 'stopped' : 'completed',
-                      }
-                    : message
-                )
+                    : message,
+                ),
               );
             }
           },
         },
         {
           activeGroupId: conversation.activeGroup.id,
-        }
+        },
       );
 
       await loadConversation(session.sessionToken, {
@@ -636,36 +717,36 @@ export default function ConversationPage() {
       });
     } catch (error) {
       if (isGatewayErrorResponse(error)) {
-        if (error.error.code === 'invalid_token') {
+        if (error.error.code === "invalid_token") {
           clearAuthSession(window.sessionStorage);
-          router.replace('/login');
+          router.replace("/login");
           return;
         }
 
-        if (error.error.code === 'conversation_not_found') {
+        if (error.error.code === "conversation_not_found") {
           setConversationError(
-            'This conversation is no longer available. Return to the apps workspace and relaunch it.'
+            "This conversation is no longer available. Return to the apps workspace and relaunch it.",
           );
           return;
         }
 
         setComposerError(error.error.message);
       } else {
-        setComposerError('The chat gateway stream failed. Please retry.');
+        setComposerError("The chat gateway stream failed. Please retry.");
       }
 
       setMessages(input.failureMessages);
-      setConversation(currentConversation =>
+      setConversation((currentConversation) =>
         currentConversation
           ? {
               ...currentConversation,
               run: {
                 ...currentConversation.run,
                 id: activeRunIdRef.current ?? currentConversation.run.id,
-                status: 'failed',
+                status: "failed",
               },
             }
-          : currentConversation
+          : currentConversation,
       );
     } finally {
       activeAssistantMessageIdRef.current = null;
@@ -695,21 +776,21 @@ export default function ConversationPage() {
     const messageContent =
       nextDraft.length > 0
         ? nextDraft
-        : `Attached ${nextAttachments.length} file${nextAttachments.length === 1 ? '' : 's'}.`;
+        : `Attached ${nextAttachments.length} file${nextAttachments.length === 1 ? "" : "s"}.`;
     const userMessage = buildLocalMessage({
-      role: 'user',
+      role: "user",
       content: messageContent,
-      status: 'completed',
+      status: "completed",
       attachments: nextAttachments,
     });
     const assistantMessage = buildLocalMessage({
-      role: 'assistant',
-      content: '',
-      status: 'streaming',
+      role: "assistant",
+      content: "",
+      status: "streaming",
     });
     const nextMessages = [...messages, userMessage];
 
-    setDraft('');
+    setDraft("");
     setDraftAttachments([]);
     await runConversationStream({
       requestMessages: nextMessages,
@@ -727,7 +808,9 @@ export default function ConversationPage() {
     const runId = activeRunIdRef.current;
 
     if (!runId) {
-      setComposerError('The active run is still initializing. Retry stop in a moment.');
+      setComposerError(
+        "The active run is still initializing. Retry stop in a moment.",
+      );
       return;
     }
 
@@ -738,12 +821,12 @@ export default function ConversationPage() {
     try {
       const result = await stopChatCompletion(session.sessionToken, runId);
 
-      if ('error' in result) {
+      if ("error" in result) {
         setComposerError(result.error.message);
         stopRequestedRef.current = false;
       }
     } catch {
-      setComposerError('The stop request failed. Please retry.');
+      setComposerError("The stop request failed. Please retry.");
       stopRequestedRef.current = false;
     } finally {
       setIsStopping(false);
@@ -764,7 +847,7 @@ export default function ConversationPage() {
     }
 
     if (!navigator.clipboard?.writeText) {
-      setComposerError('Clipboard access is unavailable in this browser.');
+      setComposerError("Clipboard access is unavailable in this browser.");
       return;
     }
 
@@ -777,13 +860,13 @@ export default function ConversationPage() {
       }
 
       copiedMessageResetRef.current = window.setTimeout(() => {
-        setCopiedMessageId(currentMessageId =>
-          currentMessageId === messageId ? null : currentMessageId
+        setCopiedMessageId((currentMessageId) =>
+          currentMessageId === messageId ? null : currentMessageId,
         );
         copiedMessageResetRef.current = null;
       }, 1500);
     } catch {
-      setComposerError('Copying message content failed. Please retry.');
+      setComposerError("Copying message content failed. Please retry.");
     }
   }
 
@@ -794,17 +877,23 @@ export default function ConversationPage() {
 
     const quotedMessage = quoteMessageContent(message.content);
 
-    setDraft(currentDraft =>
+    setDraft((currentDraft) =>
       currentDraft.trim().length > 0
         ? `${currentDraft.trim()}\n\n${quotedMessage}`
-        : `${quotedMessage}\n\n`
+        : `${quotedMessage}\n\n`,
     );
     setComposerError(null);
     composerInputRef.current?.focus();
   }
 
+  function handleSuggestedPrompt(prompt: string) {
+    setDraft(prompt);
+    setComposerError(null);
+    composerInputRef.current?.focus();
+  }
+
   function handleRetryMessage(message: WorkspaceConversationMessage) {
-    if (message.role !== 'user') {
+    if (message.role !== "user") {
       return;
     }
 
@@ -820,29 +909,33 @@ export default function ConversationPage() {
     }
 
     const assistantIndex = messages.findIndex(
-      message =>
+      (message) =>
         message.id === messageId &&
-        message.role === 'assistant' &&
-        message.status === 'completed'
+        message.role === "assistant" &&
+        message.status === "completed",
     );
 
     if (assistantIndex < 0 || assistantIndex !== messages.length - 1) {
-      setComposerError('Only the latest completed assistant reply can be regenerated right now.');
+      setComposerError(
+        "Only the latest completed assistant reply can be regenerated right now.",
+      );
       return;
     }
 
     const requestMessages = messages.slice(0, assistantIndex);
-    const latestUserMessage = [...requestMessages].reverse().find(message => message.role === 'user');
+    const latestUserMessage = [...requestMessages]
+      .reverse()
+      .find((message) => message.role === "user");
 
     if (!latestUserMessage) {
-      setComposerError('No user message is available to regenerate.');
+      setComposerError("No user message is available to regenerate.");
       return;
     }
 
     const assistantMessage = buildLocalMessage({
-      role: 'assistant',
-      content: '',
-      status: 'streaming',
+      role: "assistant",
+      content: "",
+      status: "streaming",
     });
 
     await runConversationStream({
@@ -855,32 +948,41 @@ export default function ConversationPage() {
 
   function setMessageFeedback(
     messageId: string,
-    feedback: WorkspaceConversationMessage['feedback'] | null
+    feedback: WorkspaceConversationMessage["feedback"] | null,
   ) {
-    setMessages(currentMessages =>
-      currentMessages.map(message => (message.id === messageId ? { ...message, feedback } : message))
+    setMessages((currentMessages) =>
+      currentMessages.map((message) =>
+        message.id === messageId ? { ...message, feedback } : message,
+      ),
     );
-    setConversation(currentConversation =>
+    setConversation((currentConversation) =>
       currentConversation
         ? {
             ...currentConversation,
             updatedAt: new Date().toISOString(),
-            messages: currentConversation.messages.map(message =>
-              message.id === messageId ? { ...message, feedback } : message
+            messages: currentConversation.messages.map((message) =>
+              message.id === messageId ? { ...message, feedback } : message,
             ),
           }
-        : currentConversation
+        : currentConversation,
     );
   }
 
-  async function handleFeedback(messageId: string, rating: WorkspaceMessageFeedbackRating) {
+  async function handleFeedback(
+    messageId: string,
+    rating: WorkspaceMessageFeedbackRating,
+  ) {
     if (!session || !conversation) {
       return;
     }
 
-    const message = messages.find(entry => entry.id === messageId);
+    const message = messages.find((entry) => entry.id === messageId);
 
-    if (!message || message.role !== 'assistant' || message.status !== 'completed') {
+    if (
+      !message ||
+      message.role !== "assistant" ||
+      message.status !== "completed"
+    ) {
       return;
     }
 
@@ -896,7 +998,7 @@ export default function ConversationPage() {
             rating: nextRating,
             updatedAt: new Date().toISOString(),
           }
-        : null
+        : null,
     );
 
     try {
@@ -906,26 +1008,26 @@ export default function ConversationPage() {
         messageId,
         {
           rating: nextRating,
-        }
+        },
       );
 
       if (!result.ok) {
         setMessageFeedback(messageId, previousFeedback);
 
-        if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
           clearAuthSession(window.sessionStorage);
-          router.replace('/login');
+          router.replace("/login");
           return;
         }
 
-        if (result.error.code === 'WORKSPACE_FORBIDDEN') {
-          router.replace('/auth/pending');
+        if (result.error.code === "WORKSPACE_FORBIDDEN") {
+          router.replace("/auth/pending");
           return;
         }
 
-        if (result.error.code === 'WORKSPACE_NOT_FOUND') {
+        if (result.error.code === "WORKSPACE_NOT_FOUND") {
           setConversationError(
-            'This conversation is no longer available. Return to the apps workspace and relaunch it.'
+            "This conversation is no longer available. Return to the apps workspace and relaunch it.",
           );
           return;
         }
@@ -937,10 +1039,10 @@ export default function ConversationPage() {
       setMessageFeedback(messageId, result.data.message.feedback ?? null);
     } catch {
       setMessageFeedback(messageId, previousFeedback);
-      setComposerError('Saving message feedback failed. Please retry.');
+      setComposerError("Saving message feedback failed. Please retry.");
     } finally {
-      setActiveFeedbackMessageId(currentMessageId =>
-        currentMessageId === messageId ? null : currentMessageId
+      setActiveFeedbackMessageId((currentMessageId) =>
+        currentMessageId === messageId ? null : currentMessageId,
       );
     }
   }
@@ -972,8 +1074,10 @@ export default function ConversationPage() {
   }
 
   const replayMessages = selectedRun ? buildReplayMessages(selectedRun) : [];
-  const replayAssistant = selectedRun ? buildAssistantReplay(selectedRun) : '';
-  const replayAttachments = selectedRun ? buildReplayAttachments(selectedRun) : [];
+  const replayAssistant = selectedRun ? buildAssistantReplay(selectedRun) : "";
+  const replayAttachments = selectedRun
+    ? buildReplayAttachments(selectedRun)
+    : [];
   const quotaAlerts = listQuotaAlerts(quotaUsages);
 
   return (
@@ -985,14 +1089,19 @@ export default function ConversationPage() {
           <span className="eyebrow">R12 Attachments</span>
           <h1>{conversation.title}</h1>
           <p className="lead">
-            The conversation surface now keeps independent runs per completion, supports live stop
-            control and can bind uploaded workspace attachments onto the persisted chat boundary.
+            The conversation surface now keeps independent runs per completion,
+            supports live stop control and can bind uploaded workspace
+            attachments onto the persisted chat boundary.
           </p>
         </div>
         <div className="workspace-badges">
-          <span className="workspace-badge">Conversation {conversation.id}</span>
+          <span className="workspace-badge">
+            Conversation {conversation.id}
+          </span>
           <span className="workspace-badge">Run {conversation.run.id}</span>
-          <span className="workspace-badge">Trace {lastTraceId ?? conversation.run.traceId}</span>
+          <span className="workspace-badge">
+            Trace {lastTraceId ?? conversation.run.traceId}
+          </span>
         </div>
       </header>
 
@@ -1001,8 +1110,8 @@ export default function ConversationPage() {
           <div>
             <h2>Gateway context</h2>
             <p>
-              The latest conversation snapshot still comes from workspace state, and each
-              completion now lands in its own queryable run record.
+              The latest conversation snapshot still comes from workspace state,
+              and each completion now lands in its own queryable run record.
             </p>
           </div>
           <span className={`status-chip status-${conversation.app.status}`}>
@@ -1025,13 +1134,16 @@ export default function ConversationPage() {
             <span>Run status</span>
             <strong>{conversation.run.status}</strong>
             <p>
-              Type: {conversation.run.type} · Trigger: {conversation.run.triggeredFrom}
+              Type: {conversation.run.type} · Trigger:{" "}
+              {conversation.run.triggeredFrom}
             </p>
           </article>
           <article className="chat-meta-card">
             <span>Transcript</span>
             <strong>{messages.length} messages</strong>
-            <p>History is rehydrated from the workspace conversation response.</p>
+            <p>
+              History is rehydrated from the workspace conversation response.
+            </p>
           </article>
           <article className="chat-meta-card">
             <span>Run history</span>
@@ -1046,22 +1158,25 @@ export default function ConversationPage() {
           <div>
             <h2>Quota context</h2>
             <p>
-              Workspace quota cards now come from persisted quota state plus recorded launch and run
-              usage, instead of static fixture data.
+              Workspace quota cards now come from persisted quota state plus
+              recorded launch and run usage, instead of static fixture data.
             </p>
           </div>
         </div>
 
-        {quotaServiceState === 'degraded' ? (
+        {quotaServiceState === "degraded" ? (
           <div className="notice warning">
-            Workspace quota is temporarily degraded. New launches may be blocked until the service
-            recovers.
+            Workspace quota is temporarily degraded. New launches may be blocked
+            until the service recovers.
           </div>
         ) : null}
 
         <div className="quota-grid">
-          {quotaUsages.map(usage => (
-            <article className={`quota-card quota-${getQuotaSeverity(usage)}`} key={usage.scope}>
+          {quotaUsages.map((usage) => (
+            <article
+              className={`quota-card quota-${getQuotaSeverity(usage)}`}
+              key={usage.scope}
+            >
               <div className="quota-card-header">
                 <span>{usage.scopeLabel}</span>
                 <strong>
@@ -1086,7 +1201,9 @@ export default function ConversationPage() {
 
         {quotaAlerts.length > 0 ? (
           <div className="notice warning">
-            {quotaAlerts.map(alert => `${alert.scopeLabel} is near capacity.`).join(' ')}
+            {quotaAlerts
+              .map((alert) => `${alert.scopeLabel} is near capacity.`)
+              .join(" ")}
           </div>
         ) : null}
       </section>
@@ -1102,40 +1219,60 @@ export default function ConversationPage() {
           <div>
             <h2>Conversation</h2>
             <p>
-              Send a prompt to stream an assistant response. Refreshing the page now reloads both
-              the transcript and the latest run from persisted workspace state.
+              Send a prompt to stream an assistant response. Refreshing the page
+              now reloads both the transcript and the latest run from persisted
+              workspace state.
             </p>
           </div>
         </div>
 
-        {composerError ? <div className="notice error">{composerError}</div> : null}
+        {composerError ? (
+          <div className="notice error">{composerError}</div>
+        ) : null}
 
         {messages.length === 0 ? (
           <div className="chat-empty-state">
             <strong>No messages yet.</strong>
-            <p>Start with a prompt like "Summarize the current policy changes for my team."</p>
+            <p>
+              Start with a prompt like "Summarize the current policy changes for
+              my team."
+            </p>
           </div>
         ) : (
           <div className="chat-placeholder">
             {messages.map((message, index) => (
-              <article key={message.id} className={`chat-bubble ${message.role}`}>
+              <article
+                key={message.id}
+                className={`chat-bubble ${message.role}`}
+              >
                 <div className="chat-bubble-meta">
                   <span className="chat-bubble-label">
-                    {message.role === 'user' ? session.user.displayName : conversation.app.name}
+                    {message.role === "user"
+                      ? session.user.displayName
+                      : conversation.app.name}
                   </span>
-                  <span className={`chat-bubble-status status-${message.status}`}>
+                  <span
+                    className={`chat-bubble-status status-${message.status}`}
+                  >
                     {message.status}
                   </span>
                 </div>
-                <p>{message.content || (message.status === 'streaming' ? 'Streaming...' : '')}</p>
+                <ChatMarkdown
+                  content={message.content}
+                  emptyFallback={
+                    message.status === "streaming" ? "Streaming..." : ""
+                  }
+                />
                 <div className="chat-message-actions">
                   <button
                     type="button"
                     className="message-action-button"
-                    onClick={() => void handleCopyMessage(message.id, message.content)}
+                    onClick={() =>
+                      void handleCopyMessage(message.id, message.content)
+                    }
                     disabled={message.content.trim().length === 0}
                   >
-                    {copiedMessageId === message.id ? 'Copied' : 'Copy'}
+                    {copiedMessageId === message.id ? "Copied" : "Copy"}
                   </button>
                   <button
                     type="button"
@@ -1145,7 +1282,7 @@ export default function ConversationPage() {
                   >
                     Quote
                   </button>
-                  {message.role === 'user' ? (
+                  {message.role === "user" ? (
                     <button
                       type="button"
                       className="message-action-button"
@@ -1155,8 +1292,8 @@ export default function ConversationPage() {
                       Retry
                     </button>
                   ) : null}
-                  {message.role === 'assistant' &&
-                  message.status === 'completed' &&
+                  {message.role === "assistant" &&
+                  message.status === "completed" &&
                   index === messages.length - 1 ? (
                     <button
                       type="button"
@@ -1170,29 +1307,32 @@ export default function ConversationPage() {
                 </div>
                 {message.attachments && message.attachments.length > 0 ? (
                   <ul className="chat-attachment-list">
-                    {message.attachments.map(attachment => (
+                    {message.attachments.map((attachment) => (
                       <li key={attachment.id}>
-                        {attachment.fileName} · {attachment.contentType} ·{' '}
+                        {attachment.fileName} · {attachment.contentType} ·{" "}
                         {formatAttachmentSize(attachment.sizeBytes)}
                       </li>
                     ))}
                   </ul>
                 ) : null}
-                {message.role === 'assistant' && message.status === 'completed' ? (
+                {message.role === "assistant" &&
+                message.status === "completed" ? (
                   <div className="chat-feedback-row">
                     <span className="chat-feedback-note">
                       {activeFeedbackMessageId === message.id
-                        ? 'Saving feedback...'
+                        ? "Saving feedback..."
                         : message.feedback
                           ? `Marked ${describeFeedbackRating(message.feedback.rating)}.`
-                          : 'Rate this reply.'}
+                          : "Rate this reply."}
                     </span>
                     <div className="chat-feedback-actions">
                       <button
                         type="button"
                         className="feedback-button"
-                        aria-pressed={message.feedback?.rating === 'positive'}
-                        onClick={() => void handleFeedback(message.id, 'positive')}
+                        aria-pressed={message.feedback?.rating === "positive"}
+                        onClick={() =>
+                          void handleFeedback(message.id, "positive")
+                        }
                         disabled={activeFeedbackMessageId !== null}
                       >
                         Helpful
@@ -1200,12 +1340,37 @@ export default function ConversationPage() {
                       <button
                         type="button"
                         className="feedback-button"
-                        aria-pressed={message.feedback?.rating === 'negative'}
-                        onClick={() => void handleFeedback(message.id, 'negative')}
+                        aria-pressed={message.feedback?.rating === "negative"}
+                        onClick={() =>
+                          void handleFeedback(message.id, "negative")
+                        }
                         disabled={activeFeedbackMessageId !== null}
                       >
                         Needs work
                       </button>
+                    </div>
+                  </div>
+                ) : null}
+                {message.role === "assistant" &&
+                message.status === "completed" &&
+                message.suggestedPrompts &&
+                message.suggestedPrompts.length > 0 ? (
+                  <div className="chat-suggested-prompts">
+                    <span className="chat-suggested-prompts-label">
+                      Try a follow-up
+                    </span>
+                    <div className="chat-suggested-prompt-list">
+                      {message.suggestedPrompts.map((prompt) => (
+                        <button
+                          key={`${message.id}-${prompt}`}
+                          type="button"
+                          className="suggested-prompt-button"
+                          onClick={() => handleSuggestedPrompt(prompt)}
+                          disabled={isStreaming || isUploadingAttachments}
+                        >
+                          {prompt}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 ) : null}
@@ -1225,7 +1390,7 @@ export default function ConversationPage() {
             rows={4}
             placeholder={`Ask ${conversation.app.name} to work on something concrete...`}
             value={draft}
-            onChange={event => setDraft(event.target.value)}
+            onChange={(event) => setDraft(event.target.value)}
             disabled={isStreaming}
           />
           <label className="field" htmlFor="chat-attachment">
@@ -1235,17 +1400,17 @@ export default function ConversationPage() {
             id="chat-attachment"
             type="file"
             multiple
-            accept={WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES.join(',')}
-            onChange={event => void handleAttachmentSelect(event)}
+            accept={WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES.join(",")}
+            onChange={(event) => void handleAttachmentSelect(event)}
             disabled={isStreaming || isUploadingAttachments}
           />
           <p className="chat-composer-hint">
-            Up to {formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} per file. Supported: text,
-            JSON, CSV, PDF, PNG, JPEG, WEBP, GIF.
+            Up to {formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} per
+            file. Supported: text, JSON, CSV, PDF, PNG, JPEG, WEBP, GIF.
           </p>
           {draftAttachments.length > 0 ? (
             <div className="chat-attachment-draft-list">
-              {draftAttachments.map(attachment => (
+              {draftAttachments.map((attachment) => (
                 <div key={attachment.id} className="chat-attachment-chip">
                   <span>{attachmentsToText([attachment])[0]}</span>
                   <button
@@ -1271,10 +1436,10 @@ export default function ConversationPage() {
               }
             >
               {isUploadingAttachments
-                ? 'Uploading...'
+                ? "Uploading..."
                 : isStreaming
-                  ? 'Streaming...'
-                  : 'Send message'}
+                  ? "Streaming..."
+                  : "Send message"}
             </button>
             {isStreaming ? (
               <button
@@ -1284,10 +1449,10 @@ export default function ConversationPage() {
                 disabled={isStopping || isAwaitingRunMetadata}
               >
                 {isStopping
-                  ? 'Stopping...'
+                  ? "Stopping..."
                   : isAwaitingRunMetadata
-                    ? 'Starting...'
-                    : 'Stop response'}
+                    ? "Starting..."
+                    : "Stop response"}
               </button>
             ) : null}
           </div>
@@ -1299,8 +1464,9 @@ export default function ConversationPage() {
           <div>
             <h2>Run history</h2>
             <p>
-              Queryable run records are ordered newest first. Select one to inspect the stored
-              request snapshot, assistant output and usage counters.
+              Queryable run records are ordered newest first. Select one to
+              inspect the stored request snapshot, assistant output and usage
+              counters.
             </p>
           </div>
         </div>
@@ -1310,14 +1476,17 @@ export default function ConversationPage() {
             {runs.length === 0 ? (
               <div className="chat-empty-state">
                 <strong>No runs recorded yet.</strong>
-                <p>The first completion will create the initial replayable run record.</p>
+                <p>
+                  The first completion will create the initial replayable run
+                  record.
+                </p>
               </div>
             ) : (
-              runs.map(run => (
+              runs.map((run) => (
                 <button
                   key={run.id}
                   type="button"
-                  className={`run-history-item ${selectedRun?.id === run.id ? 'selected' : ''}`}
+                  className={`run-history-item ${selectedRun?.id === run.id ? "selected" : ""}`}
                   onClick={() => void handleRunSelect(run.id)}
                 >
                   <strong>{run.id}</strong>
@@ -1346,24 +1515,30 @@ export default function ConversationPage() {
                     <span>Usage</span>
                     <strong>{selectedRun.usage.totalTokens} tokens</strong>
                     <p>
-                      Prompt {selectedRun.usage.promptTokens} · Completion{' '}
+                      Prompt {selectedRun.usage.promptTokens} · Completion{" "}
                       {selectedRun.usage.completionTokens}
                     </p>
                   </article>
                   <article className="chat-meta-card">
                     <span>Timing</span>
                     <strong>{selectedRun.elapsedTime} ms</strong>
-                    <p>{selectedRun.finishedAt ?? 'in progress'}</p>
+                    <p>{selectedRun.finishedAt ?? "in progress"}</p>
                   </article>
                   <article className="chat-meta-card">
                     <span>Attached files</span>
                     <strong>{replayAttachments.length}</strong>
-                    <p>Run inputs keep attachment metadata for replay and follow-on audit work.</p>
+                    <p>
+                      Run inputs keep attachment metadata for replay and
+                      follow-on audit work.
+                    </p>
                   </article>
                   <article className="chat-meta-card">
                     <span>Timeline events</span>
                     <strong>{selectedRun.timeline.length}</strong>
-                    <p>Run lifecycle events are persisted alongside replayable inputs and outputs.</p>
+                    <p>
+                      Run lifecycle events are persisted alongside replayable
+                      inputs and outputs.
+                    </p>
                   </article>
                 </div>
 
@@ -1372,15 +1547,21 @@ export default function ConversationPage() {
                     <article className="chat-bubble assistant">
                       <div className="chat-bubble-meta">
                         <span className="chat-bubble-label">Run timeline</span>
-                        <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
                           {selectedRun.status}
                         </span>
                       </div>
                       <ul className="timeline-list">
-                        {selectedRun.timeline.map(event => (
+                        {selectedRun.timeline.map((event) => (
                           <li key={event.id} className="timeline-item">
-                            <strong>{RUN_TIMELINE_EVENT_LABELS[event.type]}</strong>
-                            <span>{new Date(event.createdAt).toLocaleString()}</span>
+                            <strong>
+                              {RUN_TIMELINE_EVENT_LABELS[event.type]}
+                            </strong>
+                            <span>
+                              {new Date(event.createdAt).toLocaleString()}
+                            </span>
                             <p>{describeTimelineEvent(event)}</p>
                           </li>
                         ))}
@@ -1390,41 +1571,59 @@ export default function ConversationPage() {
                   <article className="chat-bubble user">
                     <div className="chat-bubble-meta">
                       <span className="chat-bubble-label">Prompt snapshot</span>
-                      <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                      <span
+                        className={`chat-bubble-status status-${selectedRun.status}`}
+                      >
                         {selectedRun.status}
                       </span>
                     </div>
                     <p>
-                      {replayMessages.map(message => `${message.role}: ${message.content}`).join('\n\n') ||
-                        'No prompt snapshot was stored for this run.'}
+                      {replayMessages
+                        .map((message) => `${message.role}: ${message.content}`)
+                        .join("\n\n") ||
+                        "No prompt snapshot was stored for this run."}
                     </p>
                   </article>
                   {replayAttachments.length > 0 ? (
                     <article className="chat-bubble user">
                       <div className="chat-bubble-meta">
-                        <span className="chat-bubble-label">Attached files</span>
-                        <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                        <span className="chat-bubble-label">
+                          Attached files
+                        </span>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
                           {selectedRun.status}
                         </span>
                       </div>
-                      <p>{attachmentsToText(replayAttachments).join('\n')}</p>
+                      <p>{attachmentsToText(replayAttachments).join("\n")}</p>
                     </article>
                   ) : null}
                   <article className="chat-bubble assistant">
                     <div className="chat-bubble-meta">
-                      <span className="chat-bubble-label">Assistant output</span>
-                      <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                      <span className="chat-bubble-label">
+                        Assistant output
+                      </span>
+                      <span
+                        className={`chat-bubble-status status-${selectedRun.status}`}
+                      >
                         {selectedRun.status}
                       </span>
                     </div>
-                    <p>{replayAssistant || 'No assistant output was stored for this run.'}</p>
+                    <ChatMarkdown
+                      content={replayAssistant}
+                      emptyFallback="No assistant output was stored for this run."
+                    />
                   </article>
                 </div>
               </>
             ) : (
               <div className="chat-empty-state">
                 <strong>Select a run.</strong>
-                <p>The latest run will be loaded automatically after the first completion.</p>
+                <p>
+                  The latest run will be loaded automatically after the first
+                  completion.
+                </p>
               </div>
             )}
           </div>

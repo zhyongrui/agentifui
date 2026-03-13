@@ -2,43 +2,45 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceConversationResponse,
   WorkspaceRunResponse,
-} from '@agentifui/shared/apps';
+} from "@agentifui/shared/apps";
 import type {
   ChatCompletionResponse,
   ChatCompletionStopResponse,
   ChatModelsResponse,
-} from '@agentifui/shared/chat';
-import { describe, expect, it } from 'vitest';
+} from "@agentifui/shared/chat";
+import { describe, expect, it } from "vitest";
 
-import { buildApp } from '../app.js';
-import { createAuditService } from '../services/audit-service.js';
-import { createAuthService } from '../services/auth-service.js';
+import { buildApp } from "../app.js";
+import { createAuditService } from "../services/audit-service.js";
+import { createAuthService } from "../services/auth-service.js";
 
 const testEnv: {
-  nodeEnv: 'test';
+  nodeEnv: "test";
   host: string;
   port: number;
   corsOrigin: boolean;
   ssoDomainMap: Record<string, string>;
   defaultTenantId: string;
-  defaultSsoUserStatus: 'pending' | 'active';
+  defaultSsoUserStatus: "pending" | "active";
   authLockoutThreshold: number;
   authLockoutDurationMs: number;
 } = {
-  nodeEnv: 'test' as const,
-  host: '127.0.0.1',
+  nodeEnv: "test" as const,
+  host: "127.0.0.1",
   port: 4000,
   corsOrigin: true,
   ssoDomainMap: {
-    'iflabx.com': 'iflabx-sso',
+    "iflabx.com": "iflabx-sso",
   },
-  defaultTenantId: 'tenant-dev',
-  defaultSsoUserStatus: 'pending',
+  defaultTenantId: "tenant-dev",
+  defaultSsoUserStatus: "pending",
   authLockoutThreshold: 5,
   authLockoutDurationMs: 1800000,
 };
 
-function createTestAuthService(overrides: Partial<Parameters<typeof createAuthService>[0]> = {}) {
+function createTestAuthService(
+  overrides: Partial<Parameters<typeof createAuthService>[0]> = {},
+) {
   return createAuthService({
     defaultTenantId: testEnv.defaultTenantId,
     defaultSsoUserStatus: testEnv.defaultSsoUserStatus,
@@ -51,7 +53,7 @@ function createTestAuthService(overrides: Partial<Parameters<typeof createAuthSe
 async function createTestApp(
   authService = createTestAuthService(),
   envOverrides: Partial<typeof testEnv> = {},
-  appOverrides: Record<string, unknown> = {}
+  appOverrides: Record<string, unknown> = {},
 ) {
   const app = await buildApp(
     {
@@ -62,7 +64,7 @@ async function createTestApp(
       logger: false,
       authService,
       ...appOverrides,
-    }
+    },
   );
 
   return {
@@ -71,20 +73,20 @@ async function createTestApp(
   };
 }
 
-describe('chat routes', () => {
-  it('rejects chat completions without a bearer token', async () => {
+describe("chat routes", () => {
+  it("rejects chat completions without a bearer token", async () => {
     const { app } = await createTestApp();
 
     try {
       const response = await app.inject({
-        method: 'POST',
-        url: '/v1/chat/completions',
+        method: "POST",
+        url: "/v1/chat/completions",
         payload: {
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           messages: [
             {
-              role: 'user',
-              content: 'hello',
+              role: "user",
+              content: "hello",
             },
           ],
         },
@@ -93,58 +95,59 @@ describe('chat routes', () => {
       expect(response.statusCode).toBe(401);
       expect(response.json()).toEqual({
         error: {
-          message: 'A valid session token is required to call the chat gateway.',
-          type: 'authentication_error',
-          code: 'invalid_token',
+          message:
+            "A valid session token is required to call the chat gateway.",
+          type: "authentication_error",
+          code: "invalid_token",
           trace_id: expect.any(String),
         },
       });
-      expect(response.headers['x-trace-id']).toEqual(expect.any(String));
+      expect(response.headers["x-trace-id"]).toEqual(expect.any(String));
     } finally {
       await app.close();
     }
   });
 
-  it('returns the authorized app catalog through /v1/models', async () => {
+  it("returns the authorized app catalog through /v1/models", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
 
     authService.register({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
-      displayName: 'Developer',
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
     });
 
     const login = authService.login({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
+      email: "developer@iflabx.com",
+      password: "Secure123",
     });
 
     expect(login.ok).toBe(true);
 
     if (!login.ok) {
-      throw new Error('expected active login to succeed');
+      throw new Error("expected active login to succeed");
     }
 
     try {
       const response = await app.inject({
-        method: 'GET',
-        url: '/v1/models',
+        method: "GET",
+        url: "/v1/models",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-trace-id']).toEqual(expect.any(String));
+      expect(response.headers["x-trace-id"]).toEqual(expect.any(String));
       expect(response.json()).toEqual({
-        object: 'list',
+        object: "list",
         data: expect.arrayContaining([
           expect.objectContaining({
-            id: 'app_policy_watch',
-            object: 'model',
-            owned_by: 'tenant-dev',
-            name: 'Policy Watch',
+            id: "app_policy_watch",
+            object: "model",
+            owned_by: "tenant-dev",
+            name: "Policy Watch",
             capabilities: expect.objectContaining({
               streaming: true,
               stop: true,
@@ -157,37 +160,37 @@ describe('chat routes', () => {
     }
   });
 
-  it('binds blocking chat completions onto an existing workspace conversation', async () => {
+  it("binds blocking chat completions onto an existing workspace conversation", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
 
     authService.register({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
-      displayName: 'Developer',
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
     });
 
     const login = authService.login({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
+      email: "developer@iflabx.com",
+      password: "Secure123",
     });
 
     expect(login.ok).toBe(true);
 
     if (!login.ok) {
-      throw new Error('expected active login to succeed');
+      throw new Error("expected active login to succeed");
     }
 
     try {
       const launch = await app.inject({
-        method: 'POST',
-        url: '/workspace/apps/launch',
+        method: "POST",
+        url: "/workspace/apps/launch",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          appId: 'app_policy_watch',
-          activeGroupId: 'grp_research',
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
         },
       });
       const launchBody = launch.json() as WorkspaceAppLaunchResponse;
@@ -196,42 +199,49 @@ describe('chat routes', () => {
       const traceId = launchBody.data.traceId;
 
       if (!conversationId || !runId || !traceId) {
-        throw new Error('expected launch payload to include conversation, run and trace ids');
+        throw new Error(
+          "expected launch payload to include conversation, run and trace ids",
+        );
       }
 
       const response = await app.inject({
-        method: 'POST',
-        url: '/v1/chat/completions',
+        method: "POST",
+        url: "/v1/chat/completions",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           conversation_id: conversationId,
           messages: [
             {
-              role: 'user',
-              content: 'Summarize the current policy changes for my group.',
+              role: "user",
+              content: "Summarize the current policy changes for my group.",
             },
           ],
         },
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['x-trace-id']).toBe(traceId);
+      expect(response.headers["x-trace-id"]).toBe(traceId);
       expect(response.json()).toEqual({
         id: runId,
-        object: 'chat.completion',
+        object: "chat.completion",
         created: expect.any(Number),
-        model: 'policy-watch',
+        model: "policy-watch",
         choices: [
           {
             index: 0,
             message: {
-              role: 'assistant',
-              content: expect.stringContaining('Policy Watch is now reachable through the AgentifUI gateway.'),
+              role: "assistant",
+              content: expect.stringContaining(
+                "Policy Watch is now reachable through the AgentifUI gateway.",
+              ),
+              suggested_prompts: expect.arrayContaining([
+                expect.stringContaining("Summarize the key takeaways about"),
+              ]),
             },
-            finish_reason: 'stop',
+            finish_reason: "stop",
           },
         ],
         usage: {
@@ -242,14 +252,14 @@ describe('chat routes', () => {
         conversation_id: conversationId,
         trace_id: traceId,
         metadata: {
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           run_id: runId,
-          active_group_id: 'grp_research',
+          active_group_id: "grp_research",
         },
       } satisfies ChatCompletionResponse);
 
       const conversationResponse = await app.inject({
-        method: 'GET',
+        method: "GET",
         url: `/workspace/conversations/${conversationId}`,
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
@@ -257,24 +267,29 @@ describe('chat routes', () => {
       });
 
       expect(conversationResponse.statusCode).toBe(200);
-      expect((conversationResponse.json() as WorkspaceConversationResponse).data).toMatchObject({
+      expect(
+        (conversationResponse.json() as WorkspaceConversationResponse).data,
+      ).toMatchObject({
         id: conversationId,
         messages: [
           {
-            role: 'user',
-            content: 'Summarize the current policy changes for my group.',
-            status: 'completed',
+            role: "user",
+            content: "Summarize the current policy changes for my group.",
+            status: "completed",
           },
           {
-            role: 'assistant',
+            role: "assistant",
             content: expect.stringContaining(
-              'Policy Watch is now reachable through the AgentifUI gateway.'
+              "Policy Watch is now reachable through the AgentifUI gateway.",
             ),
-            status: 'completed',
+            status: "completed",
+            suggestedPrompts: expect.arrayContaining([
+              expect.stringContaining("Summarize the key takeaways about"),
+            ]),
           },
         ],
         run: {
-          status: 'succeeded',
+          status: "succeeded",
         },
       });
     } finally {
@@ -282,37 +297,37 @@ describe('chat routes', () => {
     }
   });
 
-  it('creates a fresh run for the next completion on the same conversation', async () => {
+  it("creates a fresh run for the next completion on the same conversation", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
 
     authService.register({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
-      displayName: 'Developer',
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
     });
 
     const login = authService.login({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
+      email: "developer@iflabx.com",
+      password: "Secure123",
     });
 
     expect(login.ok).toBe(true);
 
     if (!login.ok) {
-      throw new Error('expected active login to succeed');
+      throw new Error("expected active login to succeed");
     }
 
     try {
       const launch = await app.inject({
-        method: 'POST',
-        url: '/workspace/apps/launch',
+        method: "POST",
+        url: "/workspace/apps/launch",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          appId: 'app_policy_watch',
-          activeGroupId: 'grp_research',
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
         },
       });
       const launchBody = launch.json() as WorkspaceAppLaunchResponse;
@@ -320,22 +335,24 @@ describe('chat routes', () => {
       const initialRunId = launchBody.data.runId;
 
       if (!conversationId || !initialRunId) {
-        throw new Error('expected launch payload to include conversation and run ids');
+        throw new Error(
+          "expected launch payload to include conversation and run ids",
+        );
       }
 
       const firstCompletion = await app.inject({
-        method: 'POST',
-        url: '/v1/chat/completions',
+        method: "POST",
+        url: "/v1/chat/completions",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           conversation_id: conversationId,
           messages: [
             {
-              role: 'user',
-              content: 'Summarize the current policy changes for my group.',
+              role: "user",
+              content: "Summarize the current policy changes for my group.",
             },
           ],
         },
@@ -345,26 +362,26 @@ describe('chat routes', () => {
       expect(firstBody.id).toBe(initialRunId);
 
       const secondCompletion = await app.inject({
-        method: 'POST',
-        url: '/v1/chat/completions',
+        method: "POST",
+        url: "/v1/chat/completions",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           conversation_id: conversationId,
           messages: [
             {
-              role: 'user',
-              content: 'Summarize the current policy changes for my group.',
+              role: "user",
+              content: "Summarize the current policy changes for my group.",
             },
             {
-              role: 'assistant',
-              content: firstBody.choices[0]?.message.content ?? '',
+              role: "assistant",
+              content: firstBody.choices[0]?.message.content ?? "",
             },
             {
-              role: 'user',
-              content: 'Now tell me what changed since the previous answer.',
+              role: "user",
+              content: "Now tell me what changed since the previous answer.",
             },
           ],
         },
@@ -378,7 +395,7 @@ describe('chat routes', () => {
       expect(secondBody.metadata?.run_id).toBe(secondBody.id);
 
       const runsResponse = await app.inject({
-        method: 'GET',
+        method: "GET",
         url: `/workspace/conversations/${conversationId}/runs`,
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
@@ -386,7 +403,10 @@ describe('chat routes', () => {
       });
 
       expect(runsResponse.statusCode).toBe(200);
-      expect((runsResponse.json() as { data: { runs: Array<{ id: string }> } }).data.runs).toEqual([
+      expect(
+        (runsResponse.json() as { data: { runs: Array<{ id: string }> } }).data
+          .runs,
+      ).toEqual([
         expect.objectContaining({
           id: secondBody.id,
         }),
@@ -396,7 +416,7 @@ describe('chat routes', () => {
       ]);
 
       const runResponse = await app.inject({
-        method: 'GET',
+        method: "GET",
         url: `/workspace/runs/${secondBody.id}`,
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
@@ -404,11 +424,13 @@ describe('chat routes', () => {
       });
 
       expect(runResponse.statusCode).toBe(200);
-      expect((runResponse.json() as { data: Record<string, unknown> }).data).toMatchObject({
+      expect(
+        (runResponse.json() as { data: Record<string, unknown> }).data,
+      ).toMatchObject({
         id: secondBody.id,
         conversationId,
-        status: 'succeeded',
-        triggeredFrom: 'chat_completion',
+        status: "succeeded",
+        triggeredFrom: "chat_completion",
         usage: {
           totalTokens: expect.any(Number),
         },
@@ -420,7 +442,7 @@ describe('chat routes', () => {
       });
 
       const conversationResponse = await app.inject({
-        method: 'GET',
+        method: "GET",
         url: `/workspace/conversations/${conversationId}`,
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
@@ -428,51 +450,53 @@ describe('chat routes', () => {
       });
 
       expect(conversationResponse.statusCode).toBe(200);
-      expect((conversationResponse.json() as WorkspaceConversationResponse).data.run).toMatchObject({
+      expect(
+        (conversationResponse.json() as WorkspaceConversationResponse).data.run,
+      ).toMatchObject({
         id: secondBody.id,
-        status: 'succeeded',
-        triggeredFrom: 'chat_completion',
+        status: "succeeded",
+        triggeredFrom: "chat_completion",
       });
     } finally {
       await app.close();
     }
   });
 
-  it('creates a new conversation when conversation_id is omitted', async () => {
+  it("creates a new conversation when conversation_id is omitted", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
 
     authService.register({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
-      displayName: 'Developer',
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
     });
 
     const login = authService.login({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
+      email: "developer@iflabx.com",
+      password: "Secure123",
     });
 
     expect(login.ok).toBe(true);
 
     if (!login.ok) {
-      throw new Error('expected active login to succeed');
+      throw new Error("expected active login to succeed");
     }
 
     try {
       const response = await app.inject({
-        method: 'POST',
-        url: '/v1/chat/completions',
+        method: "POST",
+        url: "/v1/chat/completions",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
-          'x-active-group-id': 'grp_research',
+          "x-active-group-id": "grp_research",
         },
         payload: {
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           messages: [
             {
-              role: 'user',
-              content: 'Create a new workspace-backed conversation.',
+              role: "user",
+              content: "Create a new workspace-backed conversation.",
             },
           ],
         },
@@ -490,41 +514,41 @@ describe('chat routes', () => {
     }
   });
 
-  it('returns SSE-compatible payloads when stream=true', async () => {
+  it("returns SSE-compatible payloads when stream=true", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
 
     authService.register({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
-      displayName: 'Developer',
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
     });
 
     const login = authService.login({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
+      email: "developer@iflabx.com",
+      password: "Secure123",
     });
 
     expect(login.ok).toBe(true);
 
     if (!login.ok) {
-      throw new Error('expected active login to succeed');
+      throw new Error("expected active login to succeed");
     }
 
     try {
       const response = await app.inject({
-        method: 'POST',
-        url: '/v1/chat/completions',
+        method: "POST",
+        url: "/v1/chat/completions",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
-          'x-active-group-id': 'grp_research',
+          "x-active-group-id": "grp_research",
         },
         payload: {
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           messages: [
             {
-              role: 'user',
-              content: 'Stream the response.',
+              role: "user",
+              content: "Stream the response.",
             },
           ],
           stream: true,
@@ -532,40 +556,41 @@ describe('chat routes', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['content-type']).toContain('text/event-stream');
-      expect(response.body).toContain('event: agentif.metadata');
+      expect(response.headers["content-type"]).toContain("text/event-stream");
+      expect(response.body).toContain("event: agentif.metadata");
       expect(response.body).toContain('"object":"chat.completion.chunk"');
-      expect(response.body).toContain('data: [DONE]');
+      expect(response.body).toContain('"suggested_prompts"');
+      expect(response.body).toContain("data: [DONE]");
     } finally {
       await app.close();
     }
   });
 
-  it('returns a soft stop result for the minimal protocol slice', async () => {
+  it("returns a soft stop result for the minimal protocol slice", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
 
     authService.register({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
-      displayName: 'Developer',
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
     });
 
     const login = authService.login({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
+      email: "developer@iflabx.com",
+      password: "Secure123",
     });
 
     expect(login.ok).toBe(true);
 
     if (!login.ok) {
-      throw new Error('expected active login to succeed');
+      throw new Error("expected active login to succeed");
     }
 
     try {
       const response = await app.inject({
-        method: 'POST',
-        url: '/v1/chat/completions/run_test/stop',
+        method: "POST",
+        url: "/v1/chat/completions/run_test/stop",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
@@ -573,45 +598,45 @@ describe('chat routes', () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({
-        result: 'success',
-        stop_type: 'soft',
+        result: "success",
+        stop_type: "soft",
       } satisfies ChatCompletionStopResponse);
     } finally {
       await app.close();
     }
   });
 
-  it('binds uploaded workspace attachments onto the conversation transcript and run inputs', async () => {
+  it("binds uploaded workspace attachments onto the conversation transcript and run inputs", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
 
     authService.register({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
-      displayName: 'Developer',
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
     });
 
     const login = authService.login({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
+      email: "developer@iflabx.com",
+      password: "Secure123",
     });
 
     expect(login.ok).toBe(true);
 
     if (!login.ok) {
-      throw new Error('expected active login to succeed');
+      throw new Error("expected active login to succeed");
     }
 
     try {
       const launch = await app.inject({
-        method: 'POST',
-        url: '/workspace/apps/launch',
+        method: "POST",
+        url: "/workspace/apps/launch",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          appId: 'app_policy_watch',
-          activeGroupId: 'grp_research',
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
         },
       });
       const launchBody = launch.json() as WorkspaceAppLaunchResponse;
@@ -619,19 +644,21 @@ describe('chat routes', () => {
       const runId = launchBody.data.runId;
 
       if (!conversationId || !runId) {
-        throw new Error('expected launch payload to include conversation and run ids');
+        throw new Error(
+          "expected launch payload to include conversation and run ids",
+        );
       }
 
       const upload = await app.inject({
-        method: 'POST',
+        method: "POST",
         url: `/workspace/conversations/${conversationId}/uploads`,
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          fileName: 'brief.txt',
-          contentType: 'text/plain',
-          base64Data: Buffer.from('Policy attachment').toString('base64'),
+          fileName: "brief.txt",
+          contentType: "text/plain",
+          base64Data: Buffer.from("Policy attachment").toString("base64"),
         },
       });
 
@@ -639,37 +666,37 @@ describe('chat routes', () => {
       const attachmentId = (upload.json() as { data: { id: string } }).data.id;
 
       const response = await app.inject({
-        method: 'POST',
-        url: '/v1/chat/completions',
+        method: "POST",
+        url: "/v1/chat/completions",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           conversation_id: conversationId,
           messages: [
             {
-              role: 'user',
-              content: 'Review the attachment.',
+              role: "user",
+              content: "Review the attachment.",
             },
           ],
           files: [
             {
-              type: 'local',
+              type: "local",
               file_id: attachmentId,
-              transfer_method: 'local_file',
+              transfer_method: "local_file",
             },
           ],
         },
       });
 
       expect(response.statusCode).toBe(200);
-      expect((response.json() as ChatCompletionResponse).choices[0]?.message.content).toContain(
-        'Attachments: brief.txt (text/plain, 17 bytes).'
-      );
+      expect(
+        (response.json() as ChatCompletionResponse).choices[0]?.message.content,
+      ).toContain("Attachments: brief.txt (text/plain, 17 bytes).");
 
       const conversationResponse = await app.inject({
-        method: 'GET',
+        method: "GET",
         url: `/workspace/conversations/${conversationId}`,
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
@@ -677,27 +704,30 @@ describe('chat routes', () => {
       });
 
       expect(conversationResponse.statusCode).toBe(200);
-      expect((conversationResponse.json() as WorkspaceConversationResponse).data.messages).toEqual([
+      expect(
+        (conversationResponse.json() as WorkspaceConversationResponse).data
+          .messages,
+      ).toEqual([
         expect.objectContaining({
-          role: 'user',
-          content: 'Review the attachment.',
+          role: "user",
+          content: "Review the attachment.",
           attachments: [
             expect.objectContaining({
               id: attachmentId,
-              fileName: 'brief.txt',
-              contentType: 'text/plain',
+              fileName: "brief.txt",
+              contentType: "text/plain",
               sizeBytes: 17,
             }),
           ],
         }),
         expect.objectContaining({
-          role: 'assistant',
-          status: 'completed',
+          role: "assistant",
+          status: "completed",
         }),
       ]);
 
       const runResponse = await app.inject({
-        method: 'GET',
+        method: "GET",
         url: `/workspace/runs/${runId}`,
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
@@ -705,12 +735,14 @@ describe('chat routes', () => {
       });
 
       expect(runResponse.statusCode).toBe(200);
-      expect((runResponse.json() as WorkspaceRunResponse).data.inputs).toMatchObject({
+      expect(
+        (runResponse.json() as WorkspaceRunResponse).data.inputs,
+      ).toMatchObject({
         attachments: [
           {
             id: attachmentId,
-            fileName: 'brief.txt',
-            contentType: 'text/plain',
+            fileName: "brief.txt",
+            contentType: "text/plain",
             sizeBytes: 17,
           },
         ],
@@ -718,42 +750,42 @@ describe('chat routes', () => {
     } finally {
       await app.close();
     }
-  });
+  }, 15_000);
 
-  it('hard-stops an active streaming response and persists stopped state', async () => {
+  it("hard-stops an active streaming response and persists stopped state", async () => {
     const authService = createTestAuthService();
     const auditService = createAuditService();
     const { app } = await createTestApp(authService, {}, { auditService });
 
     authService.register({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
-      displayName: 'Developer',
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
     });
 
     const login = authService.login({
-      email: 'developer@iflabx.com',
-      password: 'Secure123',
+      email: "developer@iflabx.com",
+      password: "Secure123",
     });
 
     expect(login.ok).toBe(true);
 
     if (!login.ok) {
-      throw new Error('expected active login to succeed');
+      throw new Error("expected active login to succeed");
     }
 
     let baseUrl: string | null = null;
 
     try {
       const launch = await app.inject({
-        method: 'POST',
-        url: '/workspace/apps/launch',
+        method: "POST",
+        url: "/workspace/apps/launch",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          appId: 'app_policy_watch',
-          activeGroupId: 'grp_research',
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
         },
       });
       const launchBody = launch.json() as WorkspaceAppLaunchResponse;
@@ -761,27 +793,29 @@ describe('chat routes', () => {
       const runId = launchBody.data.runId;
 
       if (!conversationId || !runId) {
-        throw new Error('expected launch payload to include conversation and run ids');
+        throw new Error(
+          "expected launch payload to include conversation and run ids",
+        );
       }
 
       baseUrl = await app.listen({
-        host: '127.0.0.1',
+        host: "127.0.0.1",
         port: 0,
       });
 
       const streamResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
-        method: 'POST',
+        method: "POST",
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
-          'content-type': 'application/json',
+          "content-type": "application/json",
         },
         body: JSON.stringify({
-          app_id: 'app_policy_watch',
+          app_id: "app_policy_watch",
           conversation_id: conversationId,
           messages: [
             {
-              role: 'user',
-              content: 'Start a response that I will stop.',
+              role: "user",
+              content: "Start a response that I will stop.",
             },
           ],
           stream: true,
@@ -795,26 +829,33 @@ describe('chat routes', () => {
       expect(reader).toBeDefined();
 
       if (!reader) {
-        throw new Error('expected stream reader to exist');
+        throw new Error("expected stream reader to exist");
       }
 
       const firstChunk = await reader.read();
 
       expect(firstChunk.done).toBe(false);
-      expect(new TextDecoder().decode(firstChunk.value)).toContain('chat.completion.chunk');
+      expect(new TextDecoder().decode(firstChunk.value)).toContain(
+        "chat.completion.chunk",
+      );
 
-      const stopResponse = await fetch(`${baseUrl}/v1/chat/completions/${runId}/stop`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${login.data.sessionToken}`,
+      const stopResponse = await fetch(
+        `${baseUrl}/v1/chat/completions/${runId}/stop`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${login.data.sessionToken}`,
+          },
         },
-      });
+      );
 
       expect(stopResponse.status).toBe(200);
-      expect((await stopResponse.json()) as ChatCompletionStopResponse).toEqual({
-        result: 'success',
-        stop_type: 'hard',
-      });
+      expect((await stopResponse.json()) as ChatCompletionStopResponse).toEqual(
+        {
+          result: "success",
+          stop_type: "hard",
+        },
+      );
 
       let streamBody = new TextDecoder().decode(firstChunk.value);
 
@@ -828,10 +869,10 @@ describe('chat routes', () => {
         streamBody += new TextDecoder().decode(nextChunk.value);
       }
 
-      expect(streamBody).toContain('data: [DONE]');
+      expect(streamBody).toContain("data: [DONE]");
 
       const conversationResponse = await app.inject({
-        method: 'GET',
+        method: "GET",
         url: `/workspace/conversations/${conversationId}`,
         headers: {
           authorization: `Bearer ${login.data.sessionToken}`,
@@ -839,20 +880,22 @@ describe('chat routes', () => {
       });
 
       expect(conversationResponse.statusCode).toBe(200);
-      expect((conversationResponse.json() as WorkspaceConversationResponse).data).toMatchObject({
+      expect(
+        (conversationResponse.json() as WorkspaceConversationResponse).data,
+      ).toMatchObject({
         id: conversationId,
         run: {
-          status: 'stopped',
+          status: "stopped",
         },
         messages: [
           {
-            role: 'user',
-            content: 'Start a response that I will stop.',
-            status: 'completed',
+            role: "user",
+            content: "Start a response that I will stop.",
+            status: "completed",
           },
           {
-            role: 'assistant',
-            status: 'stopped',
+            role: "assistant",
+            status: "stopped",
           },
         ],
       });
@@ -864,16 +907,16 @@ describe('chat routes', () => {
       expect(auditEvents).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            action: 'workspace.run.stop_requested',
-            entityType: 'run',
+            action: "workspace.run.stop_requested",
+            entityType: "run",
             entityId: runId,
             payload: expect.objectContaining({
               runId,
-              stopType: 'hard',
+              stopType: "hard",
               conversationId,
             }),
           }),
-        ])
+        ]),
       );
     } finally {
       if (baseUrl) {
