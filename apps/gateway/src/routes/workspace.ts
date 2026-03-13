@@ -6,6 +6,7 @@ import type {
   WorkspaceAppLaunchRequest,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceConversationListResponse,
   WorkspaceConversationResponse,
   WorkspaceConversationShareCreateRequest,
   WorkspaceConversationShareResponse,
@@ -61,6 +62,24 @@ function isStringArray(value: unknown): value is string[] {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function readSingleQueryValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return readSingleQueryValue(value[0]);
+  }
+
+  return null;
 }
 
 function decodeBase64Payload(value: string): Buffer | null {
@@ -254,6 +273,29 @@ export async function registerWorkspaceRoutes(
     });
 
     if (!result.ok) {
+      const quotaReason =
+        typeof result.details === 'object' && result.details !== null
+          ? (result.details as Record<string, unknown>).reason
+          : null;
+
+      if (quotaReason === 'quota_exceeded' || quotaReason === 'quota_service_degraded') {
+        await auditService.recordEvent({
+          tenantId: access.user.tenantId,
+          actorUserId: access.user.id,
+          action: 'workspace.quota.launch_blocked',
+          level: quotaReason === 'quota_exceeded' ? 'warning' : 'critical',
+          entityType: 'workspace_app',
+          entityId: appId,
+          ipAddress: request.ip,
+          payload: {
+            appId,
+            activeGroupId,
+            reason: quotaReason,
+            details: result.details ?? null,
+          },
+        });
+      }
+
       reply.code(result.statusCode);
       return buildErrorResponse(result.code, result.message, result.details);
     }
@@ -281,6 +323,56 @@ export async function registerWorkspaceRoutes(
         activeGroupName: result.data.attributedGroup.name,
       },
     });
+
+    return response;
+  });
+
+  app.get('/workspace/conversations', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const query = (request.query ?? {}) as {
+      appId?: unknown;
+      groupId?: unknown;
+      limit?: unknown;
+      q?: unknown;
+    };
+    const appId = readSingleQueryValue(query.appId);
+    const groupId = readSingleQueryValue(query.groupId);
+    const limitValue = readSingleQueryValue(query.limit);
+    const searchQuery = readSingleQueryValue(query.q);
+    const limit = limitValue
+      ? Number.parseInt(limitValue, 10)
+      : undefined;
+
+    if (limitValue && (!Number.isFinite(limit) || (limit ?? 0) <= 0)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace conversation history requires a positive numeric limit when provided.'
+      );
+    }
+
+    const result = await workspaceService.listConversationsForUser(access.user, {
+      appId,
+      groupId,
+      limit,
+      query: searchQuery,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationListResponse = {
+      ok: true,
+      data: result.data,
+    };
 
     return response;
   });

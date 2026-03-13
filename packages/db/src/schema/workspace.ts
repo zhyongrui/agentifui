@@ -20,6 +20,7 @@ export const workspaceAppKindEnum = pgEnum('workspace_app_kind', [
   'governance',
 ]);
 export const workspaceAppStatusEnum = pgEnum('workspace_app_status', ['ready', 'beta']);
+export const quotaScopeEnum = pgEnum('quota_scope', ['tenant', 'group', 'user']);
 export const workspaceAppLaunchStatusEnum = pgEnum('workspace_app_launch_status', [
   'handoff_ready',
   'conversation_ready',
@@ -41,6 +42,16 @@ export const runStatusEnum = pgEnum('run_status', [
   'succeeded',
   'failed',
   'stopped',
+]);
+export const runTimelineEventTypeEnum = pgEnum('run_timeline_event_type', [
+  'run_created',
+  'input_recorded',
+  'run_started',
+  'stop_requested',
+  'output_recorded',
+  'run_succeeded',
+  'run_failed',
+  'run_stopped',
 ]);
 
 export const workspaceApps = pgTable(
@@ -122,6 +133,31 @@ export const workspaceUserPreferences = pgTable(
   })
 );
 
+export const workspaceQuotaLimits = pgTable(
+  'workspace_quota_limits',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    scope: quotaScopeEnum('scope').notNull(),
+    scopeId: varchar('scope_id', { length: 120 }).notNull(),
+    scopeLabel: varchar('scope_label', { length: 120 }).notNull(),
+    monthlyLimit: integer('monthly_limit').notNull().default(1000),
+    baseUsed: integer('base_used').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workspaceQuotaLimitsTenantScopeUnique: uniqueIndex('workspace_quota_limits_tenant_scope_unique').on(
+      table.tenantId,
+      table.scope,
+      table.scopeId
+    ),
+    workspaceQuotaLimitsTenantIndex: index('workspace_quota_limits_tenant_idx').on(table.tenantId),
+  })
+);
+
 export const conversations = pgTable(
   'conversations',
   {
@@ -198,6 +234,39 @@ export const runs = pgTable(
     runsConversationIndex: index('runs_conversation_idx').on(table.conversationId),
     runsTraceIndex: uniqueIndex('runs_trace_id_unique').on(table.traceId),
     runsUserCreatedIndex: index('runs_user_created_idx').on(table.userId, table.createdAt),
+  })
+);
+
+export const runTimelineEvents = pgTable(
+  'run_timeline_events',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    conversationId: varchar('conversation_id', { length: 120 })
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    runId: varchar('run_id', { length: 120 })
+      .notNull()
+      .references(() => runs.id, { onDelete: 'cascade' }),
+    eventType: runTimelineEventTypeEnum('event_type').notNull(),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    runTimelineEventsTenantIndex: index('run_timeline_events_tenant_idx').on(table.tenantId),
+    runTimelineEventsRunIndex: index('run_timeline_events_run_idx').on(
+      table.runId,
+      table.createdAt
+    ),
+    runTimelineEventsConversationIndex: index('run_timeline_events_conversation_idx').on(
+      table.conversationId,
+      table.createdAt
+    ),
   })
 );
 

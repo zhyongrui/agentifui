@@ -2,9 +2,11 @@ import type { DatabaseClient } from '@agentifui/db';
 import type { AuthUser } from '@agentifui/shared/auth';
 import {
   evaluateAppLaunch,
+  type QuotaUsage,
   type WorkspaceApp,
   type WorkspaceConversationAttachment,
   type WorkspaceConversation,
+  type WorkspaceConversationListItem,
   type WorkspaceConversationShare,
   type WorkspaceConversationMessage,
   type WorkspaceGroup,
@@ -12,6 +14,8 @@ import {
   type WorkspacePreferencesUpdateRequest,
   type WorkspaceRun,
   type WorkspaceRunSummary,
+  type WorkspaceRunTimelineEvent,
+  type WorkspaceRunTimelineEventType,
   type WorkspaceRunTrigger,
   type WorkspaceRunType,
 } from '@agentifui/shared/apps';
@@ -30,6 +34,8 @@ import type {
   WorkspaceConversationRunsResult,
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
+  WorkspaceConversationListInput,
+  WorkspaceConversationListResult,
   WorkspaceConversationShareCreateInput,
   WorkspaceConversationShareResult,
   WorkspaceConversationShareRevokeInput,
@@ -39,11 +45,18 @@ import type {
   WorkspaceLaunchResult,
   WorkspaceRunCreateInput,
   WorkspaceRunResult,
+  WorkspaceRunTimelineEventAppendInput,
   WorkspaceSharedConversationResult,
   WorkspaceRunUpdateInput,
   WorkspaceService,
 } from './workspace-service.js';
 import type { WorkspaceFileStorage } from './workspace-file-storage.js';
+import {
+  buildDefaultQuotaLimitRecords,
+  buildQuotaUsagesByGroupId,
+  calculateCompletionQuotaCost,
+  type WorkspaceQuotaLimitRecord,
+} from './workspace-quota.js';
 
 type GroupRow = {
   description: string | null;
@@ -81,6 +94,14 @@ type WorkspacePreferencesRow = {
   favorite_app_ids: string[] | string;
   recent_app_ids: string[] | string;
   updated_at: Date | string;
+};
+
+type WorkspaceQuotaLimitRow = {
+  base_used: number;
+  monthly_limit: number;
+  scope: 'tenant' | 'group' | 'user';
+  scope_id: string;
+  scope_label: string;
 };
 
 type WorkspaceContext = {
@@ -144,6 +165,13 @@ type WorkspaceRunRow = {
   trace_id: string;
   triggered_from: WorkspaceRunTrigger;
   type: WorkspaceRunType;
+};
+
+type WorkspaceRunTimelineEventRow = {
+  created_at: Date | string;
+  event_type: WorkspaceRunTimelineEventType;
+  id: string;
+  metadata: Record<string, unknown> | string;
 };
 
 type WorkspaceUploadedFileRow = {
@@ -861,6 +889,56 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
     inputs: normalizeJsonRecord(row.inputs),
     outputs: normalizeJsonRecord(row.outputs),
     usage: toWorkspaceRunUsage(row.outputs, row.total_tokens),
+    timeline: [],
+  };
+}
+
+function toWorkspaceRunTimelineEvent(
+  row: WorkspaceRunTimelineEventRow
+): WorkspaceRunTimelineEvent {
+  return {
+    id: row.id,
+    type: row.event_type,
+    createdAt: toIso(row.created_at)!,
+    metadata: normalizeJsonRecord(row.metadata),
+  };
+}
+
+function buildConversationPreview(
+  messages: WorkspaceConversationMessage[]
+): Pick<WorkspaceConversationListItem, 'lastMessagePreview' | 'messageCount'> {
+  const lastMessage = messages[messages.length - 1];
+
+  if (!lastMessage) {
+    return {
+      lastMessagePreview: null,
+      messageCount: 0,
+    };
+  }
+
+  const normalized = lastMessage.content.replace(/\s+/g, ' ').trim();
+
+  return {
+    lastMessagePreview: normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized,
+    messageCount: messages.length,
+  };
+}
+
+function toWorkspaceConversationListItem(row: ConversationRow): WorkspaceConversationListItem {
+  const conversation = toWorkspaceConversation(row);
+  const preview = buildConversationPreview(conversation.messages);
+
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    status: conversation.status,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
+    messageCount: preview.messageCount,
+    lastMessagePreview: preview.lastMessagePreview,
+    app: conversation.app,
+    activeGroup: conversation.activeGroup,
+    run: conversation.run,
   };
 }
 
@@ -967,6 +1045,154 @@ async function readWorkspacePreferences(
     },
     context
   );
+}
+
+async function ensureWorkspaceQuotaLimits(
+  database: DatabaseClient,
+  user: AuthUser,
+  context: WorkspaceContext
+): Promise<WorkspaceQuotaLimitRecord[]> {
+  const seeds = buildDefaultQuotaLimitRecords(user, context.memberGroupIds);
+
+  await database.begin(async transaction => {
+    const sql = transaction as unknown as DatabaseClient;
+
+    for (const seed of seeds) {
+      await sql`
+        insert into workspace_quota_limits (
+          id,
+          tenant_id,
+          scope,
+          scope_id,
+          scope_label,
+          monthly_limit,
+          base_used
+        )
+        values (
+          ${`quota_${seed.scope}_${seed.scopeId}`},
+          ${user.tenantId},
+          ${seed.scope},
+          ${seed.scopeId},
+          ${seed.scopeLabel},
+          ${seed.limit},
+          ${seed.baseUsed}
+        )
+        on conflict (tenant_id, scope, scope_id) do nothing
+      `;
+    }
+  });
+
+  const rows = await database<WorkspaceQuotaLimitRow[]>`
+    select
+      scope,
+      scope_id,
+      scope_label,
+      monthly_limit,
+      base_used
+    from workspace_quota_limits
+    where tenant_id = ${user.tenantId}
+      and (
+        (scope = 'tenant' and scope_id = ${user.tenantId})
+        or (scope = 'user' and scope_id = ${user.id})
+        or (scope = 'group' and scope_id in ${database(context.memberGroupIds)})
+      )
+    order by scope asc, scope_id asc
+  `;
+
+  return rows.map(row => ({
+    scope: row.scope,
+    scopeId: row.scope_id,
+    scopeLabel: row.scope_label,
+    limit: row.monthly_limit,
+    baseUsed: row.base_used,
+  }));
+}
+
+async function readWorkspaceQuotaSnapshot(
+  database: DatabaseClient,
+  user: AuthUser,
+  context: WorkspaceContext
+): Promise<{
+  quotaServiceState: 'available';
+  quotaUsagesByGroupId: Record<string, QuotaUsage[]>;
+}> {
+  const quotaLimits = await ensureWorkspaceQuotaLimits(database, user, context);
+  const launchRows = await database<
+    {
+      active_group_id: string | null;
+      launch_cost: number;
+      user_id: string;
+    }[]
+  >`
+    select
+      launches.attributed_group_id as active_group_id,
+      apps.launch_cost,
+      launches.user_id
+    from workspace_app_launches as launches
+    inner join workspace_apps as apps
+      on apps.id = launches.app_id
+    where launches.tenant_id = ${user.tenantId}
+  `;
+  const runRows = await database<
+    {
+      active_group_id: string | null;
+      total_tokens: number;
+      user_id: string;
+    }[]
+  >`
+    select active_group_id, total_tokens, user_id
+    from runs
+    where tenant_id = ${user.tenantId}
+      and status in ('succeeded', 'failed', 'stopped')
+      and total_tokens > 0
+  `;
+
+  let tenantUsage = 0;
+  let userUsage = 0;
+  const groupsById: Record<string, number> = {};
+
+  for (const row of launchRows) {
+    tenantUsage += row.launch_cost;
+
+    if (row.user_id === user.id) {
+      userUsage += row.launch_cost;
+    }
+
+    if (row.active_group_id) {
+      groupsById[row.active_group_id] = (groupsById[row.active_group_id] ?? 0) + row.launch_cost;
+    }
+  }
+
+  for (const row of runRows) {
+    const usageCost = calculateCompletionQuotaCost(row.total_tokens);
+
+    if (usageCost <= 0) {
+      continue;
+    }
+
+    tenantUsage += usageCost;
+
+    if (row.user_id === user.id) {
+      userUsage += usageCost;
+    }
+
+    if (row.active_group_id) {
+      groupsById[row.active_group_id] = (groupsById[row.active_group_id] ?? 0) + usageCost;
+    }
+  }
+
+  return {
+    quotaServiceState: 'available',
+    quotaUsagesByGroupId: buildQuotaUsagesByGroupId({
+      memberGroupIds: context.memberGroupIds,
+      quotaLimits,
+      usageTotals: {
+        tenant: tenantUsage,
+        user: userUsage,
+        groupsById,
+      },
+    }),
+  };
 }
 
 async function upsertWorkspacePreferences(
@@ -1151,6 +1377,138 @@ async function readConversationRunsForUser(
   return rows.map(toWorkspaceRunSummary);
 }
 
+async function readRecentConversationsForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceConversationListInput
+): Promise<WorkspaceConversationListItem[]> {
+  const normalizedQuery = input.query?.trim() || null;
+  const limit = Math.min(Math.max(input.limit ?? 12, 1), 50);
+  const searchTerm = normalizedQuery ? `%${normalizedQuery}%` : null;
+
+  const rows = await database<ConversationRow[]>`
+    select
+      c.id,
+      c.title,
+      c.status,
+      c.inputs as conversation_inputs,
+      c.created_at,
+      c.updated_at,
+      l.id as launch_id,
+      a.id as app_id,
+      a.slug as app_slug,
+      a.name as app_name,
+      a.summary as app_summary,
+      a.kind as app_kind,
+      a.status as app_status,
+      a.short_code as app_short_code,
+      g.id as active_group_id,
+      g.name as active_group_name,
+      g.description as active_group_description,
+      r.id as run_id,
+      r.type as run_type,
+      r.status as run_status,
+      r.triggered_from as run_triggered_from,
+      r.trace_id as run_trace_id,
+      r.created_at as run_created_at,
+      r.finished_at as run_finished_at,
+      r.elapsed_time as run_elapsed_time,
+      r.total_tokens as run_total_tokens,
+      r.total_steps as run_total_steps
+    from conversations c
+    inner join workspace_apps a on a.id = c.app_id
+    left join groups g on g.id = c.active_group_id
+    left join workspace_app_launches l on l.conversation_id = c.id
+    inner join lateral (
+      select
+        r.id,
+        r.type,
+        r.status,
+        r.triggered_from,
+        r.trace_id,
+        r.created_at,
+        r.finished_at,
+        r.elapsed_time,
+        r.total_tokens,
+        r.total_steps
+      from runs r
+      where r.conversation_id = c.id
+      order by r.created_at desc
+      limit 1
+    ) r on true
+    where c.user_id = ${user.id}
+      and (${input.appId ?? null}::varchar is null or c.app_id = ${input.appId ?? null})
+      and (${input.groupId ?? null}::varchar is null or c.active_group_id = ${input.groupId ?? null})
+      and (
+        ${searchTerm}::text is null
+        or c.title ilike ${searchTerm}
+        or cast(c.inputs as text) ilike ${searchTerm}
+      )
+    order by c.updated_at desc
+    limit ${limit}
+  `;
+
+  return rows.map(toWorkspaceConversationListItem);
+}
+
+async function readRunTimelineForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  runId: string
+): Promise<WorkspaceRunTimelineEvent[]> {
+  const rows = await database<WorkspaceRunTimelineEventRow[]>`
+    select
+      rte.id,
+      rte.event_type,
+      rte.metadata,
+      rte.created_at
+    from run_timeline_events rte
+    inner join runs r on r.id = rte.run_id
+    inner join conversations c on c.id = r.conversation_id
+    where rte.run_id = ${runId}
+      and c.user_id = ${user.id}
+    order by rte.created_at asc
+  `;
+
+  return rows.map(toWorkspaceRunTimelineEvent);
+}
+
+async function insertRunTimelineEvent(
+  database: DatabaseClient,
+  input: {
+    conversationId: string;
+    createdAt?: string;
+    metadata?: Record<string, unknown>;
+    runId: string;
+    tenantId: string;
+    type: WorkspaceRunTimelineEventType;
+    userId: string;
+  }
+) {
+  await database`
+    insert into run_timeline_events (
+      id,
+      tenant_id,
+      user_id,
+      conversation_id,
+      run_id,
+      event_type,
+      metadata,
+      created_at
+    )
+    values (
+      ${`timeline_${randomUUID()}`},
+      ${input.tenantId},
+      ${input.userId},
+      ${input.conversationId},
+      ${input.runId},
+      ${input.type},
+      ${input.metadata ?? {}}::jsonb,
+      coalesce(${input.createdAt ?? null}::timestamptz, now())
+    )
+  `;
+}
+
 async function readRunForUser(
   database: DatabaseClient,
   user: AuthUser,
@@ -1191,7 +1549,14 @@ async function readRunForUser(
     limit 1
   `;
 
-  return row ? toWorkspaceRun(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const run = toWorkspaceRun(row);
+  run.timeline = await readRunTimelineForUser(database, user, runId);
+
+  return run;
 }
 
 async function uploadConversationFileForUser(
@@ -1608,6 +1973,19 @@ async function createConversationRunForUser(
       )
     `;
 
+    await insertRunTimelineEvent(sql, {
+      tenantId: user.tenantId,
+      userId: user.id,
+      conversationId: conversation.id,
+      runId,
+      type: 'run_created',
+      metadata: {
+        triggeredFrom: input.triggeredFrom,
+        traceId,
+      },
+      createdAt,
+    });
+
     await sql`
       update conversations
       set updated_at = ${createdAt}::timestamptz
@@ -1688,6 +2066,85 @@ async function updateConversationRunForUser(
       `;
     }
 
+    if (input.inputs && Object.keys(input.inputs).length > 0) {
+      await insertRunTimelineEvent(sql, {
+        tenantId: user.tenantId,
+        userId: user.id,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        type: 'input_recorded',
+        metadata: {
+          keys: Object.keys(input.inputs),
+        },
+      });
+    }
+
+    if (input.status === 'running') {
+      await insertRunTimelineEvent(sql, {
+        tenantId: user.tenantId,
+        userId: user.id,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        type: 'run_started',
+        metadata: {
+          status: input.status,
+        },
+      });
+    }
+
+    if (input.outputs && Object.keys(input.outputs).length > 0) {
+      await insertRunTimelineEvent(sql, {
+        tenantId: user.tenantId,
+        userId: user.id,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        type: 'output_recorded',
+        metadata: {
+          keys: Object.keys(input.outputs),
+        },
+      });
+    }
+
+    if (input.status === 'succeeded') {
+      await insertRunTimelineEvent(sql, {
+        tenantId: user.tenantId,
+        userId: user.id,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        type: 'run_succeeded',
+        metadata: {
+          status: input.status,
+        },
+      });
+    }
+
+    if (input.status === 'failed') {
+      await insertRunTimelineEvent(sql, {
+        tenantId: user.tenantId,
+        userId: user.id,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        type: 'run_failed',
+        metadata: {
+          status: input.status,
+          error: input.error ?? null,
+        },
+      });
+    }
+
+    if (input.status === 'stopped') {
+      await insertRunTimelineEvent(sql, {
+        tenantId: user.tenantId,
+        userId: user.id,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        type: 'run_stopped',
+        metadata: {
+          status: input.status,
+        },
+      });
+    }
+
     return true;
   });
 
@@ -1708,12 +2165,15 @@ export function createPersistentWorkspaceService(
     async getCatalogForUser(user) {
       const context = await resolveWorkspaceContext(database, user);
       const preferences = await readWorkspacePreferences(database, user, context);
+      const quotaSnapshot = await readWorkspaceQuotaSnapshot(database, user, context);
 
       return buildWorkspaceCatalog(user, {
         groups: context.groups,
         memberGroupIds: context.memberGroupIds,
         apps: context.apps,
         preferences,
+        quotaServiceState: quotaSnapshot.quotaServiceState,
+        quotaUsagesByGroupId: quotaSnapshot.quotaUsagesByGroupId,
       });
     },
     async getPreferencesForUser(user) {
@@ -1849,6 +2309,19 @@ export function createPersistentWorkspaceService(
           )
         `;
 
+        await insertRunTimelineEvent(sql, {
+          tenantId: user.tenantId,
+          userId: user.id,
+          conversationId,
+          runId,
+          type: 'run_created',
+          metadata: {
+            triggeredFrom: 'app_launch',
+            traceId,
+          },
+          createdAt: launchedAt,
+        });
+
         await sql`
           insert into workspace_app_launches (
             id,
@@ -1929,6 +2402,20 @@ export function createPersistentWorkspaceService(
         data: conversation,
       };
     },
+    async listConversationsForUser(user, input): Promise<WorkspaceConversationListResult> {
+      return {
+        ok: true,
+        data: {
+          items: await readRecentConversationsForUser(database, user, input),
+          filters: {
+            appId: input.appId ?? null,
+            groupId: input.groupId ?? null,
+            query: input.query?.trim() || null,
+            limit: Math.min(Math.max(input.limit ?? 12, 1), 50),
+          },
+        },
+      };
+    },
     async listConversationRunsForUser(
       user,
       conversationId
@@ -1967,6 +2454,43 @@ export function createPersistentWorkspaceService(
       return {
         ok: true,
         data: run,
+      };
+    },
+    async appendRunTimelineEventForUser(user, input): Promise<WorkspaceRunResult> {
+      const run = await readRunForUser(database, user, input.runId);
+
+      if (!run || run.conversationId !== input.conversationId) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace run could not be found.',
+        };
+      }
+
+      await insertRunTimelineEvent(database, {
+        tenantId: user.tenantId,
+        userId: user.id,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        type: input.type,
+        metadata: input.metadata,
+      });
+
+      const refreshed = await readRunForUser(database, user, input.runId);
+
+      if (!refreshed) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace run could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: refreshed,
       };
     },
     async uploadConversationFileForUser(user, input): Promise<WorkspaceConversationUploadResult> {

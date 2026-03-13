@@ -176,6 +176,7 @@ async function expectConversationSurface(page: Page, appName: string) {
     timeout: 60_000,
   });
   await expect(page.getByText('Gateway context')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Quota context' })).toBeVisible();
   await expect(page.getByLabel('Message')).toBeEnabled();
 }
 
@@ -307,12 +308,14 @@ test('register/login/workspace controls work for a normal active user', async ({
   ).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText('brief.txt')).toBeVisible();
+  await expect(page.locator('.chat-attachment-list').getByText('brief.txt')).toBeVisible();
   await expect(
     page.locator('article.chat-meta-card').filter({
       has: page.getByText('Run status'),
     }).getByText('succeeded')
-  ).toBeVisible();
+  ).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.locator('.run-replay-stack').getByText('Attached files')).toBeVisible();
 
   await page.getByLabel('Message').fill(buildLongStopPrompt());
@@ -437,9 +440,14 @@ test('mfa setup, mfa login verification, and disable flow work end-to-end', asyn
       has: page.getByText('MFA', { exact: true }),
     }).locator('strong')
   ).toHaveText('Disabled');
-  await page.getByRole('button', { name: 'Start MFA setup' }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/auth/mfa/setup'),
+    page.getByRole('button', { name: 'Start MFA setup' }).click(),
+  ]);
 
-  await expect(page.getByText('MFA setup started.')).toBeVisible();
+  await expect(page.getByText('MFA setup started.')).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.getByText('Manual entry key')).toBeVisible();
 
   await page.getByRole('button', { name: 'Copy manual key' }).click();
@@ -567,6 +575,54 @@ test('conversation shares allow another group member to open a read-only shared 
     })
   ).toBeVisible();
   await expect(page.getByLabel('Message')).toHaveCount(0);
+});
+
+test('chat history lists recent conversations and links back to timeline-aware replay', async ({
+  page,
+}) => {
+  const email = uniqueEmail('history-user');
+
+  await register(page, {
+    email,
+    displayName: 'History Browser User',
+  });
+  await login(page, {
+    email,
+  });
+  await expectAppsWorkspace(page);
+
+  await appCard(page, 'Policy Watch').getByRole('button', { name: /切换到 Research Lab/ }).click();
+  await expect(page.getByLabel('Working group')).toHaveValue('grp_research');
+  await Promise.all([
+    waitForGatewayPost(page, '/workspace/apps/launch'),
+    appCard(page, 'Policy Watch').getByRole('button', { name: '打开应用' }).click(),
+  ]);
+  await expectConversationSurface(page, 'Policy Watch');
+  await page.getByLabel('Message').fill('Show this conversation in recent history.');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(
+    page.getByText('Policy Watch is now reachable through the AgentifUI gateway.')
+  ).toBeVisible({
+    timeout: 60_000,
+  });
+
+  await page.goto('/chat');
+  await expect(page).toHaveURL(/\/chat$/);
+  await expect(page.getByRole('heading', { name: 'Conversation history' })).toBeVisible({
+    timeout: 60_000,
+  });
+  await page.getByLabel('Search').fill('recent history');
+  await page.getByLabel('App').selectOption('app_policy_watch');
+  await page.getByLabel('Group').selectOption('grp_research');
+  await expect(
+    page.locator('.conversation-history-card').filter({
+      has: page.getByRole('heading', { name: 'Policy Watch' }),
+    })
+  ).toBeVisible();
+
+  await page.getByRole('link', { name: 'Open conversation' }).first().click();
+  await expectConversationSurface(page, 'Policy Watch');
+  await expect(page.getByText('Run timeline')).toBeVisible();
 });
 
 test('security and admin users see different workspace catalogs', async ({ page }) => {

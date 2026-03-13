@@ -3,6 +3,7 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceApp,
   WorkspaceCatalogResponse,
+  WorkspaceConversationListResponse,
   WorkspaceConversationResponse,
   WorkspaceConversationShareCreateRequest,
   WorkspaceConversationShareResponse,
@@ -134,6 +135,44 @@ export async function fetchWorkspaceConversation(
   );
 }
 
+export async function fetchWorkspaceConversationList(
+  sessionToken: string,
+  input: {
+    appId?: string | null;
+    groupId?: string | null;
+    limit?: number;
+    query?: string | null;
+  } = {}
+): Promise<WorkspaceConversationListResponse | WorkspaceErrorResponse> {
+  const params = new URLSearchParams();
+
+  if (input.appId) {
+    params.set('appId', input.appId);
+  }
+
+  if (input.groupId) {
+    params.set('groupId', input.groupId);
+  }
+
+  if (input.query) {
+    params.set('q', input.query);
+  }
+
+  if (typeof input.limit === 'number' && Number.isFinite(input.limit)) {
+    params.set('limit', String(input.limit));
+  }
+
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+
+  return fetchWorkspaceJson<WorkspaceConversationListResponse>(
+    `/workspace/conversations${suffix}`,
+    {
+      method: 'GET',
+      sessionToken,
+    }
+  );
+}
+
 export async function fetchWorkspaceConversationRuns(
   sessionToken: string,
   conversationId: string
@@ -195,13 +234,16 @@ export async function revokeWorkspaceConversationShare(
   conversationId: string,
   shareId: string
 ): Promise<WorkspaceConversationShareResponse | WorkspaceErrorResponse> {
-  const response = await fetch(`${getGatewayBaseUrl()}/workspace/conversations/${conversationId}/shares/${shareId}`, {
-    method: 'DELETE',
-    headers: {
-      authorization: `Bearer ${sessionToken}`,
-    },
-    cache: 'no-store',
-  });
+  const response = await fetch(
+    `${getGatewayBaseUrl()}/workspace/conversations/${conversationId}/shares/${shareId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${sessionToken}`,
+      },
+      cache: 'no-store',
+    }
+  );
 
   return (await response.json()) as WorkspaceConversationShareResponse | WorkspaceErrorResponse;
 }

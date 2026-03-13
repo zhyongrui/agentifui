@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   fetchWorkspaceConversation,
+  fetchWorkspaceConversationList,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceCatalog,
   fetchWorkspaceRun,
@@ -308,6 +309,94 @@ describe('apps client', () => {
     });
   });
 
+  it('loads filtered conversation history from the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            items: [
+              {
+                id: 'conv-123',
+                title: 'Policy Watch',
+                status: 'active',
+                createdAt: '2026-03-12T10:05:00.000Z',
+                updatedAt: '2026-03-12T10:10:00.000Z',
+                messageCount: 2,
+                lastMessagePreview: 'Policy Watch is now reachable...',
+                app: {
+                  id: 'app_policy_watch',
+                  slug: 'policy-watch',
+                  name: 'Policy Watch',
+                  summary: 'summary',
+                  kind: 'governance',
+                  status: 'ready',
+                  shortCode: 'PW',
+                },
+                activeGroup: {
+                  id: 'grp_research',
+                  name: 'Research Lab',
+                  description: 'desc',
+                },
+                run: {
+                  id: 'run-123',
+                  type: 'agent',
+                  status: 'succeeded',
+                  triggeredFrom: 'chat_completion',
+                  traceId: 'trace-123',
+                  createdAt: '2026-03-12T10:05:00.000Z',
+                  finishedAt: '2026-03-12T10:10:00.000Z',
+                  elapsedTime: 5000,
+                  totalTokens: 42,
+                  totalSteps: 1,
+                },
+              },
+            ],
+            filters: {
+              appId: 'app_policy_watch',
+              groupId: 'grp_research',
+              query: 'policy',
+              limit: 20,
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceConversationList('session-123', {
+      appId: 'app_policy_watch',
+      groupId: 'grp_research',
+      limit: 20,
+      query: 'policy',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/gateway/workspace/conversations?appId=app_policy_watch&groupId=grp_research&q=policy&limit=20',
+      {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        body: undefined,
+        cache: 'no-store',
+      }
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        items: [
+          {
+            id: 'conv-123',
+            app: {
+              id: 'app_policy_watch',
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it('loads conversation run history from the gateway proxy', async () => {
     vi.stubGlobal(
       'fetch',
@@ -410,6 +499,16 @@ describe('apps client', () => {
               completionTokens: 16,
               totalTokens: 24,
             },
+            timeline: [
+              {
+                id: 'timeline-1',
+                type: 'run_created',
+                createdAt: '2026-03-12T10:10:00.000Z',
+                metadata: {
+                  triggeredFrom: 'chat_completion',
+                },
+              },
+            ],
           },
         }),
       })
@@ -432,6 +531,11 @@ describe('apps client', () => {
         usage: {
           totalTokens: 24,
         },
+        timeline: [
+          {
+            type: 'run_created',
+          },
+        ],
       },
     });
   });

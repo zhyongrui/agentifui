@@ -1,15 +1,20 @@
 'use client';
 
 import {
+  getQuotaSeverity,
+  listQuotaAlerts,
   WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES,
   WORKSPACE_ATTACHMENT_MAX_BYTES,
 } from '@agentifui/shared/apps';
 import type {
+  QuotaServiceState,
+  QuotaUsage,
   WorkspaceConversation,
   WorkspaceConversationAttachment,
   WorkspaceConversationMessage,
   WorkspaceRun,
   WorkspaceRunSummary,
+  WorkspaceRunTimelineEvent,
 } from '@agentifui/shared/apps';
 import type { ChatCompletionMessage, ChatGatewayErrorResponse } from '@agentifui/shared/chat';
 import Link from 'next/link';
@@ -19,6 +24,7 @@ import { FormEvent, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { MainSectionNav } from '../../../../components/main-section-nav';
 import { ConversationSharePanel } from '../../../../components/conversation-share-panel';
 import {
+  fetchWorkspaceCatalog,
   fetchWorkspaceConversation,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceRun,
@@ -195,6 +201,37 @@ function buildReplayAttachments(run: WorkspaceRun): WorkspaceConversationAttachm
   });
 }
 
+const RUN_TIMELINE_EVENT_LABELS: Record<WorkspaceRunTimelineEvent['type'], string> = {
+  run_created: 'Run created',
+  input_recorded: 'Inputs recorded',
+  run_started: 'Run started',
+  stop_requested: 'Stop requested',
+  output_recorded: 'Outputs recorded',
+  run_succeeded: 'Run succeeded',
+  run_failed: 'Run failed',
+  run_stopped: 'Run stopped',
+};
+
+function describeTimelineEvent(event: WorkspaceRunTimelineEvent) {
+  if (event.type === 'input_recorded' || event.type === 'output_recorded') {
+    const keys = Array.isArray(event.metadata.keys)
+      ? event.metadata.keys.filter((value): value is string => typeof value === 'string')
+      : [];
+
+    return keys.length > 0 ? keys.join(', ') : 'payload stored';
+  }
+
+  if (event.type === 'stop_requested') {
+    return typeof event.metadata.stopType === 'string' ? event.metadata.stopType : 'manual';
+  }
+
+  if (event.type === 'run_failed' && typeof event.metadata.error === 'string') {
+    return event.metadata.error;
+  }
+
+  return typeof event.metadata.traceId === 'string' ? `trace ${event.metadata.traceId}` : '';
+}
+
 export default function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
   const router = useRouter();
@@ -205,6 +242,8 @@ export default function ConversationPage() {
   const [messages, setMessages] = useState<WorkspaceConversationMessage[]>([]);
   const [runs, setRuns] = useState<WorkspaceRunSummary[]>([]);
   const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
+  const [quotaUsages, setQuotaUsages] = useState<QuotaUsage[]>([]);
+  const [quotaServiceState, setQuotaServiceState] = useState<QuotaServiceState>('available');
   const [draft, setDraft] = useState('');
   const [draftAttachments, setDraftAttachments] = useState<WorkspaceConversationAttachment[]>([]);
   const [composerError, setComposerError] = useState<string | null>(null);
@@ -291,6 +330,20 @@ export default function ConversationPage() {
         return;
       }
 
+      const catalogResult = await fetchWorkspaceCatalog(sessionToken);
+
+      if (catalogResult.ok) {
+        setQuotaServiceState(catalogResult.data.quotaServiceState);
+        setQuotaUsages(
+          catalogResult.data.quotaUsagesByGroupId[result.data.activeGroup.id] ??
+            catalogResult.data.quotaUsagesByGroupId[catalogResult.data.defaultActiveGroupId] ??
+            []
+        );
+      } else {
+        setQuotaServiceState('available');
+        setQuotaUsages([]);
+      }
+
       setConversation(result.data);
       setLastTraceId(result.data.run.traceId);
       activeRunIdRef.current = result.data.run.id;
@@ -314,6 +367,8 @@ export default function ConversationPage() {
     setMessages([]);
     setRuns([]);
     setSelectedRun(null);
+    setQuotaUsages([]);
+    setQuotaServiceState('available');
     setDraft('');
     setDraftAttachments([]);
     setComposerError(null);
@@ -683,6 +738,7 @@ export default function ConversationPage() {
   const replayMessages = selectedRun ? buildReplayMessages(selectedRun) : [];
   const replayAssistant = selectedRun ? buildAssistantReplay(selectedRun) : '';
   const replayAttachments = selectedRun ? buildReplayAttachments(selectedRun) : [];
+  const quotaAlerts = listQuotaAlerts(quotaUsages);
 
   return (
     <div className="chat-surface stack">
@@ -747,6 +803,56 @@ export default function ConversationPage() {
             <p>Each completion is now tracked separately for replay.</p>
           </article>
         </div>
+      </section>
+
+      <section className="chat-panel">
+        <div className="chat-panel-header">
+          <div>
+            <h2>Quota context</h2>
+            <p>
+              Workspace quota cards now come from persisted quota state plus recorded launch and run
+              usage, instead of static fixture data.
+            </p>
+          </div>
+        </div>
+
+        {quotaServiceState === 'degraded' ? (
+          <div className="notice warning">
+            Workspace quota is temporarily degraded. New launches may be blocked until the service
+            recovers.
+          </div>
+        ) : null}
+
+        <div className="quota-grid">
+          {quotaUsages.map(usage => (
+            <article className={`quota-card quota-${getQuotaSeverity(usage)}`} key={usage.scope}>
+              <div className="quota-card-header">
+                <span>{usage.scopeLabel}</span>
+                <strong>
+                  {usage.used} / {usage.limit}
+                </strong>
+              </div>
+              <div className="quota-progress">
+                <div
+                  className="quota-progress-bar"
+                  style={{
+                    width: `${Math.min(100, usage.limit > 0 ? (usage.used / usage.limit) * 100 : 100)}%`,
+                  }}
+                />
+              </div>
+              <div className="quota-card-meta">
+                <span>{usage.scope}</span>
+                <span>{usage.limit - usage.used} credits left</span>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        {quotaAlerts.length > 0 ? (
+          <div className="notice warning">
+            {quotaAlerts.map(alert => `${alert.scopeLabel} is near capacity.`).join(' ')}
+          </div>
+        ) : null}
       </section>
 
       <ConversationSharePanel
@@ -946,9 +1052,33 @@ export default function ConversationPage() {
                     <strong>{replayAttachments.length}</strong>
                     <p>Run inputs keep attachment metadata for replay and follow-on audit work.</p>
                   </article>
+                  <article className="chat-meta-card">
+                    <span>Timeline events</span>
+                    <strong>{selectedRun.timeline.length}</strong>
+                    <p>Run lifecycle events are persisted alongside replayable inputs and outputs.</p>
+                  </article>
                 </div>
 
                 <div className="run-replay-stack">
+                  {selectedRun.timeline.length > 0 ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Run timeline</span>
+                        <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <ul className="timeline-list">
+                        {selectedRun.timeline.map(event => (
+                          <li key={event.id} className="timeline-item">
+                            <strong>{RUN_TIMELINE_EVENT_LABELS[event.type]}</strong>
+                            <span>{new Date(event.createdAt).toLocaleString()}</span>
+                            <p>{describeTimelineEvent(event)}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </article>
+                  ) : null}
                   <article className="chat-bubble user">
                     <div className="chat-bubble-meta">
                       <span className="chat-bubble-label">Prompt snapshot</span>
@@ -994,6 +1124,9 @@ export default function ConversationPage() {
       </section>
 
       <div className="actions">
+        <Link className="secondary" href="/chat">
+          Chat history
+        </Link>
         <Link className="secondary" href="/apps">
           Back to Apps workspace
         </Link>

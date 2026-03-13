@@ -1,9 +1,11 @@
 import type { AuthUser } from '@agentifui/shared/auth';
 import type {
+  QuotaUsage,
   WorkspaceAppLaunch,
   WorkspaceCatalog,
   WorkspaceConversationAttachment,
   WorkspaceConversation,
+  WorkspaceConversationListItem,
   WorkspaceConversationShare,
   WorkspaceConversationMessage,
   WorkspacePreferences,
@@ -11,6 +13,8 @@ import type {
   WorkspaceRun,
   WorkspaceRunStatus,
   WorkspaceRunSummary,
+  WorkspaceRunTimelineEvent,
+  WorkspaceRunTimelineEventType,
   WorkspaceRunTrigger,
   WorkspaceRunType,
 } from '@agentifui/shared/apps';
@@ -24,6 +28,12 @@ import {
   resolveSeededWorkspaceAppsForUser,
 } from './workspace-catalog-fixtures.js';
 import type { WorkspaceFileStorage } from './workspace-file-storage.js';
+import {
+  buildDefaultQuotaLimitRecords,
+  buildQuotaUsagesByGroupId,
+  calculateCompletionQuotaCost,
+  type WorkspaceQuotaLimitRecord,
+} from './workspace-quota.js';
 
 type WorkspaceLaunchFailure = {
   ok: false;
@@ -72,6 +82,28 @@ type WorkspaceRunResult =
     }
   | WorkspaceLookupFailure;
 
+type WorkspaceConversationListInput = {
+  appId?: string | null;
+  groupId?: string | null;
+  limit?: number;
+  query?: string | null;
+};
+
+type WorkspaceConversationListResult =
+  | {
+      ok: true;
+      data: {
+        items: WorkspaceConversationListItem[];
+        filters: {
+          appId: string | null;
+          groupId: string | null;
+          query: string | null;
+          limit: number;
+        };
+      };
+    }
+  | WorkspaceLookupFailure;
+
 type WorkspaceRunCreateInput = {
   conversationId: string;
   triggeredFrom: WorkspaceRunTrigger;
@@ -97,6 +129,13 @@ type WorkspaceConversationShareCreateInput = {
 type WorkspaceConversationShareRevokeInput = {
   conversationId: string;
   shareId: string;
+};
+
+type WorkspaceRunTimelineEventAppendInput = {
+  conversationId: string;
+  runId: string;
+  type: WorkspaceRunTimelineEventType;
+  metadata?: Record<string, unknown>;
 };
 
 type WorkspaceRunUpdateInput = {
@@ -179,6 +218,10 @@ type WorkspaceService = {
     user: AuthUser,
     conversationId: string
   ): WorkspaceConversationResult | Promise<WorkspaceConversationResult>;
+  listConversationsForUser(
+    user: AuthUser,
+    input: WorkspaceConversationListInput
+  ): WorkspaceConversationListResult | Promise<WorkspaceConversationListResult>;
   listConversationRunsForUser(
     user: AuthUser,
     conversationId: string
@@ -210,6 +253,10 @@ type WorkspaceService = {
     user: AuthUser,
     shareId: string
   ): WorkspaceSharedConversationResult | Promise<WorkspaceSharedConversationResult>;
+  appendRunTimelineEventForUser(
+    user: AuthUser,
+    input: WorkspaceRunTimelineEventAppendInput
+  ): WorkspaceRunResult | Promise<WorkspaceRunResult>;
   createConversationRunForUser(
     user: AuthUser,
     input: WorkspaceRunCreateInput
@@ -221,6 +268,7 @@ type WorkspaceService = {
 };
 
 type WorkspaceConversationRecord = WorkspaceConversation & {
+  launchCost: number;
   userId: string;
 };
 
@@ -244,6 +292,8 @@ type WorkspaceConversationShareRecord = {
   revokedAt: string | null;
   status: WorkspaceConversationShare['status'];
 };
+
+type WorkspaceRunTimelineEventRecord = WorkspaceRunTimelineEvent;
 
 function buildEmptyPreferences(): WorkspacePreferences {
   return {
@@ -331,6 +381,66 @@ function buildUsageFromOutputs(run: WorkspaceRunRecord): WorkspaceRun['usage'] {
   };
 }
 
+function createRunTimelineEvent(input: {
+  createdAt?: string;
+  metadata?: Record<string, unknown>;
+  type: WorkspaceRunTimelineEventType;
+}): WorkspaceRunTimelineEventRecord {
+  return {
+    id: `timeline_${randomUUID()}`,
+    type: input.type,
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    metadata: input.metadata ?? {},
+  };
+}
+
+function appendTimelineEvent(
+  run: WorkspaceRunRecord,
+  type: WorkspaceRunTimelineEventType,
+  metadata?: Record<string, unknown>,
+  createdAt?: string
+) {
+  run.timeline = [...run.timeline, createRunTimelineEvent({ type, metadata, createdAt })];
+}
+
+function buildConversationPreview(messages: WorkspaceConversationMessage[]) {
+  const lastMessage = messages[messages.length - 1];
+
+  if (!lastMessage) {
+    return {
+      lastMessagePreview: null,
+      messageCount: 0,
+    };
+  }
+
+  const normalized = lastMessage.content.replace(/\s+/g, ' ').trim();
+
+  return {
+    lastMessagePreview: normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized,
+    messageCount: messages.length,
+  };
+}
+
+function toWorkspaceConversationListItem(
+  conversation: WorkspaceConversationRecord,
+  latestRun: WorkspaceRunRecord
+): WorkspaceConversationListItem {
+  const preview = buildConversationPreview(conversation.messages);
+
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    status: conversation.status,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
+    messageCount: preview.messageCount,
+    lastMessagePreview: preview.lastMessagePreview,
+    app: conversation.app,
+    activeGroup: conversation.activeGroup,
+    run: buildRunSummary(latestRun),
+  };
+}
+
 function createRunRecord(input: {
   conversation: WorkspaceConversationRecord;
   createdAt: string;
@@ -362,13 +472,19 @@ function createRunRecord(input: {
       completionTokens: 0,
       totalTokens: 0,
     },
+    timeline: [],
   };
+}
+
+function shouldCountRunTowardsQuota(run: WorkspaceRunRecord) {
+  return ['succeeded', 'failed', 'stopped'].includes(run.status) && run.totalTokens > 0;
 }
 
 export function createWorkspaceService(options: {
   fileStorage?: WorkspaceFileStorage;
 } = {}): WorkspaceService {
   const preferencesByUserId = new Map<string, WorkspacePreferences>();
+  const quotaLimitsByUserId = new Map<string, WorkspaceQuotaLimitRecord[]>();
   const conversationsById = new Map<string, WorkspaceConversationRecord>();
   const runsById = new Map<string, WorkspaceRunRecord>();
   const runIdsByConversationId = new Map<string, string[]>();
@@ -407,12 +523,117 @@ export function createWorkspaceService(options: {
     };
   }
 
+  function getQuotaLimitsForUser(
+    user: AuthUser,
+    context: ReturnType<typeof getContextForUser>
+  ): WorkspaceQuotaLimitRecord[] {
+    const current = quotaLimitsByUserId.get(user.id) ?? [];
+    const currentKeys = new Set(current.map(limit => `${limit.scope}:${limit.scopeId}`));
+    const nextLimits = [...current];
+
+    for (const seed of buildDefaultQuotaLimitRecords(user, context.memberGroupIds)) {
+      const key = `${seed.scope}:${seed.scopeId}`;
+
+      if (!currentKeys.has(key)) {
+        nextLimits.push(seed);
+        currentKeys.add(key);
+      }
+    }
+
+    quotaLimitsByUserId.set(user.id, nextLimits);
+
+    return nextLimits;
+  }
+
+  function buildQuotaUsageTotalsForUser(user: AuthUser): {
+    tenant: number;
+    user: number;
+    groupsById: Record<string, number>;
+  } {
+    const groupsById: Record<string, number> = {};
+    let tenant = 0;
+    let userUsage = 0;
+
+    for (const conversation of conversationsById.values()) {
+      const launchCost = conversation.launchCost;
+
+      tenant += launchCost;
+
+      if (conversation.userId === user.id) {
+        userUsage += launchCost;
+      }
+
+      groupsById[conversation.activeGroup.id] =
+        (groupsById[conversation.activeGroup.id] ?? 0) + launchCost;
+    }
+
+    for (const run of runsById.values()) {
+      if (!shouldCountRunTowardsQuota(run)) {
+        continue;
+      }
+
+      const usageCost = calculateCompletionQuotaCost(run.totalTokens);
+
+      if (usageCost <= 0) {
+        continue;
+      }
+
+      tenant += usageCost;
+
+      if (run.userId === user.id) {
+        userUsage += usageCost;
+      }
+
+      groupsById[run.activeGroup.id] = (groupsById[run.activeGroup.id] ?? 0) + usageCost;
+    }
+
+    return {
+      tenant,
+      user: userUsage,
+      groupsById,
+    };
+  }
+
+  function buildQuotaSnapshotForUser(
+    user: AuthUser,
+    context: ReturnType<typeof getContextForUser>
+  ): {
+    quotaServiceState: 'available';
+    quotaUsagesByGroupId: Record<string, QuotaUsage[]>;
+  } {
+    return {
+      quotaServiceState: 'available',
+      quotaUsagesByGroupId: buildQuotaUsagesByGroupId({
+        memberGroupIds: context.memberGroupIds,
+        quotaLimits: getQuotaLimitsForUser(user, context),
+        usageTotals: buildQuotaUsageTotalsForUser(user),
+      }),
+    };
+  }
+
   function updateConversationLatestRun(
     conversation: WorkspaceConversationRecord,
     run: WorkspaceRunRecord
   ) {
     conversation.run = buildRunSummary(run);
     conversation.updatedAt = run.finishedAt ?? run.createdAt;
+  }
+
+  function toWorkspaceConversationData(
+    conversation: WorkspaceConversationRecord
+  ): WorkspaceConversation {
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      status: conversation.status,
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.updatedAt,
+      launchId: conversation.launchId,
+      app: conversation.app,
+      activeGroup: conversation.activeGroup,
+      messages: conversation.messages,
+      run: conversation.run,
+    };
   }
 
   function listRunRecords(conversationId: string) {
@@ -451,12 +672,15 @@ export function createWorkspaceService(options: {
         user,
         preferencesByUserId.get(user.id) ?? buildEmptyPreferences()
       );
+      const quotaSnapshot = buildQuotaSnapshotForUser(user, context);
 
       return buildWorkspaceCatalog(user, {
         groups: context.groups,
         apps: context.apps,
         memberGroupIds: context.memberGroupIds,
         preferences,
+        quotaServiceState: quotaSnapshot.quotaServiceState,
+        quotaUsagesByGroupId: quotaSnapshot.quotaUsagesByGroupId,
       });
     },
     getPreferencesForUser(user) {
@@ -539,6 +763,7 @@ export function createWorkspaceService(options: {
         createdAt: launchedAt,
         updatedAt: launchedAt,
         launchId,
+        launchCost: app.launchCost,
         userId: user.id,
         app: {
           id: app.id,
@@ -574,6 +799,15 @@ export function createWorkspaceService(options: {
         triggeredFrom: 'app_launch',
         userId: user.id,
       });
+      appendTimelineEvent(
+        run,
+        'run_created',
+        {
+          triggeredFrom: 'app_launch',
+          traceId,
+        },
+        launchedAt
+      );
 
       runsById.set(runId, run);
       runIdsByConversationId.set(conversationId, [runId]);
@@ -622,11 +856,61 @@ export function createWorkspaceService(options: {
         updateConversationLatestRun(conversation, latestRun);
       }
 
-      const { userId, ...conversationData } = conversation;
+      return {
+        ok: true,
+        data: toWorkspaceConversationData(conversation),
+      };
+    },
+    listConversationsForUser(user, input) {
+      const limit = Math.min(Math.max(input.limit ?? 12, 1), 50);
+      const normalizedQuery = input.query?.trim().toLowerCase() || null;
+      const items = [...conversationsById.values()]
+        .filter(conversation => conversation.userId === user.id)
+        .flatMap(conversation => {
+          const latestRun = listRunRecords(conversation.id)[0];
+
+          if (!latestRun) {
+            return [];
+          }
+
+          if (input.appId && conversation.app.id !== input.appId) {
+            return [];
+          }
+
+          if (input.groupId && conversation.activeGroup.id !== input.groupId) {
+            return [];
+          }
+
+          if (normalizedQuery) {
+            const haystack = [
+              conversation.title,
+              conversation.app.name,
+              ...conversation.messages.map(message => message.content),
+            ]
+              .join(' ')
+              .toLowerCase();
+
+            if (!haystack.includes(normalizedQuery)) {
+              return [];
+            }
+          }
+
+          return [toWorkspaceConversationListItem(conversation, latestRun)];
+        })
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .slice(0, limit);
 
       return {
         ok: true,
-        data: conversationData,
+        data: {
+          items,
+          filters: {
+            appId: input.appId ?? null,
+            groupId: input.groupId ?? null,
+            query: normalizedQuery,
+            limit,
+          },
+        },
       };
     },
     listConversationRunsForUser(user, conversationId) {
@@ -897,7 +1181,7 @@ export function createWorkspaceService(options: {
         updateConversationLatestRun(conversation, latestRun);
       }
 
-      const { userId, ...conversationData } = conversation;
+      const { userId, launchCost, ...conversationData } = conversation;
 
       return {
         ok: true,
@@ -905,6 +1189,35 @@ export function createWorkspaceService(options: {
           share: toWorkspaceConversationShare(share),
           conversation: conversationData,
         },
+      };
+    },
+    appendRunTimelineEventForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+      const run = runsById.get(input.runId);
+
+      if (
+        !conversation ||
+        conversation.userId !== user.id ||
+        !run ||
+        run.userId !== user.id ||
+        run.conversationId !== input.conversationId
+      ) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace run could not be found.',
+        };
+      }
+
+      appendTimelineEvent(run, input.type, input.metadata);
+      run.usage = buildUsageFromOutputs(run);
+
+      const { userId, ...runData } = run;
+
+      return {
+        ok: true,
+        data: runData,
       };
     },
     createConversationRunForUser(user, input) {
@@ -928,6 +1241,15 @@ export function createWorkspaceService(options: {
         triggeredFrom: input.triggeredFrom,
         userId: user.id,
       });
+      appendTimelineEvent(
+        run,
+        'run_created',
+        {
+          triggeredFrom: input.triggeredFrom,
+          traceId: run.traceId,
+        },
+        createdAt
+      );
 
       runsById.set(run.id, run);
       runIdsByConversationId.set(conversation.id, [
@@ -936,11 +1258,9 @@ export function createWorkspaceService(options: {
       ]);
       updateConversationLatestRun(conversation, run);
 
-      const { userId, ...conversationData } = conversation;
-
       return {
         ok: true,
-        data: conversationData,
+        data: toWorkspaceConversationData(conversation),
       };
     },
     updateConversationRunForUser(user, input) {
@@ -978,6 +1298,9 @@ export function createWorkspaceService(options: {
           ...run.inputs,
           ...input.inputs,
         };
+        appendTimelineEvent(run, 'input_recorded', {
+          keys: Object.keys(input.inputs),
+        });
       }
 
       if (input.outputs) {
@@ -985,6 +1308,34 @@ export function createWorkspaceService(options: {
           ...run.outputs,
           ...input.outputs,
         };
+        appendTimelineEvent(run, 'output_recorded', {
+          keys: Object.keys(input.outputs),
+        });
+      }
+
+      if (input.status === 'running') {
+        appendTimelineEvent(run, 'run_started', {
+          status: input.status,
+        });
+      }
+
+      if (input.status === 'succeeded') {
+        appendTimelineEvent(run, 'run_succeeded', {
+          status: input.status,
+        });
+      }
+
+      if (input.status === 'failed') {
+        appendTimelineEvent(run, 'run_failed', {
+          status: input.status,
+          error: input.error ?? null,
+        });
+      }
+
+      if (input.status === 'stopped') {
+        appendTimelineEvent(run, 'run_stopped', {
+          status: input.status,
+        });
       }
 
       run.usage = buildUsageFromOutputs(run);
@@ -995,11 +1346,9 @@ export function createWorkspaceService(options: {
 
       updateConversationLatestRun(conversation, run);
 
-      const { userId, ...conversationData } = conversation;
-
       return {
         ok: true,
-        data: conversationData,
+        data: toWorkspaceConversationData(conversation),
       };
     },
   };
@@ -1008,6 +1357,8 @@ export function createWorkspaceService(options: {
 export type {
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
+  WorkspaceConversationListInput,
+  WorkspaceConversationListResult,
   WorkspaceConversationResult,
   WorkspaceConversationRunsResult,
   WorkspaceConversationShareCreateInput,
@@ -1019,6 +1370,7 @@ export type {
   WorkspaceLaunchResult,
   WorkspaceRunCreateInput,
   WorkspaceRunResult,
+  WorkspaceRunTimelineEventAppendInput,
   WorkspaceRunUpdateInput,
   WorkspaceSharedConversationResult,
   WorkspaceService,

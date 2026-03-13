@@ -7,8 +7,10 @@ import type {
 import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceConversationListResponse,
   WorkspaceConversationResponse,
   WorkspacePreferencesResponse,
+  WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
 import type { ChatCompletionResponse } from '@agentifui/shared/chat';
 import { randomUUID } from 'node:crypto';
@@ -37,7 +39,7 @@ function normalizeStringArray(value: string[] | string) {
   return JSON.parse(value) as string[];
 }
 
-const PERSISTENCE_TEST_TIMEOUT_MS = 60000;
+const PERSISTENCE_TEST_TIMEOUT_MS = 120000;
 
 describe.sequential('persistent auth runtime', () => {
   it(
@@ -1199,6 +1201,33 @@ describe.sequential('persistent auth runtime', () => {
 
         const launchBody = launch.json() as WorkspaceAppLaunchResponse;
 
+        const catalogAfterLaunch = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(catalogAfterLaunch.statusCode).toBe(200);
+        expect((catalogAfterLaunch.json() as WorkspaceCatalogResponse).data.quotaUsagesByGroupId).toMatchObject({
+          grp_research: [
+            expect.objectContaining({
+              scope: 'tenant',
+              used: 845,
+            }),
+            expect.objectContaining({
+              scope: 'group',
+              scopeId: 'grp_research',
+              used: 785,
+            }),
+            expect.objectContaining({
+              scope: 'user',
+              used: 635,
+            }),
+          ],
+        });
+
         const completion = await app.inject({
           method: 'POST',
           url: '/v1/chat/completions',
@@ -1302,6 +1331,106 @@ describe.sequential('persistent auth runtime', () => {
             },
           ],
         });
+
+        const history = await app.inject({
+          method: 'GET',
+          url: '/workspace/conversations?appId=app_policy_watch&groupId=grp_research&q=policy updates',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(history.statusCode).toBe(200);
+        expect((history.json() as WorkspaceConversationListResponse).data.items).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: launchBody.data.conversationId,
+              messageCount: 2,
+              activeGroup: expect.objectContaining({
+                id: 'grp_research',
+              }),
+              app: expect.objectContaining({
+                id: 'app_policy_watch',
+              }),
+            }),
+          ])
+        );
+
+        const run = await app.inject({
+          method: 'GET',
+          url: `/workspace/runs/${launchBody.data.runId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(run.statusCode).toBe(200);
+        expect((run.json() as WorkspaceRunResponse).data.timeline).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'run_created' }),
+            expect.objectContaining({ type: 'input_recorded' }),
+            expect.objectContaining({ type: 'run_started' }),
+            expect.objectContaining({ type: 'output_recorded' }),
+            expect.objectContaining({ type: 'run_succeeded' }),
+          ])
+        );
+
+        const catalogAfterCompletion = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+        const catalogAfterCompletionBody = catalogAfterCompletion.json() as WorkspaceCatalogResponse;
+        const researchQuotaUsages = catalogAfterCompletionBody.data.quotaUsagesByGroupId.grp_research;
+
+        expect(researchQuotaUsages).toBeDefined();
+
+        if (!researchQuotaUsages) {
+          throw new Error('expected research quota usage to be present');
+        }
+
+        const researchQuotaAfterCompletion = researchQuotaUsages.find(
+          usage => usage.scope === 'group'
+        );
+
+        expect(catalogAfterCompletion.statusCode).toBe(200);
+        expect(researchQuotaUsages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              scope: 'group',
+              used: expect.any(Number),
+            }),
+            expect.objectContaining({
+              scope: 'tenant',
+              used: expect.any(Number),
+            }),
+            expect.objectContaining({
+              scope: 'user',
+              used: expect.any(Number),
+            }),
+          ])
+        );
+        expect(researchQuotaAfterCompletion?.used ?? 0).toBeGreaterThan(785);
+
+        const auditEvents = await app.inject({
+          method: 'GET',
+          url: '/auth/audit-events',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(auditEvents.statusCode).toBe(200);
+        expect(auditEvents.json().data.events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              action: 'workspace.quota.usage_recorded',
+              entityId: launchBody.data.runId,
+            }),
+          ])
+        );
       } finally {
         if (!appClosed) {
           await app.close();

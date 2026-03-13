@@ -68,6 +68,8 @@ export type AuthAuditAction =
   | 'workspace.conversation_share.created'
   | 'workspace.conversation_share.revoked'
   | 'workspace.conversation_share.accessed'
+  | 'workspace.quota.launch_blocked'
+  | 'workspace.quota.usage_recorded'
   | 'workspace.run.stop_requested'
   | 'admin.workspace.read'
   | 'admin.workspace_grant.created'

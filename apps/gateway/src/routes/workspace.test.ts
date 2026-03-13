@@ -1,6 +1,7 @@
 import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceConversationListResponse,
   WorkspaceConversationResponse,
   WorkspaceConversationShareResponse,
   WorkspaceConversationSharesResponse,
@@ -409,8 +410,23 @@ describe('workspace routes', () => {
       });
 
       expect(catalogResponse.statusCode).toBe(200);
-      expect((catalogResponse.json() as WorkspaceCatalogResponse).data.recentAppIds).toEqual([
-        'app_policy_watch',
+      const catalogBody = catalogResponse.json() as WorkspaceCatalogResponse;
+
+      expect(catalogBody.data.recentAppIds).toEqual(['app_policy_watch']);
+      expect(catalogBody.data.quotaUsagesByGroupId.grp_research).toEqual([
+        expect.objectContaining({
+          scope: 'tenant',
+          used: 845,
+        }),
+        expect.objectContaining({
+          scope: 'group',
+          scopeId: 'grp_research',
+          used: 785,
+        }),
+        expect.objectContaining({
+          scope: 'user',
+          used: 635,
+        }),
       ]);
 
       const conversationResponse = await app.inject({
@@ -513,7 +529,8 @@ describe('workspace routes', () => {
 
   it('rejects invalid workspace preference payloads and blocked launches', async () => {
     const authService = createTestAuthService();
-    const { app } = await createTestApp(authService);
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
 
     authService.register({
       email: 'developer@iflabx.com',
@@ -576,6 +593,41 @@ describe('workspace routes', () => {
           },
         },
       });
+
+      const quotaBlockedLaunch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_release_radar',
+          activeGroupId: 'grp_product',
+        },
+      });
+
+      expect(quotaBlockedLaunch.statusCode).toBe(409);
+      expect(quotaBlockedLaunch.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'WORKSPACE_LAUNCH_BLOCKED',
+          details: {
+            reason: 'quota_exceeded',
+          },
+        },
+      });
+
+      expect(await auditService.listEvents({ actorUserId: login.data.user.id })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'workspace.quota.launch_blocked',
+            entityId: 'app_release_radar',
+            payload: expect.objectContaining({
+              reason: 'quota_exceeded',
+            }),
+          }),
+        ])
+      );
     } finally {
       await app.close();
     }
@@ -827,6 +879,118 @@ describe('workspace routes', () => {
             entityType: 'conversation_share',
             entityId: share.id,
           }),
+        ])
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('lists recent conversations and exposes persisted run timeline events', async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: 'timeline@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Timeline User',
+    });
+
+    const login = authService.login({
+      email: 'timeline@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected timeline login to succeed');
+    }
+
+    try {
+      const launch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_research',
+        },
+      });
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error('expected launch payload to include a conversation id');
+      }
+
+      const completion = await app.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          model: 'app_policy_watch',
+          app_id: 'app_policy_watch',
+          stream: false,
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: 'user',
+              content: 'Create a searchable history entry for timeline coverage.',
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+      const completionBody = completion.json() as {
+        id: string;
+      };
+
+      const history = await app.inject({
+        method: 'GET',
+        url: '/workspace/conversations?appId=app_policy_watch&groupId=grp_research&q=searchable',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(history.statusCode).toBe(200);
+      expect((history.json() as WorkspaceConversationListResponse).data.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: conversationId,
+            app: expect.objectContaining({
+              id: 'app_policy_watch',
+            }),
+            activeGroup: expect.objectContaining({
+              id: 'grp_research',
+            }),
+            messageCount: 2,
+          }),
+        ])
+      );
+
+      const runResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/runs/${completionBody.id}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data.timeline).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'run_created' }),
+          expect.objectContaining({ type: 'input_recorded' }),
+          expect.objectContaining({ type: 'run_started' }),
+          expect.objectContaining({ type: 'output_recorded' }),
+          expect.objectContaining({ type: 'run_succeeded' }),
         ])
       );
     } finally {

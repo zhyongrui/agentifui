@@ -1,11 +1,17 @@
 import type { AuthUser } from '@agentifui/shared/auth';
 import type {
+  QuotaServiceState,
   QuotaUsage,
   WorkspaceApp,
   WorkspaceCatalog,
   WorkspaceGroup,
   WorkspacePreferences,
 } from '@agentifui/shared/apps';
+
+import {
+  buildDefaultQuotaLimitRecords,
+  buildQuotaUsagesByGroupId,
+} from './workspace-quota.js';
 
 type WorkspaceRoleSeed = {
   id: string;
@@ -218,56 +224,6 @@ function resolveSeededWorkspaceAppsForUser(user: AuthUser): WorkspaceApp[] {
   }).map(app => toWorkspaceAppFixture(app, memberGroupIds));
 }
 
-function buildTenantQuota(user: AuthUser): QuotaUsage {
-  return {
-    scope: 'tenant',
-    scopeId: user.tenantId,
-    scopeLabel: 'Tenant monthly quota',
-    used: 820,
-    limit: 1000,
-  };
-}
-
-function buildUserQuota(user: AuthUser): QuotaUsage {
-  return {
-    scope: 'user',
-    scopeId: user.id,
-    scopeLabel: 'Your monthly quota',
-    used: 610,
-    limit: 1000,
-  };
-}
-
-function buildGroupQuota(groupId: string): QuotaUsage {
-  if (groupId === 'grp_research') {
-    return {
-      scope: 'group',
-      scopeId: groupId,
-      scopeLabel: 'Research Lab quota',
-      used: 760,
-      limit: 1000,
-    };
-  }
-
-  if (groupId === 'grp_security') {
-    return {
-      scope: 'group',
-      scopeId: groupId,
-      scopeLabel: 'Security Office quota',
-      used: 540,
-      limit: 1000,
-    };
-  }
-
-  return {
-    scope: 'group',
-    scopeId: groupId,
-    scopeLabel: 'Product Studio quota',
-    used: 930,
-    limit: 1000,
-  };
-}
-
 function buildWorkspaceCatalog(
   user: AuthUser,
   input: {
@@ -278,6 +234,8 @@ function buildWorkspaceCatalog(
       WorkspacePreferences,
       'favoriteAppIds' | 'recentAppIds' | 'defaultActiveGroupId'
     >;
+    quotaServiceState?: QuotaServiceState;
+    quotaUsagesByGroupId?: Record<string, QuotaUsage[]>;
   }
 ): WorkspaceCatalog {
   const fallbackActiveGroupId = input.memberGroupIds[0]!;
@@ -286,8 +244,6 @@ function buildWorkspaceCatalog(
     input.memberGroupIds.includes(input.preferences.defaultActiveGroupId)
       ? input.preferences.defaultActiveGroupId
       : fallbackActiveGroupId;
-  const tenantQuota = buildTenantQuota(user);
-  const userQuota = buildUserQuota(user);
 
   return {
     groups: input.groups,
@@ -296,10 +252,18 @@ function buildWorkspaceCatalog(
     apps: input.apps,
     favoriteAppIds: input.preferences?.favoriteAppIds ?? [],
     recentAppIds: input.preferences?.recentAppIds ?? [],
-    quotaServiceState: 'available',
-    quotaUsagesByGroupId: Object.fromEntries(
-      input.memberGroupIds.map(groupId => [groupId, [tenantQuota, buildGroupQuota(groupId), userQuota]])
-    ),
+    quotaServiceState: input.quotaServiceState ?? 'available',
+    quotaUsagesByGroupId:
+      input.quotaUsagesByGroupId ??
+      buildQuotaUsagesByGroupId({
+        memberGroupIds: input.memberGroupIds,
+        quotaLimits: buildDefaultQuotaLimitRecords(user, input.memberGroupIds),
+        usageTotals: {
+          tenant: 0,
+          user: 0,
+          groupsById: Object.fromEntries(input.memberGroupIds.map(groupId => [groupId, 0])),
+        },
+      }),
     generatedAt: new Date().toISOString(),
   };
 }

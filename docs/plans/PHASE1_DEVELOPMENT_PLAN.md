@@ -723,17 +723,17 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 
 当前默认按下面顺序执行，不再每轮重新定义优先级：
 
-1. `R12-C1` / `R12-C4` 执行时间线、状态流和历史回源
-2. `R12-C5` / `R12-C7` timeline UI、历史筛选与 replay 联动
-3. `R12-D1` / `R12-D4` quota、历史列表与 workspace 收口
-4. `R13-B1` / `R13-B4` 稳定公网入口与进程管理
-5. `R13-C1` / `R13-C4` CI、观测与发布质量门槛
+1. `R13-B1` / `R13-B4` 稳定公网入口与进程管理
+2. `R13-C1` / `R13-C4` CI、观测与发布质量门槛
+3. `R13-A1` / `R13-A4` 平台管理与租户生命周期
+4. `R13-B5` / `R13-B6` 环境模板、公网浏览器回归脚本
+5. `R13-C5` / `R13-C6` smoke 脚本与发布 checklist
 
-如果 `R12-C` 被环境阻塞，则按下面的降级顺序切换：
+如果公网入口或部署环境被阻塞，则按下面的降级顺序切换：
 
-1. `R12-D` quota 与历史状态收口
-2. `R13-B` 稳定公网入口与部署硬化
-3. `R13-C` CI、观测与发布质量门槛
+1. `R13-C` CI、观测与发布质量门槛
+2. `R13-A` 平台管理与租户生命周期
+3. `R13-B` 稳定公网入口与部署硬化
 
 ## 13. 2026-03-12 进度快照
 
@@ -780,7 +780,10 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - `/v1/chat/completions` 已支持 blocking 与 SSE 响应格式
   - `X-Trace-ID` 已和 launch 创建的 run trace 保持一致
   - chat page 已能发起真实 completion 并回写 run status
-- `S1-3` / `S2-*` 仍未完成真实 quota service、消息持久化、渐进式流式渲染与历史列表衔接。
+- `S1-3` 已完成真实 quota service 与 workspace 收口：
+  - quota 已由 `workspace_quota_limits` + 实际 launch/run 使用量驱动
+  - app launch 与 completion 都会反馈到真实 quota usage
+  - `/apps` 与 `/chat/[conversationId]` 都已显示真实 quota 卡片和告警
 - `S1-2` 已具备第一版角色体系、显式 deny 优先级和用户直授例外授权。
 - `S1-2` 已具备 direct user grant 的后台写接口，但仍未完成 Manager 授权路径与 Break-glass。
 - `S3-1 / S3-2` 已完成后台第一版治理闭环：
@@ -802,10 +805,14 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - shared conversation 访问已要求登录且校验 group membership / revoked 状态
   - Web `/chat/[conversationId]` 已新增 share panel，`/chat/shared/[shareId]` 已提供只读 transcript 视图
   - 浏览器回归已覆盖 owner 创建分享、reader 打开只读 transcript 的链路
-- 后续产品主线已切到 `R12-C`：
-  - timeline / history 回源
-  - timeline UI 与 replay 联动
-  - quota 与公网部署硬化
+- `S2` 已完成 timeline / history 回源闭环：
+  - run timeline 已持久化到 `run_timeline_events`
+  - `/chat` 已提供 conversation history 列表和筛选
+  - `/chat/[conversationId]` 已支持 replay timeline 视图
+- 后续产品主线已切到 `R13-B`：
+  - 正式公网入口、进程管理和部署硬化
+  - CI / observability / smoke 脚本
+  - 平台级租户生命周期
 
 ## 14. 关联文档
 

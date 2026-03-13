@@ -15,10 +15,6 @@ type NavItem = {
 };
 
 function isActivePath(pathname: string, item: NavItem) {
-  if (item.href === '/apps' && pathname.startsWith('/chat/')) {
-    return true;
-  }
-
   return pathname === item.href || pathname.startsWith(`${item.matchPrefix}/`);
 }
 
@@ -32,6 +28,11 @@ export function MainSectionNav({
       href: '/apps',
       label: 'Apps workspace',
       matchPrefix: '/apps',
+    },
+    {
+      href: '/chat',
+      label: 'Chat history',
+      matchPrefix: '/chat',
     },
     {
       href: '/settings/profile',

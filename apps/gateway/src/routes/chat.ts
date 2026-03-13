@@ -24,6 +24,7 @@ import { Readable } from 'node:stream';
 
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
+import { calculateCompletionQuotaCost } from '../services/workspace-quota.js';
 import type { WorkspaceService } from '../services/workspace-service.js';
 
 type ActiveSessionResult =
@@ -50,6 +51,48 @@ function buildTraceId() {
 
 function buildConversationMessageId() {
   return `msg_${randomUUID()}`;
+}
+
+async function recordQuotaUsageAudit(input: {
+  auditService: AuditService;
+  completionTokens: number;
+  conversation: WorkspaceConversation;
+  ipAddress: string;
+  promptTokens: number;
+  runId: string;
+  runStatus: WorkspaceConversation['run']['status'];
+  totalTokens: number;
+  traceId: string;
+  user: AuthUser;
+}) {
+  const quotaUsageCost = calculateCompletionQuotaCost(input.totalTokens);
+
+  if (quotaUsageCost <= 0) {
+    return;
+  }
+
+  await input.auditService.recordEvent({
+    tenantId: input.user.tenantId,
+    actorUserId: input.user.id,
+    action: 'workspace.quota.usage_recorded',
+    entityType: 'run',
+    entityId: input.runId,
+    ipAddress: input.ipAddress,
+    payload: {
+      conversationId: input.conversation.id,
+      appId: input.conversation.app.id,
+      appName: input.conversation.app.name,
+      activeGroupId: input.conversation.activeGroup.id,
+      activeGroupName: input.conversation.activeGroup.name,
+      runId: input.runId,
+      runStatus: input.runStatus,
+      traceId: input.traceId,
+      promptTokens: input.promptTokens,
+      completionTokens: input.completionTokens,
+      totalTokens: input.totalTokens,
+      quotaUsageCost,
+    },
+  });
 }
 
 function readBearerToken(value: string | undefined): string | null {
@@ -677,8 +720,10 @@ function buildBlockingResponse(input: {
 
 async function* streamCompletionEvents(input: {
   attachments: WorkspaceConversationAttachment[];
+  auditService: AuditService;
   conversation: WorkspaceConversation;
   created: number;
+  ipAddress: string;
   model: string;
   promptTokens: number;
   assistantText: string;
@@ -779,12 +824,25 @@ async function* streamCompletionEvents(input: {
     if (!updateResult.ok) {
       return;
     }
+
+    await recordQuotaUsageAudit({
+      auditService: input.auditService,
+      completionTokens,
+      conversation: updateResult.data,
+      ipAddress: input.ipAddress,
+      promptTokens: input.promptTokens,
+      runId: input.conversation.run.id,
+      runStatus: wasStopped ? 'stopped' : 'succeeded',
+      totalTokens: input.promptTokens + completionTokens,
+      traceId: input.conversation.run.traceId,
+      user: input.user,
+    });
   } finally {
     activeStreams.delete(input.conversation.run.id);
 
     if (!finalized) {
       const completionTokens = estimateTokens(assistantContent);
-      await input.workspaceService.updateConversationRunForUser(input.user, {
+      const fallbackResult = await input.workspaceService.updateConversationRunForUser(input.user, {
         conversationId: input.conversation.id,
         runId: input.conversation.run.id,
         status: streamState?.stopRequested ? 'stopped' : 'failed',
@@ -813,6 +871,21 @@ async function* streamCompletionEvents(input: {
         totalSteps: 1,
         finishedAt: new Date().toISOString(),
       });
+
+      if (fallbackResult.ok) {
+        await recordQuotaUsageAudit({
+          auditService: input.auditService,
+          completionTokens,
+          conversation: fallbackResult.data,
+          ipAddress: input.ipAddress,
+          promptTokens: input.promptTokens,
+          runId: input.conversation.run.id,
+          runStatus: streamState?.stopRequested ? 'stopped' : 'failed',
+          totalTokens: input.promptTokens + completionTokens,
+          traceId: input.conversation.run.traceId,
+          user: input.user,
+        });
+      }
     }
   }
 }
@@ -1055,8 +1128,10 @@ export async function registerChatRoutes(
         Readable.from(
           streamCompletionEvents({
             attachments: attachmentResult.attachments,
+            auditService,
             conversation: runningResult.data,
             created,
+            ipAddress: request.ip,
             model,
             promptTokens,
             assistantText,
@@ -1107,6 +1182,19 @@ export async function registerChatRoutes(
       });
     }
 
+    await recordQuotaUsageAudit({
+      auditService,
+      completionTokens,
+      conversation: updateResult.data,
+      ipAddress: request.ip,
+      promptTokens,
+      runId: conversation.run.id,
+      runStatus: 'succeeded',
+      totalTokens: promptTokens + completionTokens,
+      traceId,
+      user: access.user,
+    });
+
     return buildBlockingResponse({
       conversation: updateResult.data,
       created,
@@ -1155,6 +1243,17 @@ export async function registerChatRoutes(
     };
 
     const runResult = await workspaceService.getRunForUser(access.user, taskId);
+
+    if (runResult.ok) {
+      await workspaceService.appendRunTimelineEventForUser(access.user, {
+        conversationId: runResult.data.conversationId,
+        runId: taskId,
+        type: 'stop_requested',
+        metadata: {
+          stopType: response.stop_type,
+        },
+      });
+    }
 
     await auditService.recordEvent({
       tenantId: access.user.tenantId,

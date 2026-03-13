@@ -108,6 +108,16 @@ export type WorkspaceRunStatus = 'pending' | 'running' | 'succeeded' | 'failed' 
 
 export type WorkspaceRunTrigger = 'app_launch' | 'chat_completion';
 
+export type WorkspaceRunTimelineEventType =
+  | 'run_created'
+  | 'input_recorded'
+  | 'run_started'
+  | 'stop_requested'
+  | 'output_recorded'
+  | 'run_succeeded'
+  | 'run_failed'
+  | 'run_stopped';
+
 export type WorkspaceConversationMessageStatus =
   | 'completed'
   | 'streaming'
@@ -167,6 +177,13 @@ export type WorkspaceRunSummary = {
   totalSteps: number;
 };
 
+export type WorkspaceRunTimelineEvent = {
+  id: string;
+  type: WorkspaceRunTimelineEventType;
+  createdAt: string;
+  metadata: Record<string, unknown>;
+};
+
 export type WorkspaceRun = WorkspaceRunSummary & {
   conversationId: string;
   app: Pick<
@@ -178,6 +195,7 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
   usage: WorkspaceRunUsage;
+  timeline: WorkspaceRunTimelineEvent[];
 };
 
 export type WorkspaceAppLaunch = {
@@ -216,9 +234,38 @@ export type WorkspaceConversation = {
   run: WorkspaceRunSummary;
 };
 
+export type WorkspaceConversationListItem = {
+  id: string;
+  title: string;
+  status: WorkspaceConversationStatus;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  lastMessagePreview: string | null;
+  app: Pick<
+    WorkspaceApp,
+    'id' | 'slug' | 'name' | 'summary' | 'kind' | 'status' | 'shortCode'
+  >;
+  activeGroup: WorkspaceGroup;
+  run: WorkspaceRunSummary;
+};
+
 export type WorkspaceConversationResponse = {
   ok: true;
   data: WorkspaceConversation;
+};
+
+export type WorkspaceConversationListResponse = {
+  ok: true;
+  data: {
+    items: WorkspaceConversationListItem[];
+    filters: {
+      appId: string | null;
+      groupId: string | null;
+      query: string | null;
+      limit: number;
+    };
+  };
 };
 
 export type WorkspaceConversationShare = {
