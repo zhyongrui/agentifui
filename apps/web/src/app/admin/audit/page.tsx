@@ -4,19 +4,26 @@ import type {
   AdminAuditFilters,
   AdminAuditPayloadMode,
   AdminAuditResponse,
+  AdminTenantSummary,
 } from '@agentifui/shared/admin';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { clearAuthSession } from '../../../lib/auth-session';
-import { exportAdminAudit, fetchAdminAudit } from '../../../lib/admin-client';
+import {
+  exportAdminAudit,
+  fetchAdminAudit,
+  fetchAdminTenants,
+} from '../../../lib/admin-client';
 import { useProtectedSession } from '../../../lib/use-protected-session';
 
 type AuditFilterFormState = {
+  scope: 'tenant' | 'platform';
+  tenantId: string;
   action: string;
   level: '' | 'critical' | 'info' | 'warning';
   actorUserId: string;
-  entityType: '' | 'conversation' | 'run' | 'session' | 'user' | 'workspace_app';
+  entityType: '' | 'conversation' | 'run' | 'session' | 'tenant' | 'user' | 'workspace_app';
   traceId: string;
   runId: string;
   conversationId: string;
@@ -25,6 +32,8 @@ type AuditFilterFormState = {
 };
 
 const EMPTY_FILTERS: AuditFilterFormState = {
+  scope: 'tenant',
+  tenantId: '',
   action: '',
   level: '',
   actorUserId: '',
@@ -40,6 +49,8 @@ function normalizeFilters(filters: AuditFilterFormState): AdminAuditFilters {
   const limit = filters.limit.trim();
 
   return {
+    scope: filters.scope,
+    tenantId: filters.tenantId.trim() || null,
     action: filters.action.trim() || null,
     level: filters.level || null,
     actorUserId: filters.actorUserId.trim() || null,
@@ -58,12 +69,20 @@ function hasAppliedFilters(filters: AdminAuditFilters) {
       return value === 'raw';
     }
 
+    if (key === 'scope') {
+      return value === 'platform';
+    }
+
     return value !== null && value !== undefined && value !== '';
   });
 }
 
-function buildFilterTags(filters: AdminAuditFilters) {
+function buildFilterTags(filters: AdminAuditFilters, tenantNameById: Map<string, string>) {
   return [
+    filters.scope === 'platform' ? 'Scope: platform' : null,
+    filters.tenantId
+      ? `Tenant: ${tenantNameById.get(filters.tenantId) ?? filters.tenantId}`
+      : null,
     filters.action ? `Action: ${filters.action}` : null,
     filters.level ? `Level: ${filters.level}` : null,
     filters.actorUserId ? `Actor: ${filters.actorUserId}` : null,
@@ -76,9 +95,24 @@ function buildFilterTags(filters: AdminAuditFilters) {
   ].filter((value): value is string => Boolean(value));
 }
 
+function resolveTenantLabel(
+  tenantId: string | null | undefined,
+  fallbackName: string | null | undefined,
+  tenantNameById: Map<string, string>
+) {
+  if (tenantId && tenantNameById.has(tenantId)) {
+    return tenantNameById.get(tenantId) ?? fallbackName ?? tenantId;
+  }
+
+  return fallbackName ?? tenantId ?? 'Unknown tenant';
+}
+
 export default function AdminAuditPage() {
   const router = useRouter();
   const { session, isLoading: isSessionLoading } = useProtectedSession('/admin');
+  const [capabilities, setCapabilities] =
+    useState<AdminAuditResponse['data']['capabilities'] | null>(null);
+  const [platformTenants, setPlatformTenants] = useState<AdminTenantSummary[]>([]);
   const [data, setData] = useState<AdminAuditResponse['data'] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDataLoading, setIsDataLoading] = useState(false);
@@ -87,15 +121,41 @@ export default function AdminAuditPage() {
   const [exportingFormat, setExportingFormat] = useState<null | 'csv' | 'json'>(null);
   const [draftFilters, setDraftFilters] = useState<AuditFilterFormState>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<AuditFilterFormState>(EMPTY_FILTERS);
+  const [didBootstrapPlatformScope, setDidBootstrapPlatformScope] = useState(false);
 
   useEffect(() => {
     if (!session) {
+      setCapabilities(null);
+      setPlatformTenants([]);
       setData(null);
       setError(null);
       setIsDataLoading(false);
       setExportNotice(null);
       setExportError(null);
       setExportingFormat(null);
+      setDidBootstrapPlatformScope(false);
+      return;
+    }
+  }, [router, session]);
+
+  useEffect(() => {
+    if (!capabilities?.canReadPlatformAdmin || didBootstrapPlatformScope) {
+      return;
+    }
+
+    setDraftFilters(currentValue => ({
+      ...currentValue,
+      scope: 'platform',
+    }));
+    setAppliedFilters(currentValue => ({
+      ...currentValue,
+      scope: 'platform',
+    }));
+    setDidBootstrapPlatformScope(true);
+  }, [capabilities, didBootstrapPlatformScope]);
+
+  useEffect(() => {
+    if (!session) {
       return;
     }
 
@@ -123,6 +183,7 @@ export default function AdminAuditPage() {
           return;
         }
 
+        setCapabilities(result.data.capabilities);
         setData(result.data);
       })
       .catch(() => {
@@ -141,6 +202,55 @@ export default function AdminAuditPage() {
       isCancelled = true;
     };
   }, [appliedFilters, router, session]);
+
+  useEffect(() => {
+    if (!session || !capabilities?.canReadPlatformAdmin) {
+      setPlatformTenants([]);
+      return;
+    }
+
+    let isCancelled = false;
+
+    fetchAdminTenants(session.sessionToken)
+      .then(result => {
+        if (isCancelled) {
+          return;
+        }
+
+        if (!result.ok) {
+          if (result.error.code === 'ADMIN_UNAUTHORIZED') {
+            clearAuthSession(window.sessionStorage);
+            router.replace('/login');
+            return;
+          }
+
+          setPlatformTenants([]);
+          setError(currentValue => currentValue ?? result.error.message);
+          return;
+        }
+
+        setPlatformTenants(result.data.tenants);
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setPlatformTenants([]);
+          setError(currentValue => currentValue ?? 'Platform tenant inventory 加载失败，请稍后重试。');
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [capabilities, router, session]);
+
+  const tenantNameById = new Map(platformTenants.map(tenant => [tenant.id, tenant.name]));
+  const defaultFilters =
+    capabilities?.canReadPlatformAdmin
+      ? {
+          ...EMPTY_FILTERS,
+          scope: 'platform' as const,
+        }
+      : EMPTY_FILTERS;
 
   if (isSessionLoading || (isDataLoading && !data)) {
     return <p className="lead">Loading admin audit...</p>;
@@ -206,8 +316,9 @@ export default function AdminAuditPage() {
       <div>
         <h1>Audit</h1>
         <p className="lead">
-          Tenant-level audit visibility with action, actor and trace filters for persisted run-aware
-          governance review.
+          {capabilities?.canReadPlatformAdmin
+            ? 'Platform audit visibility across tenants with run-aware filters, high-risk summaries and tenant scope switching.'
+            : 'Tenant-level audit visibility with action, actor and trace filters for persisted run-aware governance review.'}
         </p>
       </div>
 
@@ -228,6 +339,48 @@ export default function AdminAuditPage() {
           }}
         >
           <div className="workspace-toolbar">
+            {capabilities?.canReadPlatformAdmin ? (
+              <>
+                <label className="field">
+                  <span>Scope</span>
+                  <select
+                    aria-label="Audit scope filter"
+                    value={draftFilters.scope}
+                    onChange={event => {
+                      const scope = event.target.value as AuditFilterFormState['scope'];
+
+                      setDraftFilters(currentValue => ({
+                        ...currentValue,
+                        scope,
+                      }));
+                    }}
+                  >
+                    <option value="platform">platform</option>
+                    <option value="tenant">tenant</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Tenant</span>
+                  <select
+                    aria-label="Audit tenant filter"
+                    value={draftFilters.tenantId}
+                    onChange={event => {
+                      setDraftFilters(currentValue => ({
+                        ...currentValue,
+                        tenantId: event.target.value,
+                      }));
+                    }}
+                  >
+                    <option value="">All tenants</option>
+                    {platformTenants.map(tenant => (
+                      <option key={tenant.id} value={tenant.id}>
+                        {tenant.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : null}
             <label className="field">
               <span>Action</span>
               <input
@@ -276,6 +429,7 @@ export default function AdminAuditPage() {
                 }}
               >
                 <option value="">All entity types</option>
+                <option value="tenant">tenant</option>
                 <option value="user">user</option>
                 <option value="session">session</option>
                 <option value="workspace_app">workspace_app</option>
@@ -384,8 +538,8 @@ export default function AdminAuditPage() {
                   className="secondary"
                   type="button"
                   onClick={() => {
-                    setDraftFilters(EMPTY_FILTERS);
-                    setAppliedFilters(EMPTY_FILTERS);
+                    setDraftFilters(defaultFilters);
+                    setAppliedFilters(defaultFilters);
                   }}
                   disabled={isDataLoading}
                 >
@@ -418,14 +572,18 @@ export default function AdminAuditPage() {
 
         {data && hasAppliedFilters(data.appliedFilters) ? (
           <div className="tag-row admin-tag-row">
-            {buildFilterTags(data.appliedFilters).map(tag => (
+            {buildFilterTags(data.appliedFilters, tenantNameById).map(tag => (
               <span className="tag" key={tag}>
                 {tag}
               </span>
             ))}
           </div>
         ) : (
-          <p className="helper-text">No filters applied. Showing the latest tenant audit window.</p>
+          <p className="helper-text">
+            {capabilities?.canReadPlatformAdmin
+              ? 'No filters applied. Showing the latest platform audit window.'
+              : 'No filters applied. Showing the latest tenant audit window.'}
+          </p>
         )}
       </section>
 
@@ -439,14 +597,27 @@ export default function AdminAuditPage() {
             <span className="workspace-badge">
               Snapshot: {new Date(data.generatedAt).toLocaleString()}
             </span>
+            <span className="workspace-badge">Scope: {data.scope}</span>
             <span className="workspace-badge">{data.events.length} matching events</span>
+            <span className="workspace-badge">
+              High risk: {data.highRiskEventCount}
+            </span>
+            {capabilities?.canReadPlatformAdmin ? (
+              <span className="workspace-badge">
+                Tenant spread: {data.countsByTenant.length}
+              </span>
+            ) : null}
           </div>
 
           <section className="admin-card stack">
             <div className="section-header">
               <div>
                 <h2>Top actions</h2>
-                <p>Filtered tenant-wide audit volume grouped by action.</p>
+                <p>
+                  {data.scope === 'platform'
+                    ? 'Filtered platform-wide audit volume grouped by action.'
+                    : 'Filtered tenant-wide audit volume grouped by action.'}
+                </p>
               </div>
             </div>
             <div className="tag-row admin-tag-row">
@@ -461,6 +632,33 @@ export default function AdminAuditPage() {
               )}
             </div>
           </section>
+
+          {capabilities?.canReadPlatformAdmin ? (
+            <section className="admin-card stack">
+              <div className="section-header">
+                <div>
+                  <h2>Tenant spread</h2>
+                  <p>How the current audit window is distributed across tenants.</p>
+                </div>
+              </div>
+              <div className="tag-row admin-tag-row">
+                {data.countsByTenant.length === 0 ? (
+                  <span className="tag tag-muted">No tenant matches</span>
+                ) : (
+                  data.countsByTenant.map(tenantCount => (
+                    <span className="tag" key={tenantCount.tenantId}>
+                      {resolveTenantLabel(
+                        tenantCount.tenantId,
+                        tenantCount.tenantName,
+                        tenantNameById
+                      )}{' '}
+                      · {tenantCount.count}
+                    </span>
+                  ))
+                )}
+              </div>
+            </section>
+          ) : null}
 
           {data.events.length === 0 ? (
             <div className="workspace-empty">No audit events matched the current filter set.</div>
@@ -488,6 +686,14 @@ export default function AdminAuditPage() {
                       <span className="detail-label">Actor</span>
                       <strong>{event.actorUserId ?? 'System'}</strong>
                     </div>
+                    {event.tenantName || event.tenantId ? (
+                      <div className="detail-row">
+                        <span className="detail-label">Tenant</span>
+                        <strong>
+                          {resolveTenantLabel(event.tenantId, event.tenantName, tenantNameById)}
+                        </strong>
+                      </div>
+                    ) : null}
                     <div className="detail-row">
                       <span className="detail-label">IP</span>
                       <strong>{event.ipAddress ?? 'N/A'}</strong>

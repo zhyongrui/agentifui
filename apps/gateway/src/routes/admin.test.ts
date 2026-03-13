@@ -127,6 +127,7 @@ const auditEvents: AdminAuditEventSummary[] = [
   {
     id: 'audit-1',
     tenantId: 'tenant-dev',
+    tenantName: 'Tenant Dev',
     actorUserId: 'user-admin',
     action: 'auth.login.succeeded',
     level: 'info',
@@ -161,6 +162,14 @@ const auditEvents: AdminAuditEventSummary[] = [
         },
       ],
     },
+  },
+];
+
+const auditTenantCounts = [
+  {
+    tenantId: 'tenant-dev',
+    tenantName: 'Tenant Dev',
+    count: 1,
   },
 ];
 
@@ -201,6 +210,8 @@ function createAdminService(canReadAdmin = true, canReadPlatformAdmin = false) {
     revokeAppGrantForUser: vi.fn(),
     listAuditForUser: vi.fn().mockResolvedValue({
       countsByAction: auditCounts,
+      countsByTenant: auditTenantCounts,
+      highRiskEventCount: 0,
       events: auditEvents,
     }),
   };
@@ -348,6 +359,87 @@ describe('admin routes', () => {
         ok: true,
         data: {
           tenants: adminTenants,
+        },
+      });
+    } finally {
+      await Promise.all([tenantApp.close(), rootApp.close()]);
+    }
+  });
+
+  it('returns viewer capabilities for tenant admins and root admins', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Tenant Admin',
+    });
+    authService.register({
+      email: 'root-admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Root Admin',
+    });
+
+    const tenantAdminLogin = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+    const rootAdminLogin = authService.login({
+      email: 'root-admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(tenantAdminLogin.ok).toBe(true);
+    expect(rootAdminLogin.ok).toBe(true);
+
+    if (!tenantAdminLogin.ok || !rootAdminLogin.ok) {
+      throw new Error('expected admin logins to succeed');
+    }
+
+    const tenantApp = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService: createAdminService(true, false),
+    });
+    const rootApp = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService: createAdminService(true, true),
+    });
+
+    try {
+      const tenantResponse = await tenantApp.inject({
+        method: 'GET',
+        url: '/admin/context',
+        headers: {
+          authorization: `Bearer ${tenantAdminLogin.data.sessionToken}`,
+        },
+      });
+      const rootResponse = await rootApp.inject({
+        method: 'GET',
+        url: '/admin/context',
+        headers: {
+          authorization: `Bearer ${rootAdminLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(tenantResponse.statusCode).toBe(200);
+      expect(rootResponse.statusCode).toBe(200);
+      expect(tenantResponse.json()).toMatchObject({
+        ok: true,
+        data: {
+          capabilities: {
+            canReadAdmin: true,
+            canReadPlatformAdmin: false,
+          },
+        },
+      });
+      expect(rootResponse.json()).toMatchObject({
+        ok: true,
+        data: {
+          capabilities: {
+            canReadAdmin: true,
+            canReadPlatformAdmin: true,
+          },
         },
       });
     } finally {
@@ -560,7 +652,16 @@ describe('admin routes', () => {
       expect(groupsResponse.json().data.groups).toEqual(adminGroups);
       expect(appsResponse.json().data.apps).toEqual(adminApps);
       expect(auditResponse.json().data.events).toEqual(auditEvents);
+      expect(auditResponse.json().data.capabilities).toEqual({
+        canReadAdmin: true,
+        canReadPlatformAdmin: false,
+      });
+      expect(auditResponse.json().data.scope).toBe('tenant');
+      expect(auditResponse.json().data.countsByTenant).toEqual(auditTenantCounts);
+      expect(auditResponse.json().data.highRiskEventCount).toBe(0);
       expect(auditResponse.json().data.appliedFilters).toEqual({
+        scope: 'tenant',
+        tenantId: null,
         action: null,
         level: null,
         actorUserId: null,
@@ -578,6 +679,8 @@ describe('admin routes', () => {
           email: 'admin@iflabx.com',
         }),
         {
+          scope: 'tenant',
+          tenantId: null,
           action: null,
           level: null,
           actorUserId: null,
@@ -684,6 +787,8 @@ describe('admin routes', () => {
           email: 'admin@iflabx.com',
         }),
         {
+          scope: 'tenant',
+          tenantId: null,
           action: 'workspace.app.launched',
           level: 'info',
           actorUserId: null,
@@ -698,6 +803,7 @@ describe('admin routes', () => {
         }
       );
       expect(response.json().data.appliedFilters).toMatchObject({
+        scope: 'tenant',
         action: 'workspace.app.launched',
         level: 'info',
         traceId: 'trace-123',
@@ -707,6 +813,99 @@ describe('admin routes', () => {
       });
     } finally {
       await app.close();
+    }
+  });
+
+  it('rejects platform audit scope for tenant admins and passes tenant filters for root admins', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Tenant Admin',
+    });
+    authService.register({
+      email: 'root-admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Root Admin',
+    });
+
+    const tenantAdminLogin = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+    const rootAdminLogin = authService.login({
+      email: 'root-admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(tenantAdminLogin.ok).toBe(true);
+    expect(rootAdminLogin.ok).toBe(true);
+
+    if (!tenantAdminLogin.ok || !rootAdminLogin.ok) {
+      throw new Error('expected admin logins to succeed');
+    }
+
+    const tenantAdminService = createAdminService(true, false);
+    const rootAdminService = createAdminService(true, true);
+    const tenantApp = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService: tenantAdminService,
+    });
+    const rootApp = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService: rootAdminService,
+    });
+
+    try {
+      const forbiddenResponse = await tenantApp.inject({
+        method: 'GET',
+        url: '/admin/audit?scope=platform',
+        headers: {
+          authorization: `Bearer ${tenantAdminLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(forbiddenResponse.statusCode).toBe(403);
+      expect(tenantAdminService.listAuditForUser).not.toHaveBeenCalled();
+
+      const allowedResponse = await rootApp.inject({
+        method: 'GET',
+        url: '/admin/audit?scope=platform&tenantId=tenant-acme-platform&entityType=tenant',
+        headers: {
+          authorization: `Bearer ${rootAdminLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(allowedResponse.statusCode).toBe(200);
+      expect(rootAdminService.listAuditForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'root-admin@iflabx.com',
+        }),
+        {
+          scope: 'platform',
+          tenantId: 'tenant-acme-platform',
+          action: null,
+          level: null,
+          actorUserId: null,
+          entityType: 'tenant',
+          traceId: null,
+          runId: null,
+          conversationId: null,
+          occurredAfter: null,
+          occurredBefore: null,
+          payloadMode: 'masked',
+          limit: null,
+        }
+      );
+      expect(allowedResponse.json().data.capabilities).toEqual({
+        canReadAdmin: true,
+        canReadPlatformAdmin: true,
+      });
+      expect(allowedResponse.json().data.scope).toBe('platform');
+    } finally {
+      await Promise.all([tenantApp.close(), rootApp.close()]);
     }
   });
 
@@ -848,6 +1047,8 @@ describe('admin routes', () => {
           email: 'admin@iflabx.com',
         }),
         {
+          scope: 'tenant',
+          tenantId: null,
           action: 'workspace.app.launched',
           level: null,
           actorUserId: null,
@@ -866,6 +1067,8 @@ describe('admin routes', () => {
           format: 'json',
           eventCount: 1,
           appliedFilters: {
+            scope: 'tenant',
+            tenantId: null,
             action: 'workspace.app.launched',
             payloadMode: 'masked',
             limit: 1000,

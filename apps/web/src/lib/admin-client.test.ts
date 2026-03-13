@@ -6,6 +6,7 @@ import {
   exportAdminAudit,
   fetchAdminApps,
   fetchAdminAudit,
+  fetchAdminContext,
   fetchAdminGroups,
   fetchAdminTenants,
   fetchAdminUsers,
@@ -19,9 +20,21 @@ afterEach(() => {
 });
 
 describe('admin client', () => {
-  it('loads admin users and platform tenants through the same-origin gateway proxy', async () => {
+  it('loads admin context, users and platform tenants through the same-origin gateway proxy', async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-12T00:00:00.000Z',
+            capabilities: {
+              canReadAdmin: true,
+              canReadPlatformAdmin: true,
+            },
+          },
+        }),
+      })
       .mockResolvedValueOnce({
         json: async () => ({
           ok: true,
@@ -42,24 +55,40 @@ describe('admin client', () => {
       });
     vi.stubGlobal('fetch', fetchMock);
 
-    const [usersResult, tenantsResult] = await Promise.all([
+    const [contextResult, usersResult, tenantsResult] = await Promise.all([
+      fetchAdminContext('session-123'),
       fetchAdminUsers('session-123'),
       fetchAdminTenants('session-123'),
     ]);
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/admin/users', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/admin/context', {
       method: 'GET',
       headers: {
         authorization: 'Bearer session-123',
       },
       cache: 'no-store',
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/admin/tenants', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/admin/users', {
       method: 'GET',
       headers: {
         authorization: 'Bearer session-123',
       },
       cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/gateway/admin/tenants', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(contextResult).toMatchObject({
+      ok: true,
+      data: {
+        capabilities: {
+          canReadPlatformAdmin: true,
+        },
+      },
     });
     expect(usersResult).toMatchObject({
       ok: true,
@@ -101,8 +130,15 @@ describe('admin client', () => {
           ok: true,
           data: {
             generatedAt: '2026-03-12T00:00:00.000Z',
+            capabilities: {
+              canReadAdmin: true,
+              canReadPlatformAdmin: false,
+            },
+            scope: 'tenant',
             appliedFilters: {},
             countsByAction: [],
+            countsByTenant: [],
+            highRiskEventCount: 0,
             events: [],
           },
         }),
@@ -163,9 +199,13 @@ describe('admin client', () => {
         data: {
           generatedAt: '2026-03-12T00:00:00.000Z',
           appliedFilters: {
+            scope: 'platform',
+            tenantId: 'tenant-acme',
             action: 'workspace.app.launched',
           },
           countsByAction: [],
+          countsByTenant: [],
+          highRiskEventCount: 0,
           events: [],
         },
       }),
@@ -173,6 +213,8 @@ describe('admin client', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await fetchAdminAudit('session-123', {
+      scope: 'platform',
+      tenantId: 'tenant-acme',
       action: 'workspace.app.launched',
       level: 'info',
       traceId: 'trace-123',
@@ -182,7 +224,7 @@ describe('admin client', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/gateway/admin/audit?action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&payloadMode=raw&limit=25',
+      '/api/gateway/admin/audit?scope=platform&tenantId=tenant-acme&action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&payloadMode=raw&limit=25',
       {
         method: 'GET',
         headers: {
@@ -210,13 +252,15 @@ describe('admin client', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await exportAdminAudit('session-123', 'csv', {
+      scope: 'platform',
+      tenantId: 'tenant-acme',
       action: 'workspace.app.launched',
       traceId: 'trace-123',
       payloadMode: 'masked',
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/gateway/admin/audit/export?action=workspace.app.launched&traceId=trace-123&payloadMode=masked&format=csv',
+      '/api/gateway/admin/audit/export?scope=platform&tenantId=tenant-acme&action=workspace.app.launched&traceId=trace-123&payloadMode=masked&format=csv',
       {
         method: 'GET',
         headers: {

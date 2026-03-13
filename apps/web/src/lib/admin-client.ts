@@ -3,6 +3,7 @@ import type {
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
   AdminAppsResponse,
+  AdminContextResponse,
   AdminAuditExportFormat,
   AdminAuditExportMetadata,
   AdminAuditFilters,
@@ -47,6 +48,14 @@ async function fetchAdminJson<TSuccess>(
 
 function buildAdminAuditQuery(filters: AdminAuditFilters = {}) {
   const params = new URLSearchParams();
+
+  if (filters.scope) {
+    params.set('scope', filters.scope);
+  }
+
+  if (filters.tenantId) {
+    params.set('tenantId', filters.tenantId);
+  }
 
   if (filters.action) {
     params.set('action', filters.action);
@@ -111,6 +120,12 @@ export async function fetchAdminUsers(
   sessionToken: string
 ): Promise<AdminUsersResponse | AdminErrorResponse> {
   return fetchAdminJson<AdminUsersResponse>('/admin/users', sessionToken);
+}
+
+export async function fetchAdminContext(
+  sessionToken: string
+): Promise<AdminContextResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminContextResponse>('/admin/context', sessionToken);
 }
 
 export async function fetchAdminTenants(

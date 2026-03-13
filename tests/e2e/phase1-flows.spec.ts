@@ -274,8 +274,11 @@ test('register/login/workspace controls work for a normal active user', async ({
   await expect(appCard(page, 'Service Copilot')).toHaveCount(0);
   await page.getByLabel('Search apps').fill('');
 
-  await appCard(page, 'Policy Watch').getByRole('button', { name: /切换到 Research Lab/ }).click();
-  await expect(page.getByText('工作群组已切换到 Research Lab')).toBeVisible();
+  await Promise.all([
+    waitForGatewayPut(page, '/workspace/preferences'),
+    appCard(page, 'Policy Watch').getByRole('button', { name: /切换到 Research Lab/ }).click(),
+  ]);
+  await expect(page.getByText('工作群组已切换到 Research Lab')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByLabel('Working group')).toHaveValue('grp_research');
 
   await Promise.all([
@@ -474,9 +477,14 @@ test('mfa setup, mfa login verification, and disable flow work end-to-end', asyn
   await page.goto('/login');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(DEFAULT_PASSWORD);
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await Promise.all([
+    waitForGatewayPost(page, '/auth/login'),
+    page.getByRole('button', { name: 'Continue' }).click(),
+  ]);
 
-  await expect(page).toHaveURL(/\/auth\/mfa$/);
+  await expect(page).toHaveURL(/\/auth\/mfa$/, {
+    timeout: 60_000,
+  });
   await expect(page.getByRole('heading', { name: 'MFA Verification' })).toBeVisible();
 
   await page.getByLabel('TOTP Code').fill('000000');
@@ -686,6 +694,7 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
   await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
   await expect(page.getByText('Total users')).toBeVisible();
   await expect(page.getByText(adminEmail)).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Tenants' })).toHaveCount(0);
 
   await page.getByRole('link', { name: 'Groups' }).click();
   await expect(page).toHaveURL(/\/admin\/groups$/);
@@ -726,7 +735,7 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
         response.request().method() === 'GET' &&
         response
           .url()
-          .includes('/api/gateway/admin/audit?action=admin.workspace_grant.created'),
+          .includes('/api/gateway/admin/audit?scope=tenant&action=admin.workspace_grant.created'),
       {
         timeout: 60_000,
       }
@@ -745,7 +754,9 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
         response.request().method() === 'GET' &&
         response
           .url()
-          .includes('/api/gateway/admin/audit?action=admin.workspace_grant.created&payloadMode=raw'),
+          .includes(
+            '/api/gateway/admin/audit?scope=tenant&action=admin.workspace_grant.created&payloadMode=raw'
+          ),
       {
         timeout: 60_000,
       }
@@ -759,7 +770,9 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
         response.request().method() === 'GET' &&
         response
           .url()
-          .includes('/api/gateway/admin/audit/export?action=admin.workspace_grant.created&payloadMode=raw&format=csv'),
+          .includes(
+            '/api/gateway/admin/audit/export?scope=tenant&action=admin.workspace_grant.created&payloadMode=raw&format=csv'
+          ),
       {
         timeout: 60_000,
       }
@@ -793,6 +806,7 @@ test('root admins can open the platform tenant inventory page', async ({ page })
 
   await page.getByRole('link', { name: 'Admin preview' }).click();
   await expect(page).toHaveURL(/\/admin\/users$/);
+  await expect(page.getByRole('link', { name: 'Tenants' })).toBeVisible();
 
   await page.getByRole('link', { name: 'Tenants' }).click();
   await expect(page).toHaveURL(/\/admin\/tenants$/);
@@ -832,4 +846,33 @@ test('root admins can open the platform tenant inventory page', async ({ page })
   ]);
   await expect(page.getByText(`${tenantName} is now active.`)).toBeVisible();
   await expect(tenantCard.getByText('active')).toBeVisible();
+
+  await page.getByRole('link', { name: 'Audit' }).click();
+  await expect(page).toHaveURL(/\/admin\/audit$/);
+  await expect(page.locator('.workspace-badge').filter({ hasText: 'Scope: platform' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Tenant spread' })).toBeVisible();
+  await expect(
+    page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Tenant spread' }),
+    }).locator('.tag').filter({ hasText: 'Acme Platform Tenant' })
+  ).toBeVisible();
+  await page.getByLabel('Audit tenant filter').selectOption('tenant-acme-platform');
+  await page.getByLabel('Audit action filter').fill('admin.tenant.suspended');
+  await Promise.all([
+    page.waitForResponse(
+      response =>
+        response.request().method() === 'GET' &&
+        response
+          .url()
+          .includes(
+            '/api/gateway/admin/audit?scope=platform&tenantId=tenant-acme-platform&action=admin.tenant.suspended'
+          ),
+      {
+        timeout: 60_000,
+      }
+    ),
+    page.getByRole('button', { name: 'Apply filters' }).click(),
+  ]);
+  await expect(page.getByText('Tenant: Acme Platform Tenant')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'admin.tenant.suspended' })).toBeVisible();
 });

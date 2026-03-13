@@ -3,6 +3,7 @@ import type {
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
   AdminAppsResponse,
+  AdminContextResponse,
   AdminAuditExportFormat,
   AdminAuditExportJsonBundle,
   AdminAuditExportMetadata,
@@ -81,6 +82,10 @@ function isAuditPayloadMode(value: unknown): value is AdminAuditPayloadMode {
   return value === 'masked' || value === 'raw';
 }
 
+function isAuditScope(value: unknown): value is NonNullable<AdminAuditFilters['scope']> {
+  return value === 'tenant' || value === 'platform';
+}
+
 function isTenantStatus(value: unknown): value is AdminTenantStatusUpdateRequest['status'] {
   return value === 'active' || value === 'suspended';
 }
@@ -123,6 +128,8 @@ function buildAuditExportCsv(bundle: AdminAuditExportJsonBundle) {
   const header = [
     'event_id',
     'occurred_at',
+    'tenant_id',
+    'tenant_name',
     'action',
     'level',
     'actor_user_id',
@@ -148,6 +155,8 @@ function buildAuditExportCsv(bundle: AdminAuditExportJsonBundle) {
     [
       event.id,
       event.occurredAt,
+      event.tenantId,
+      event.tenantName,
       event.action,
       event.level,
       event.actorUserId,
@@ -190,6 +199,17 @@ function parseAuditFilters(query: Record<string, unknown>):
   const occurredAfter = readQueryString(query.occurredAfter);
   const occurredBefore = readQueryString(query.occurredBefore);
   const payloadMode = readQueryString(query.payloadMode);
+  const scope = readQueryString(query.scope);
+
+  if (scope && !isAuditScope(scope)) {
+    return {
+      ok: false,
+      response: buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Audit filters require scope to be tenant or platform.'
+      ),
+    };
+  }
 
   if (level && !isAuditLevel(level)) {
     return {
@@ -224,6 +244,7 @@ function parseAuditFilters(query: Record<string, unknown>):
   const normalizedLevel = level ? (level as AuthAuditLevel) : null;
   const normalizedEntityType = entityType ? (entityType as AuthAuditEntityType) : null;
   const normalizedPayloadMode = payloadMode ? (payloadMode as AdminAuditPayloadMode) : null;
+  const normalizedScope = scope ? (scope as NonNullable<AdminAuditFilters['scope']>) : null;
 
   let parsedLimit: number | null = null;
 
@@ -286,6 +307,8 @@ function parseAuditFilters(query: Record<string, unknown>):
   return {
     ok: true,
     filters: {
+      scope: normalizedScope,
+      tenantId: readQueryString(query.tenantId) || null,
       action: readQueryString(query.action) || null,
       level: normalizedLevel,
       actorUserId: readQueryString(query.actorUserId) || null,
@@ -418,6 +441,7 @@ async function recordAdminReadEvent(
     user: AuthUser;
     ipAddress: string | null;
     resource:
+      | '/admin/context'
       | '/admin/apps'
       | '/admin/audit'
       | '/admin/audit/export'
@@ -443,6 +467,13 @@ async function recordAdminReadEvent(
       exportFormat: input.exportFormat ?? null,
     },
   });
+}
+
+async function resolveAdminCapabilities(adminService: AdminService, user: AuthUser) {
+  return {
+    canReadAdmin: true,
+    canReadPlatformAdmin: await adminService.canReadPlatformAdminForUser(user),
+  };
 }
 
 async function recordGrantRejectedEvent(
@@ -643,6 +674,35 @@ export async function registerAdminRoutes(
     return response;
   });
 
+  app.get('/admin/context', async (request, reply) => {
+    const session = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const response: AdminContextResponse = {
+      ok: true,
+      data: {
+        generatedAt: new Date().toISOString(),
+        capabilities: await resolveAdminCapabilities(adminService, session.user),
+      },
+    };
+
+    await recordAdminReadEvent(auditService, {
+      user: session.user,
+      ipAddress: request.ip,
+      resource: '/admin/context',
+    });
+
+    return response;
+  });
+
   app.get('/admin/users', async (request, reply) => {
     const session = await requireTenantAdminSession(
       authService,
@@ -752,8 +812,31 @@ export async function registerAdminRoutes(
       return parsedFilters.response;
     }
 
+    const capabilities = await resolveAdminCapabilities(adminService, session.user);
+
+    if (parsedFilters.filters.scope === 'platform' && !capabilities.canReadPlatformAdmin) {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Root admin access is required to query platform audit scope.'
+      );
+    }
+
+    if (
+      parsedFilters.filters.tenantId &&
+      !capabilities.canReadPlatformAdmin &&
+      parsedFilters.filters.tenantId !== session.user.tenantId
+    ) {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Tenant admins can only query audit events for their own tenant.'
+      );
+    }
+
     const resolvedFilters: AdminAuditFilters = {
       ...parsedFilters.filters,
+      scope: parsedFilters.filters.scope ?? 'tenant',
       payloadMode: parsedFilters.filters.payloadMode ?? 'masked',
     };
     const auditData = await adminService.listAuditForUser(session.user, resolvedFilters);
@@ -761,8 +844,12 @@ export async function registerAdminRoutes(
       ok: true,
       data: {
         generatedAt: new Date().toISOString(),
+        capabilities,
+        scope: resolvedFilters.scope ?? 'tenant',
         appliedFilters: resolvedFilters,
         countsByAction: auditData.countsByAction,
+        countsByTenant: auditData.countsByTenant,
+        highRiskEventCount: auditData.highRiskEventCount,
         events: auditData.events,
       },
     };
@@ -808,8 +895,31 @@ export async function registerAdminRoutes(
       return parsedFilters.response;
     }
 
+    const capabilities = await resolveAdminCapabilities(adminService, session.user);
+
+    if (parsedFilters.filters.scope === 'platform' && !capabilities.canReadPlatformAdmin) {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Root admin access is required to export platform audit scope.'
+      );
+    }
+
+    if (
+      parsedFilters.filters.tenantId &&
+      !capabilities.canReadPlatformAdmin &&
+      parsedFilters.filters.tenantId !== session.user.tenantId
+    ) {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Tenant admins can only export audit events for their own tenant.'
+      );
+    }
+
     const exportFilters: AdminAuditFilters = {
       ...parsedFilters.filters,
+      scope: parsedFilters.filters.scope ?? 'tenant',
       payloadMode: parsedFilters.filters.payloadMode ?? 'masked',
       limit: parsedFilters.filters.limit ?? 1000,
     };

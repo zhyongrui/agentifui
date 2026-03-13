@@ -712,7 +712,14 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - `PUT /admin/tenants/:tenantId/status` 支持 suspend/reactivate
   - tenant suspend 通过 auth service 的 effective user status 映射拦截登录、MFA、workspace 访问
   - root admin 不能在当前会话里 suspend 自己所在 tenant
-- `R13-A5` / `R13-A6` 仍待完成，是当前 Phase 1 最后一个激活块
+- `R13-A5` 已完成：
+  - `/admin/audit` 已支持 `scope=tenant|platform`、`tenantId`、platform tenant spread 和 high-risk summary
+  - root admin 可查看多租户 platform audit，tenant admin 仍被限制在 tenant scope
+- `R13-A6` 已完成：
+  - `/admin/context` 已明确返回 `canReadPlatformAdmin`
+  - admin 导航已按 capability 隐藏/展示 `Tenants`
+  - tenant admin 请求 `scope=platform` 或跨 tenant 审计过滤会被明确拒绝
+- `R13-A` 已全部完成，Phase 1 的功能主任务已收口
 
 #### R13-B `S3-3` 稳定公网入口与部署硬化
 
@@ -740,16 +747,20 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 
 当前默认按下面顺序执行，不再每轮重新定义优先级：
 
-1. `R13-A5` / `R13-A6` 平台审计页与 root_admin 权限边界
-2. `Phase 1` 收尾回归、部署复核与遗留文档清理
-3. 新阶段长期计划整理
+1. `Phase 1` 收尾回归、部署复核与遗留文档清理
+2. `Phase 2` 长期任务板整理与激活队列冻结
+3. `Phase 2` 首个实现批次
 
-一旦 `R13-A` 全部完成，就意味着当前 `PHASE1` 任务板收口，下一轮应立即开启新的阶段性规划，而不是停在“已完成”状态。
+当前 `R13-A` 已全部完成，意味着 `PHASE1` 功能任务板已经收口。后续默认流程不再停在“已完成”，而是立即进入：
+
+1. Phase 1 收尾与发布复核
+2. Phase 2 长期计划冻结
+3. Phase 2 连续开发
 
 如果公网入口或部署环境被阻塞，则按下面的降级顺序切换：
 
-1. `R13-A5` / `R13-A6`
-2. `Phase 1` 收尾回归与发布复核
+1. `Phase 1` 收尾回归与发布复核
+2. `Phase 2` 长期计划整理
 
 ## 13. 2026-03-12 进度快照
 
@@ -810,6 +821,11 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - `/admin/audit` 已支持 query 校验与过滤
   - launch 审计已带 `traceId` / `runId` / `conversationId`
   - `/admin/audit?action=...` 已在浏览器回归中验证
+- `S3-3` 已完成平台 admin 与 platform audit 闭环：
+  - `/admin/tenants` 已支持 create / suspend / reactivate
+  - `/admin/context` 已显式区分 root_admin 与 tenant_admin capability
+  - `/admin/audit` 已支持 platform scope、tenant spread、high-risk 统计和 tenant filter
+  - 浏览器回归已覆盖 tenant admin 导航收敛、root admin platform audit 和 tenant lifecycle
 - `S2` 已完成第一版附件主链路闭环：
   - shared 合同已新增 attachment 元数据、大小/类型限制和 upload DTO
   - Gateway 已具备本地文件系统存储抽象和 `POST /workspace/conversations/:conversationId/uploads`
@@ -840,6 +856,9 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - GitHub Actions 已拆成 typecheck/build/db-validate/unit/e2e
   - gateway 已暴露 `GET /metrics` 并记录结构化 `request.completed` 日志
   - smoke 脚本与发布检查表已可直接执行
+- `Phase 1` 当前状态：
+  - 功能任务已全部完成
+  - 当前仅剩收尾回归、部署复核和下一阶段长期计划冻结
 
 ## 14. 关联文档
 

@@ -7,6 +7,7 @@ import type {
   AdminAuditEventSummary,
   AdminAuditFilters,
   AdminAuditPayloadMode,
+  AdminAuditTenantCount,
   AdminTenantBootstrapInvitation,
   AdminTenantSummary,
   AdminErrorCode,
@@ -127,9 +128,13 @@ type AdminService = {
     filters?: AdminAuditFilters
   ): Promise<{
     countsByAction: AdminAuditActionCount[];
+    countsByTenant: AdminAuditTenantCount[];
+    highRiskEventCount: number;
     events: AdminAuditEventSummary[];
   }> | {
     countsByAction: AdminAuditActionCount[];
+    countsByTenant: AdminAuditTenantCount[];
+    highRiskEventCount: number;
     events: AdminAuditEventSummary[];
   };
 };
@@ -193,6 +198,7 @@ function buildInMemoryAuditEvent(
     id?: string;
     level?: AuthAuditEvent['level'];
     occurredAtOffsetMs?: number;
+    tenantName?: string | null;
     tenantId: string;
   }
 ): AdminAuditEventSummary {
@@ -205,6 +211,7 @@ function buildInMemoryAuditEventWithMode(
     id?: string;
     level?: AuthAuditEvent['level'];
     occurredAtOffsetMs?: number;
+    tenantName?: string | null;
     tenantId: string;
   },
   payloadMode: AdminAuditPayloadMode
@@ -215,6 +222,7 @@ function buildInMemoryAuditEventWithMode(
   return {
     id: input.id ?? randomUUID(),
     tenantId: input.tenantId,
+    tenantName: input.tenantName ?? formatTenantName(input.tenantId),
     actorUserId: input.actorUserId,
     action: input.action,
     level: input.level ?? 'info',
@@ -342,6 +350,8 @@ function buildAppSummary(
 
 function normalizeAuditFilters(filters: AdminAuditFilters = {}): AdminAuditFilters {
   return {
+    scope: filters.scope ?? 'tenant',
+    tenantId: filters.tenantId?.trim() || null,
     action: filters.action?.trim() || null,
     level: filters.level ?? null,
     actorUserId: filters.actorUserId?.trim() || null,
@@ -357,6 +367,10 @@ function normalizeAuditFilters(filters: AdminAuditFilters = {}): AdminAuditFilte
 }
 
 function matchesAuditFilters(event: AdminAuditEventSummary, filters: AdminAuditFilters) {
+  if (filters.tenantId && event.tenantId !== filters.tenantId) {
+    return false;
+  }
+
   if (filters.action && event.action !== filters.action) {
     return false;
   }
@@ -394,6 +408,61 @@ function matchesAuditFilters(event: AdminAuditEventSummary, filters: AdminAuditF
   }
 
   return true;
+}
+
+function isHighRiskAuditEvent(event: AdminAuditEventSummary) {
+  return event.level === 'critical' || event.payloadInspection.highRiskMatchCount > 0;
+}
+
+function buildAuditQueryResult(events: AdminAuditEventSummary[], filters: AdminAuditFilters) {
+  const limit =
+    typeof filters.limit === 'number' && filters.limit > 0 ? filters.limit : events.length;
+  const countsByAction = [...events].reduce<AdminAuditActionCount[]>((counts, event) => {
+    const currentCount = counts.find(count => count.action === event.action);
+
+    if (currentCount) {
+      currentCount.count += 1;
+      return counts;
+    }
+
+    counts.push({
+      action: event.action,
+      count: 1,
+    });
+
+    return counts;
+  }, []);
+  const countsByTenant = [...events].reduce<AdminAuditTenantCount[]>((counts, event) => {
+    const tenantId = event.tenantId ?? 'tenant-unknown';
+    const tenantName = event.tenantName ?? event.tenantId ?? 'Unknown tenant';
+    const currentCount = counts.find(count => count.tenantId === tenantId);
+
+    if (currentCount) {
+      currentCount.count += 1;
+      return counts;
+    }
+
+    counts.push({
+      tenantId,
+      tenantName,
+      count: 1,
+    });
+
+    return counts;
+  }, []);
+
+  return {
+    countsByAction,
+    countsByTenant: countsByTenant.sort((left, right) => {
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+
+      return left.tenantName.localeCompare(right.tenantName);
+    }),
+    highRiskEventCount: events.filter(isHighRiskAuditEvent).length,
+    events: events.slice(0, limit),
+  };
 }
 
 export function createAdminService(): AdminService {
@@ -729,7 +798,7 @@ export function createAdminService(): AdminService {
     },
     listAuditForUser(user, filters = {}) {
       const normalizedFilters = normalizeAuditFilters(filters);
-      const events = [
+      const tenantEvents = [
         buildInMemoryAuditEventWithMode({
           tenantId: user.tenantId,
           actorUserId: user.id,
@@ -765,33 +834,51 @@ export function createAdminService(): AdminService {
           level: 'warning',
           occurredAtOffsetMs: 50 * 60_000,
         }, normalizedFilters.payloadMode ?? 'masked'),
-      ].filter(event => matchesAuditFilters(event, normalizedFilters));
+      ];
+      const platformEvents = canReadPlatformAdmin(user.email)
+        ? [
+            buildInMemoryAuditEventWithMode(
+              {
+                tenantId: 'tenant-acme-platform',
+                tenantName: 'Acme Platform',
+                actorUserId: user.id,
+                action: 'admin.tenant.created',
+                entityType: 'tenant',
+                entityId: 'tenant-acme-platform',
+                payload: {
+                  tenantSlug: 'acme-platform',
+                  bootstrapAdminEmail: 'owner@acme.example',
+                },
+                occurredAtOffsetMs: 10 * 60_000,
+              },
+              normalizedFilters.payloadMode ?? 'masked'
+            ),
+            buildInMemoryAuditEventWithMode(
+              {
+                tenantId: 'tenant-acme-platform',
+                tenantName: 'Acme Platform',
+                actorUserId: user.id,
+                action: 'admin.tenant.suspended',
+                entityType: 'tenant',
+                entityId: 'tenant-acme-platform',
+                payload: {
+                  reason: 'Billing hold',
+                  traceId: 'trace-platform-1',
+                },
+                level: 'critical',
+                occurredAtOffsetMs: 2 * 60_000,
+              },
+              normalizedFilters.payloadMode ?? 'masked'
+            ),
+          ]
+        : [];
+      const candidateEvents =
+        normalizedFilters.scope === 'platform' && canReadPlatformAdmin(user.email)
+          ? [...tenantEvents, ...platformEvents]
+          : tenantEvents;
+      const events = candidateEvents.filter(event => matchesAuditFilters(event, normalizedFilters));
 
-      const limit =
-        typeof normalizedFilters.limit === 'number' && normalizedFilters.limit > 0
-          ? normalizedFilters.limit
-          : events.length;
-      const limitedEvents = events.slice(0, limit);
-      const countsByAction = [...events].reduce<AdminAuditActionCount[]>((counts, event) => {
-        const currentCount = counts.find(count => count.action === event.action);
-
-        if (currentCount) {
-          currentCount.count += 1;
-          return counts;
-        }
-
-        counts.push({
-          action: event.action,
-          count: 1,
-        });
-
-        return counts;
-      }, []);
-
-      return {
-        countsByAction,
-        events: limitedEvents,
-      };
+      return buildAuditQueryResult(events, normalizedFilters);
     },
   };
 }

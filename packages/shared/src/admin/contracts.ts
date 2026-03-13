@@ -81,6 +81,19 @@ export type AdminTenantsResponse = {
   };
 };
 
+export type AdminViewerCapabilities = {
+  canReadAdmin: boolean;
+  canReadPlatformAdmin: boolean;
+};
+
+export type AdminContextResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    capabilities: AdminViewerCapabilities;
+  };
+};
+
 export type AdminTenantBootstrapInvitation = {
   invitationId: string;
   invitedUserId: string;
@@ -203,7 +216,17 @@ export type AdminAuditActionCount = {
   count: number;
 };
 
+export type AdminAuditTenantCount = {
+  tenantId: string;
+  tenantName: string;
+  count: number;
+};
+
+export type AdminAuditScope = 'tenant' | 'platform';
+
 export type AdminAuditFilters = {
+  scope?: AdminAuditScope | null;
+  tenantId?: string | null;
   action?: string | null;
   level?: AuthAuditLevel | null;
   actorUserId?: string | null;
@@ -250,6 +273,7 @@ export type AdminAuditPayloadInspection = {
 };
 
 export type AdminAuditEventSummary = AuthAuditEvent & {
+  tenantName: string | null;
   context: AdminAuditEventContext;
   payloadInspection: AdminAuditPayloadInspection;
 };
@@ -273,8 +297,12 @@ export type AdminAuditResponse = {
   ok: true;
   data: {
     generatedAt: string;
+    capabilities: AdminViewerCapabilities;
+    scope: AdminAuditScope;
     appliedFilters: AdminAuditFilters;
     countsByAction: AdminAuditActionCount[];
+    countsByTenant: AdminAuditTenantCount[];
+    highRiskEventCount: number;
     events: AdminAuditEventSummary[];
   };
 };

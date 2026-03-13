@@ -8,6 +8,7 @@ import type {
   AdminAuditEventSummary,
   AdminAuditFilters,
   AdminAuditPayloadMode,
+  AdminAuditTenantCount,
   AdminTenantSummary,
   AdminErrorCode,
   AdminGroupSummary,
@@ -177,6 +178,7 @@ type AuditEventRow = {
   occurred_at: Date | string;
   payload: Record<string, unknown> | string;
   tenant_id: string | null;
+  tenant_name: string | null;
 };
 
 type AuditCountRow = {
@@ -330,6 +332,7 @@ function toAuditEvent(
 
   return {
     ...event,
+    tenantName: row.tenant_name,
     context: buildAuditContext(event),
     payloadInspection: payloadResult.inspection,
   };
@@ -512,6 +515,8 @@ async function seedTenantWorkspaceResources(database: DatabaseClient, tenantId: 
 
 function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
   return {
+    scope: filters.scope ?? 'tenant',
+    tenantId: filters.tenantId?.trim() || null,
     action: filters.action?.trim() || null,
     level: filters.level ?? null,
     actorUserId: filters.actorUserId?.trim() || null,
@@ -527,6 +532,10 @@ function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
         ? filters.limit
         : 40,
   };
+}
+
+function isHighRiskAuditEvent(event: AdminAuditEventSummary) {
+  return event.level === 'critical' || event.payloadInspection.highRiskMatchCount > 0;
 }
 
 function toAdminAppUserGrant(row: AppUserGrantRow): AdminAppUserGrant {
@@ -1467,33 +1476,45 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
     },
     async listAuditForUser(user, filters = {}) {
       const normalizedFilters = normalizeAuditFilters(filters);
+      const roleIds = await ensureDefaultRoles(database, user);
+      const canReadPlatformAdmin = roleIds.includes('root_admin');
+      const isPlatformScope = canReadPlatformAdmin && normalizedFilters.scope === 'platform';
+      const tenantIdFilter = canReadPlatformAdmin
+        ? normalizedFilters.tenantId
+        : user.tenantId;
       const rows = await database<AuditEventRow[]>`
         select
-          id,
-          tenant_id,
-          actor_user_id,
-          action,
-          level,
-          entity_type,
-          entity_id,
-          ip_address,
-          payload,
-          occurred_at
-        from audit_events
-        where tenant_id = ${user.tenantId}
-          and (${normalizedFilters.action}::varchar is null or action = ${normalizedFilters.action})
-          and (${normalizedFilters.level}::varchar is null or level = ${normalizedFilters.level})
-          and (${normalizedFilters.actorUserId}::varchar is null or actor_user_id = ${normalizedFilters.actorUserId})
-          and (${normalizedFilters.entityType}::varchar is null or entity_type = ${normalizedFilters.entityType})
+          ae.id,
+          ae.tenant_id,
+          t.name as tenant_name,
+          ae.actor_user_id,
+          ae.action,
+          ae.level,
+          ae.entity_type,
+          ae.entity_id,
+          ae.ip_address,
+          ae.payload,
+          ae.occurred_at
+        from audit_events ae
+        left join tenants t on t.id = ae.tenant_id
+        where (
+            ${isPlatformScope}
+            or ae.tenant_id = ${tenantIdFilter ?? user.tenantId}
+          )
+          and (${tenantIdFilter}::varchar is null or ae.tenant_id = ${tenantIdFilter})
+          and (${normalizedFilters.action}::varchar is null or ae.action = ${normalizedFilters.action})
+          and (${normalizedFilters.level}::varchar is null or ae.level = ${normalizedFilters.level})
+          and (${normalizedFilters.actorUserId}::varchar is null or ae.actor_user_id = ${normalizedFilters.actorUserId})
+          and (${normalizedFilters.entityType}::varchar is null or ae.entity_type = ${normalizedFilters.entityType})
           and (
             ${normalizedFilters.occurredAfter}::timestamptz is null
-            or occurred_at >= ${normalizedFilters.occurredAfter}::timestamptz
+            or ae.occurred_at >= ${normalizedFilters.occurredAfter}::timestamptz
           )
           and (
             ${normalizedFilters.occurredBefore}::timestamptz is null
-            or occurred_at <= ${normalizedFilters.occurredBefore}::timestamptz
+            or ae.occurred_at <= ${normalizedFilters.occurredBefore}::timestamptz
           )
-        order by occurred_at desc
+        order by ae.occurred_at desc
       `;
 
       const filteredEvents = rows
@@ -1516,11 +1537,52 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
 
           return true;
         });
+      const tenantNameById = new Map<string, string>();
 
-      const countsByAction = [...filteredEvents].reduce<Map<string, number>>((counts, event) => {
+      if (filteredEvents.some(event => event.tenantId && !event.tenantName)) {
+        const tenantSummaries = await listTenantSummaries(database);
+
+        for (const tenant of tenantSummaries) {
+          tenantNameById.set(tenant.id, tenant.name);
+        }
+      }
+
+      const hydratedEvents = filteredEvents.map(event => {
+        if (!event.tenantId || event.tenantName) {
+          return event;
+        }
+
+        return {
+          ...event,
+          tenantName: tenantNameById.get(event.tenantId) ?? null,
+        };
+      });
+
+      const countsByAction = [...hydratedEvents].reduce<Map<string, number>>((counts, event) => {
         counts.set(event.action, (counts.get(event.action) ?? 0) + 1);
         return counts;
       }, new Map<string, number>());
+      const countsByTenant = [...hydratedEvents].reduce<Map<string, AdminAuditTenantCount>>(
+        (counts, event) => {
+          const tenantId = event.tenantId ?? 'tenant-unknown';
+          const tenantName = event.tenantName ?? event.tenantId ?? 'Unknown tenant';
+          const currentCount = counts.get(tenantId);
+
+          if (currentCount) {
+            currentCount.count += 1;
+            return counts;
+          }
+
+          counts.set(tenantId, {
+            tenantId,
+            tenantName,
+            count: 1,
+          });
+
+          return counts;
+        },
+        new Map<string, AdminAuditTenantCount>()
+      );
 
       return {
         countsByAction: [...countsByAction.entries()]
@@ -1535,7 +1597,15 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
 
             return left.action.localeCompare(right.action);
           }),
-        events: filteredEvents.slice(0, normalizedFilters.limit),
+        countsByTenant: [...countsByTenant.values()].sort((left, right) => {
+          if (right.count !== left.count) {
+            return right.count - left.count;
+          }
+
+          return left.tenantName.localeCompare(right.tenantName);
+        }),
+        highRiskEventCount: hydratedEvents.filter(isHighRiskAuditEvent).length,
+        events: hydratedEvents.slice(0, normalizedFilters.limit),
       };
     },
   };

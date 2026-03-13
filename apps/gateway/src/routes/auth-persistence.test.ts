@@ -2250,6 +2250,25 @@ describe.sequential('persistent auth runtime', () => {
           },
         });
 
+        const rootAdminContext = await app.inject({
+          method: 'GET',
+          url: '/admin/context',
+          headers: {
+            authorization: `Bearer ${rootAdminSessionToken}`,
+          },
+        });
+
+        expect(rootAdminContext.statusCode).toBe(200);
+        expect(rootAdminContext.json()).toMatchObject({
+          ok: true,
+          data: {
+            capabilities: {
+              canReadAdmin: true,
+              canReadPlatformAdmin: true,
+            },
+          },
+        });
+
         const runtimeDatabase = createPersistentTestDatabase();
 
         try {
@@ -2326,6 +2345,25 @@ describe.sequential('persistent auth runtime', () => {
         expect(tenantAdminLogin.statusCode).toBe(200);
         const tenantAdminSessionToken = tenantAdminLogin.json().data.sessionToken as string;
 
+        const tenantAdminContext = await app.inject({
+          method: 'GET',
+          url: '/admin/context',
+          headers: {
+            authorization: `Bearer ${tenantAdminSessionToken}`,
+          },
+        });
+
+        expect(tenantAdminContext.statusCode).toBe(200);
+        expect(tenantAdminContext.json()).toMatchObject({
+          ok: true,
+          data: {
+            capabilities: {
+              canReadAdmin: true,
+              canReadPlatformAdmin: false,
+            },
+          },
+        });
+
         const tenantWorkspaceBeforeSuspend = await app.inject({
           method: 'GET',
           url: '/workspace/apps',
@@ -2360,6 +2398,16 @@ describe.sequential('persistent auth runtime', () => {
             status: 'suspended',
           },
         });
+
+        const tenantPlatformAuditWhileScoped = await app.inject({
+          method: 'GET',
+          url: '/admin/audit?scope=platform',
+          headers: {
+            authorization: `Bearer ${tenantAdminSessionToken}`,
+          },
+        });
+
+        expect(tenantPlatformAuditWhileScoped.statusCode).toBe(403);
 
         const tenantWorkspaceAfterSuspend = await app.inject({
           method: 'GET',
@@ -2419,6 +2467,46 @@ describe.sequential('persistent auth runtime', () => {
             status: 'active',
           },
         });
+
+        const platformAuditResponse = await app.inject({
+          method: 'GET',
+          url: '/admin/audit?scope=platform&tenantId=tenant-acme-platform&entityType=tenant',
+          headers: {
+            authorization: `Bearer ${rootAdminSessionToken}`,
+          },
+        });
+
+        expect(platformAuditResponse.statusCode).toBe(200);
+        const platformAuditBody = platformAuditResponse.json() as AdminAuditResponse;
+        expect(platformAuditBody.data.capabilities).toEqual({
+          canReadAdmin: true,
+          canReadPlatformAdmin: true,
+        });
+        expect(platformAuditBody.data.scope).toBe('platform');
+        expect(platformAuditBody.data.countsByTenant).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              tenantId: 'tenant-acme-platform',
+              tenantName: expect.stringContaining('Acme Platform'),
+            }),
+          ])
+        );
+        expect(platformAuditBody.data.events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              tenantId: 'tenant-acme-platform',
+              tenantName: expect.stringContaining('Acme Platform'),
+              action: 'admin.tenant.suspended',
+              entityType: 'tenant',
+            }),
+            expect.objectContaining({
+              tenantId: 'tenant-acme-platform',
+              tenantName: expect.stringContaining('Acme Platform'),
+              action: 'admin.tenant.reactivated',
+              entityType: 'tenant',
+            }),
+          ])
+        );
 
         const tenantWorkspaceAfterReactivate = await app.inject({
           method: 'GET',
