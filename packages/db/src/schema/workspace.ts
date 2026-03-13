@@ -196,6 +196,39 @@ export const runs = pgTable(
   })
 );
 
+export const workspaceUploadedFiles = pgTable(
+  'workspace_uploaded_files',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    conversationId: varchar('conversation_id', { length: 120 })
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    storageProvider: varchar('storage_provider', { length: 32 }).notNull(),
+    storageKey: text('storage_key').notNull(),
+    fileName: varchar('file_name', { length: 255 }).notNull(),
+    contentType: varchar('content_type', { length: 255 }).notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: varchar('sha256', { length: 64 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workspaceUploadedFilesTenantIndex: index('workspace_uploaded_files_tenant_idx').on(table.tenantId),
+    workspaceUploadedFilesUserIndex: index('workspace_uploaded_files_user_idx').on(table.userId),
+    workspaceUploadedFilesConversationIndex: index(
+      'workspace_uploaded_files_conversation_idx'
+    ).on(table.conversationId),
+    workspaceUploadedFilesStorageKeyUnique: uniqueIndex(
+      'workspace_uploaded_files_storage_key_unique'
+    ).on(table.storageKey),
+  })
+);
+
 export const workspaceAppLaunches = pgTable(
   'workspace_app_launches',
   {

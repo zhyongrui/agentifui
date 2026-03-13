@@ -137,6 +137,7 @@ export type ChatGatewayErrorType =
 export type ChatGatewayErrorCode =
   | 'invalid_app_id'
   | 'invalid_conversation_id'
+  | 'invalid_file_id'
   | 'invalid_task_id'
   | 'invalid_messages'
   | 'invalid_token'

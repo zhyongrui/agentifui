@@ -8,6 +8,7 @@ export type GatewayEnv = {
   port: number;
   corsOrigin: boolean | string;
   databaseUrl?: string;
+  uploadsDir?: string;
   betterAuthSecret?: string;
   betterAuthUrl?: string;
   ssoDomainMap: Record<string, string>;
@@ -129,6 +130,7 @@ export function parseGatewayEnv(source: NodeJS.ProcessEnv): GatewayEnv {
         ? source.GATEWAY_CORS_ORIGIN
         : true,
     databaseUrl: source.DATABASE_URL?.trim() || undefined,
+    uploadsDir: source.GATEWAY_UPLOADS_DIR?.trim() || undefined,
     betterAuthSecret: parseBetterAuthSecret(source.BETTER_AUTH_SECRET, nodeEnv),
     betterAuthUrl: source.BETTER_AUTH_URL?.trim() || `http://127.0.0.1:${port}`,
     ssoDomainMap: parseSsoDomainMap(source.GATEWAY_SSO_DOMAINS),

@@ -2,6 +2,7 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationUploadResponse,
   WorkspaceConversationRunsResponse,
   WorkspacePreferencesResponse,
   WorkspaceRunResponse,
@@ -570,6 +571,93 @@ describe('workspace routes', () => {
           details: {
             reason: 'group_switch_required',
           },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('uploads a conversation attachment and enforces type limits', async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Developer',
+    });
+
+    const login = authService.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected active login to succeed');
+    }
+
+    try {
+      const launch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_research',
+        },
+      });
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error('expected launch payload to include a conversation id');
+      }
+
+      const uploadResponse = await app.inject({
+        method: 'POST',
+        url: `/workspace/conversations/${conversationId}/uploads`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          fileName: 'brief.txt',
+          contentType: 'text/plain',
+          base64Data: Buffer.from('Policy changes for research.').toString('base64'),
+        },
+      });
+
+      expect(uploadResponse.statusCode).toBe(200);
+      expect((uploadResponse.json() as WorkspaceConversationUploadResponse).data).toMatchObject({
+        id: expect.stringMatching(/^file_/),
+        fileName: 'brief.txt',
+        contentType: 'text/plain',
+        sizeBytes: 28,
+        uploadedAt: expect.any(String),
+      });
+
+      const blockedUploadResponse = await app.inject({
+        method: 'POST',
+        url: `/workspace/conversations/${conversationId}/uploads`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          fileName: 'script.exe',
+          contentType: 'application/octet-stream',
+          base64Data: Buffer.from('not allowed').toString('base64'),
+        },
+      });
+
+      expect(blockedUploadResponse.statusCode).toBe(409);
+      expect(blockedUploadResponse.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'WORKSPACE_UPLOAD_BLOCKED',
         },
       });
     } finally {

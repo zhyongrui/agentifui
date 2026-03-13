@@ -20,6 +20,7 @@ export const schemaModules = [
   'workspace_user_preferences',
   'conversations',
   'runs',
+  'workspace_uploaded_files',
   'workspace_app_launches',
 ] as const;
 

@@ -1,4 +1,8 @@
-import type { WorkspaceAppLaunchResponse, WorkspaceConversationResponse } from '@agentifui/shared/apps';
+import type {
+  WorkspaceAppLaunchResponse,
+  WorkspaceConversationResponse,
+  WorkspaceRunResponse,
+} from '@agentifui/shared/apps';
 import type {
   ChatCompletionResponse,
   ChatCompletionStopResponse,
@@ -572,6 +576,145 @@ describe('chat routes', () => {
         result: 'success',
         stop_type: 'soft',
       } satisfies ChatCompletionStopResponse);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('binds uploaded workspace attachments onto the conversation transcript and run inputs', async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Developer',
+    });
+
+    const login = authService.login({
+      email: 'developer@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected active login to succeed');
+    }
+
+    try {
+      const launch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_research',
+        },
+      });
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+      const runId = launchBody.data.runId;
+
+      if (!conversationId || !runId) {
+        throw new Error('expected launch payload to include conversation and run ids');
+      }
+
+      const upload = await app.inject({
+        method: 'POST',
+        url: `/workspace/conversations/${conversationId}/uploads`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          fileName: 'brief.txt',
+          contentType: 'text/plain',
+          base64Data: Buffer.from('Policy attachment').toString('base64'),
+        },
+      });
+
+      expect(upload.statusCode).toBe(200);
+      const attachmentId = (upload.json() as { data: { id: string } }).data.id;
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: 'app_policy_watch',
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: 'user',
+              content: 'Review the attachment.',
+            },
+          ],
+          files: [
+            {
+              type: 'local',
+              file_id: attachmentId,
+              transfer_method: 'local_file',
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as ChatCompletionResponse).choices[0]?.message.content).toContain(
+        'Attachments: brief.txt (text/plain, 17 bytes).'
+      );
+
+      const conversationResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversationResponse.statusCode).toBe(200);
+      expect((conversationResponse.json() as WorkspaceConversationResponse).data.messages).toEqual([
+        expect.objectContaining({
+          role: 'user',
+          content: 'Review the attachment.',
+          attachments: [
+            expect.objectContaining({
+              id: attachmentId,
+              fileName: 'brief.txt',
+              contentType: 'text/plain',
+              sizeBytes: 17,
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          role: 'assistant',
+          status: 'completed',
+        }),
+      ]);
+
+      const runResponse = await app.inject({
+        method: 'GET',
+        url: `/workspace/runs/${runId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data.inputs).toMatchObject({
+        attachments: [
+          {
+            id: attachmentId,
+            fileName: 'brief.txt',
+            contentType: 'text/plain',
+            sizeBytes: 17,
+          },
+        ],
+      });
     } finally {
       await app.close();
     }

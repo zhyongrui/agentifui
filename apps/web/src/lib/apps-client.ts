@@ -4,6 +4,8 @@ import type {
   WorkspaceApp,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationUploadRequest,
+  WorkspaceConversationUploadResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
@@ -137,6 +139,21 @@ export async function fetchWorkspaceConversationRuns(
     {
       method: 'GET',
       sessionToken,
+    }
+  );
+}
+
+export async function uploadWorkspaceConversationFile(
+  sessionToken: string,
+  conversationId: string,
+  input: WorkspaceConversationUploadRequest
+): Promise<WorkspaceConversationUploadResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationUploadResponse>(
+    `/workspace/conversations/${conversationId}/uploads`,
+    {
+      method: 'POST',
+      sessionToken,
+      body: input,
     }
   );
 }

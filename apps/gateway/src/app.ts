@@ -1,4 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   closeDatabaseClient,
   createDatabaseClient,
@@ -28,6 +30,7 @@ import {
   createPersistentWorkspaceService,
   ensureWorkspaceCatalogSeed,
 } from './services/persistent-workspace-service.js';
+import { createLocalWorkspaceFileStorage } from './services/workspace-file-storage.js';
 import {
   createWorkspaceService,
   type WorkspaceService,
@@ -70,6 +73,9 @@ export async function buildApp(
       : null);
   const ownsDatabase = Boolean(database && !options.database);
   let betterAuthCore: BetterAuthCore | null = null;
+  const workspaceFileStorage = createLocalWorkspaceFileStorage({
+    rootDir: env.uploadsDir ?? join(tmpdir(), 'agentifui-uploads'),
+  });
 
   if (database) {
     await migrateDatabase(database);
@@ -111,7 +117,13 @@ export async function buildApp(
     options.adminService ?? (database ? createPersistentAdminService(database) : createAdminService());
   const workspaceService =
     options.workspaceService ??
-    (database ? createPersistentWorkspaceService(database) : createWorkspaceService());
+    (database
+      ? createPersistentWorkspaceService(database, {
+          fileStorage: workspaceFileStorage,
+        })
+      : createWorkspaceService({
+          fileStorage: workspaceFileStorage,
+        }));
 
   if (ownsDatabase && database) {
     app.addHook('onClose', async () => {

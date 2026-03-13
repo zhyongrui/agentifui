@@ -3,6 +3,7 @@ import type { AuthUser } from '@agentifui/shared/auth';
 import {
   evaluateAppLaunch,
   type WorkspaceApp,
+  type WorkspaceConversationAttachment,
   type WorkspaceConversation,
   type WorkspaceConversationMessage,
   type WorkspaceGroup,
@@ -13,7 +14,7 @@ import {
   type WorkspaceRunTrigger,
   type WorkspaceRunType,
 } from '@agentifui/shared/apps';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   WORKSPACE_APPS,
@@ -26,12 +27,17 @@ import {
 import type {
   WorkspaceConversationResult,
   WorkspaceConversationRunsResult,
+  WorkspaceConversationAttachmentLookupInput,
+  WorkspaceConversationAttachmentLookupResult,
+  WorkspaceConversationUploadInput,
+  WorkspaceConversationUploadResult,
   WorkspaceLaunchResult,
   WorkspaceRunCreateInput,
   WorkspaceRunResult,
   WorkspaceRunUpdateInput,
   WorkspaceService,
 } from './workspace-service.js';
+import type { WorkspaceFileStorage } from './workspace-file-storage.js';
 
 type GroupRow = {
   description: string | null;
@@ -132,6 +138,14 @@ type WorkspaceRunRow = {
   trace_id: string;
   triggered_from: WorkspaceRunTrigger;
   type: WorkspaceRunType;
+};
+
+type WorkspaceUploadedFileRow = {
+  content_type: string;
+  created_at: Date | string;
+  file_name: string;
+  id: string;
+  size_bytes: number;
 };
 
 async function listMemberGroupIds(database: DatabaseClient, userId: string) {
@@ -540,6 +554,44 @@ function buildEmptyPreferences(): WorkspacePreferences {
   };
 }
 
+function toWorkspaceConversationAttachments(
+  value: unknown
+): WorkspaceConversationAttachment[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const attachments = value.flatMap(entry => {
+    if (typeof entry !== 'object' || entry === null) {
+      return [];
+    }
+
+    const attachment = entry as Record<string, unknown>;
+
+    if (
+      typeof attachment.id !== 'string' ||
+      typeof attachment.fileName !== 'string' ||
+      typeof attachment.contentType !== 'string' ||
+      typeof attachment.sizeBytes !== 'number' ||
+      typeof attachment.uploadedAt !== 'string'
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: attachment.id,
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        sizeBytes: attachment.sizeBytes,
+        uploadedAt: attachment.uploadedAt,
+      },
+    ];
+  });
+
+  return attachments.length > 0 ? attachments : undefined;
+}
+
 function toWorkspaceConversationMessages(
   value: Record<string, unknown> | string | null | undefined
 ): WorkspaceConversationMessage[] {
@@ -588,9 +640,20 @@ function toWorkspaceConversationMessages(
             ? message.status
             : 'completed',
         createdAt: message.createdAt,
+        attachments: toWorkspaceConversationAttachments(message.attachments),
       },
     ];
   });
+}
+
+function toWorkspaceConversationAttachment(row: WorkspaceUploadedFileRow): WorkspaceConversationAttachment {
+  return {
+    id: row.id,
+    fileName: row.file_name,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes,
+    uploadedAt: toIso(row.created_at)!,
+  };
 }
 
 function toWorkspaceApp(row: PersistedWorkspaceAppRow, grantedGroupIds: string[]): WorkspaceApp {
@@ -1047,6 +1110,127 @@ async function readRunForUser(
   return row ? toWorkspaceRun(row) : null;
 }
 
+async function uploadConversationFileForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceConversationUploadInput,
+  fileStorage?: WorkspaceFileStorage
+): Promise<WorkspaceConversationUploadResult> {
+  const conversation = await readConversationForUser(database, user, input.conversationId);
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace conversation could not be found.',
+    };
+  }
+
+  const attachmentId = `file_${randomUUID()}`;
+  const contentHash = createHash('sha256').update(input.bytes).digest('hex');
+  const uploadedAt = new Date().toISOString();
+  const stored = fileStorage
+    ? await fileStorage.saveFile({
+        tenantId: user.tenantId,
+        userId: user.id,
+        fileId: attachmentId,
+        fileName: input.fileName,
+        bytes: input.bytes,
+      })
+    : {
+        provider: 'local' as const,
+        storageKey: `${user.tenantId}/${user.id}/${attachmentId}`,
+      };
+
+  await database`
+    insert into workspace_uploaded_files (
+      id,
+      tenant_id,
+      user_id,
+      conversation_id,
+      storage_provider,
+      storage_key,
+      file_name,
+      content_type,
+      size_bytes,
+      sha256,
+      created_at
+    )
+    values (
+      ${attachmentId},
+      ${user.tenantId},
+      ${user.id},
+      ${input.conversationId},
+      ${stored.provider},
+      ${stored.storageKey},
+      ${input.fileName},
+      ${input.contentType},
+      ${input.bytes.byteLength},
+      ${contentHash},
+      ${uploadedAt}::timestamptz
+    )
+  `;
+
+  return {
+    ok: true,
+    data: {
+      id: attachmentId,
+      fileName: input.fileName,
+      contentType: input.contentType,
+      sizeBytes: input.bytes.byteLength,
+      uploadedAt,
+    },
+  };
+}
+
+async function listConversationAttachmentsForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceConversationAttachmentLookupInput
+): Promise<WorkspaceConversationAttachmentLookupResult> {
+  const conversation = await readConversationForUser(database, user, input.conversationId);
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace conversation could not be found.',
+    };
+  }
+
+  if (input.fileIds.length === 0) {
+    return {
+      ok: true,
+      data: [],
+    };
+  }
+
+  const rows = await database<WorkspaceUploadedFileRow[]>`
+    select
+      id,
+      file_name,
+      content_type,
+      size_bytes,
+      created_at
+    from workspace_uploaded_files
+    where conversation_id = ${input.conversationId}
+      and user_id = ${user.id}
+      and id in ${database(input.fileIds)}
+  `;
+  const attachmentsById = new Map(rows.map(row => [row.id, toWorkspaceConversationAttachment(row)]));
+
+  return {
+    ok: true,
+    data: input.fileIds.flatMap(fileId => {
+      const attachment = attachmentsById.get(fileId);
+
+      return attachment ? [attachment] : [];
+    }),
+  };
+}
+
 async function createConversationRunForUser(
   database: DatabaseClient,
   user: AuthUser,
@@ -1194,7 +1378,12 @@ async function updateConversationRunForUser(
   return readConversationForUser(database, user, input.conversationId);
 }
 
-export function createPersistentWorkspaceService(database: DatabaseClient): WorkspaceService {
+export function createPersistentWorkspaceService(
+  database: DatabaseClient,
+  options: {
+    fileStorage?: WorkspaceFileStorage;
+  } = {}
+): WorkspaceService {
   return {
     async getCatalogForUser(user) {
       const context = await resolveWorkspaceContext(database, user);
@@ -1459,6 +1648,15 @@ export function createPersistentWorkspaceService(database: DatabaseClient): Work
         ok: true,
         data: run,
       };
+    },
+    async uploadConversationFileForUser(user, input): Promise<WorkspaceConversationUploadResult> {
+      return uploadConversationFileForUser(database, user, input, options.fileStorage);
+    },
+    async listConversationAttachmentsForUser(
+      user,
+      input
+    ): Promise<WorkspaceConversationAttachmentLookupResult> {
+      return listConversationAttachmentsForUser(database, user, input);
     },
     async createConversationRunForUser(user, input): Promise<WorkspaceConversationResult> {
       const conversation = await createConversationRunForUser(database, user, input);

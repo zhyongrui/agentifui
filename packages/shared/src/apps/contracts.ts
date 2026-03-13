@@ -112,12 +112,38 @@ export type WorkspaceConversationMessageStatus =
   | 'stopped'
   | 'failed';
 
+export const WORKSPACE_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
+
+export const WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES = [
+  'application/json',
+  'application/pdf',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/csv',
+  'text/markdown',
+  'text/plain',
+] as const;
+
+export type WorkspaceAttachmentContentType =
+  (typeof WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES)[number];
+
+export type WorkspaceConversationAttachment = {
+  id: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedAt: string;
+};
+
 export type WorkspaceConversationMessage = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   status: WorkspaceConversationMessageStatus;
   createdAt: string;
+  attachments?: WorkspaceConversationAttachment[];
 };
 
 export type WorkspaceRunUsage = {
@@ -193,6 +219,17 @@ export type WorkspaceConversationResponse = {
   data: WorkspaceConversation;
 };
 
+export type WorkspaceConversationUploadRequest = {
+  fileName: string;
+  contentType: string;
+  base64Data: string;
+};
+
+export type WorkspaceConversationUploadResponse = {
+  ok: true;
+  data: WorkspaceConversationAttachment;
+};
+
 export type WorkspaceConversationRunsResponse = {
   ok: true;
   data: {
@@ -211,7 +248,8 @@ export type WorkspaceErrorCode =
   | 'WORKSPACE_FORBIDDEN'
   | 'WORKSPACE_INVALID_PAYLOAD'
   | 'WORKSPACE_NOT_FOUND'
-  | 'WORKSPACE_LAUNCH_BLOCKED';
+  | 'WORKSPACE_LAUNCH_BLOCKED'
+  | 'WORKSPACE_UPLOAD_BLOCKED';
 
 export type WorkspaceErrorResponse = {
   ok: false;

@@ -1,11 +1,13 @@
 import type {
   WorkspaceConversation,
+  WorkspaceConversationAttachment,
   WorkspaceConversationMessage,
   WorkspaceConversationMessageStatus,
 } from '@agentifui/shared/apps';
 import type { AuthUser } from '@agentifui/shared/auth';
 import type {
   ChatCompletionChunk,
+  ChatCompletionFileReference,
   ChatCompletionMessage,
   ChatCompletionRequest,
   ChatCompletionResponse,
@@ -191,6 +193,21 @@ function isChatMessage(value: unknown): value is ChatCompletionMessage {
   return Array.isArray(message.content) && message.content.every(isContentPart);
 }
 
+function isChatFileReference(value: unknown): value is ChatCompletionFileReference {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const file = value as Record<string, unknown>;
+
+  return (
+    (file.type === 'local' || file.type === 'remote') &&
+    (file.transfer_method === 'local_file' || file.transfer_method === 'remote_url') &&
+    (file.file_id === undefined || typeof file.file_id === 'string') &&
+    (file.url === undefined || typeof file.url === 'string')
+  );
+}
+
 function extractMessageText(message: ChatCompletionMessage) {
   if (typeof message.content === 'string') {
     return message.content.trim();
@@ -236,12 +253,18 @@ function sleep(durationMs: number) {
 
 function buildPersistedHistory(
   messages: ChatCompletionMessage[],
-  assistantMessage?: {
-    content: string;
-    status: WorkspaceConversationMessageStatus;
-  }
+  input: {
+    latestUserAttachments?: WorkspaceConversationAttachment[];
+    assistantMessage?: {
+      content: string;
+      status: WorkspaceConversationMessageStatus;
+    };
+  } = {}
 ): WorkspaceConversationMessage[] {
   const baseTime = Date.now();
+  const latestUserMessageIndex = [...messages]
+    .map(message => message.role)
+    .lastIndexOf('user');
   const transcript: WorkspaceConversationMessage[] = messages.flatMap((message, index) => {
     if (message.role !== 'user' && message.role !== 'assistant') {
       return [];
@@ -254,16 +277,20 @@ function buildPersistedHistory(
         content: extractMessageText(message),
         status: 'completed',
         createdAt: new Date(baseTime + index).toISOString(),
+        attachments:
+          message.role === 'user' && index === latestUserMessageIndex
+            ? input.latestUserAttachments
+            : undefined,
       } satisfies WorkspaceConversationMessage,
     ];
   });
 
-  if (assistantMessage && assistantMessage.content.trim().length > 0) {
+  if (input.assistantMessage && input.assistantMessage.content.trim().length > 0) {
     transcript.push({
       id: buildConversationMessageId(),
       role: 'assistant',
-      content: assistantMessage.content,
-      status: assistantMessage.status,
+      content: input.assistantMessage.content,
+      status: input.assistantMessage.status,
       createdAt: new Date(baseTime + transcript.length).toISOString(),
     });
   }
@@ -273,17 +300,25 @@ function buildPersistedHistory(
 
 function buildAssistantText(
   conversation: WorkspaceConversation,
-  messages: ChatCompletionMessage[]
+  messages: ChatCompletionMessage[],
+  attachments: WorkspaceConversationAttachment[] = []
 ) {
   const latestPrompt = extractLatestUserPrompt(messages);
   const requestSummary = latestPrompt || 'Continue the current workspace task.';
+  const attachmentSummary =
+    attachments.length > 0
+      ? `Attachments: ${attachments.map(file => `${file.fileName} (${file.contentType}, ${file.sizeBytes} bytes)`).join(', ')}.`
+      : null;
 
   return [
     `${conversation.app.name} is now reachable through the AgentifUI gateway.`,
     `Request: ${requestSummary}`,
+    attachmentSummary,
     `Context: attributed group ${conversation.activeGroup.name}, trace ${conversation.run.traceId}.`,
     'This is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.',
-  ].join('\n\n');
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .join('\n\n');
 }
 
 function resolveModelName(
@@ -491,6 +526,71 @@ async function ensureConversationRun(
   };
 }
 
+async function resolveConversationAttachments(
+  workspaceService: WorkspaceService,
+  user: AuthUser,
+  conversationId: string,
+  files: ChatCompletionFileReference[],
+  traceId: string
+) {
+  const localFileIds = files.flatMap(file => {
+    if (file.type !== 'local' || file.transfer_method !== 'local_file' || !file.file_id?.trim()) {
+      return [];
+    }
+
+    return [file.file_id.trim()];
+  });
+
+  if (localFileIds.length !== files.length) {
+    return {
+      ok: false as const,
+      statusCode: 400,
+      response: buildErrorResponse(traceId, {
+        type: 'invalid_request_error',
+        code: 'invalid_file_id',
+        message: 'Only local uploaded workspace file references are supported.',
+        param: 'files',
+      }),
+    };
+  }
+
+  const attachmentsResult = await workspaceService.listConversationAttachmentsForUser(user, {
+    conversationId,
+    fileIds: localFileIds,
+  });
+
+  if (!attachmentsResult.ok) {
+    return {
+      ok: false as const,
+      statusCode: 404,
+      response: buildErrorResponse(traceId, {
+        type: 'not_found_error',
+        code: 'conversation_not_found',
+        message: 'The target workspace conversation could not be found.',
+        param: 'conversation_id',
+      }),
+    };
+  }
+
+  if (attachmentsResult.data.length !== localFileIds.length) {
+    return {
+      ok: false as const,
+      statusCode: 400,
+      response: buildErrorResponse(traceId, {
+        type: 'invalid_request_error',
+        code: 'invalid_file_id',
+        message: 'One or more workspace file references could not be resolved for this conversation.',
+        param: 'files',
+      }),
+    };
+  }
+
+  return {
+    ok: true as const,
+    attachments: attachmentsResult.data,
+  };
+}
+
 function buildMetadataEvent(input: {
   conversation: WorkspaceConversation;
 }): string {
@@ -576,6 +676,7 @@ function buildBlockingResponse(input: {
 }
 
 async function* streamCompletionEvents(input: {
+  attachments: WorkspaceConversationAttachment[];
   conversation: WorkspaceConversation;
   created: number;
   model: string;
@@ -632,8 +733,11 @@ async function* streamCompletionEvents(input: {
       runId: input.conversation.run.id,
       status: wasStopped ? 'stopped' : 'succeeded',
       messageHistory: buildPersistedHistory(input.messages, {
-        content: assistantContent,
-        status: wasStopped ? 'stopped' : 'completed',
+        latestUserAttachments: input.attachments,
+        assistantMessage: {
+          content: assistantContent,
+          status: wasStopped ? 'stopped' : 'completed',
+        },
       }),
       outputs: {
         assistant: {
@@ -685,8 +789,11 @@ async function* streamCompletionEvents(input: {
         runId: input.conversation.run.id,
         status: streamState?.stopRequested ? 'stopped' : 'failed',
         messageHistory: buildPersistedHistory(input.messages, {
-          content: assistantContent,
-          status: streamState?.stopRequested ? 'stopped' : 'failed',
+          latestUserAttachments: input.attachments,
+          assistantMessage: {
+            content: assistantContent,
+            status: streamState?.stopRequested ? 'stopped' : 'failed',
+          },
         }),
         outputs: {
           assistant: {
@@ -743,7 +850,7 @@ export async function registerChatRoutes(
           streaming: true,
           stop: true,
           tools: true,
-          files: false,
+          files: true,
           citations: chatApp.kind === 'analysis' || chatApp.kind === 'governance',
         },
       })),
@@ -800,6 +907,26 @@ export async function registerChatRoutes(
       });
     }
 
+    if (body.files !== undefined && (!Array.isArray(body.files) || !body.files.every(isChatFileReference))) {
+      reply.code(400);
+      return buildErrorResponse(fallbackTraceId, {
+        type: 'invalid_request_error',
+        code: 'invalid_file_id',
+        message: 'files must be an array of valid local or remote file references when provided.',
+        param: 'files',
+      });
+    }
+
+    if ((body.files?.length ?? 0) > 0 && !body.conversation_id?.trim()) {
+      reply.code(400);
+      return buildErrorResponse(fallbackTraceId, {
+        type: 'invalid_request_error',
+        code: 'invalid_conversation_id',
+        message: 'Local workspace files require an existing conversation_id.',
+        param: 'conversation_id',
+      });
+    }
+
     const conversationResult = await resolveConversation(
       workspaceService,
       access.user,
@@ -839,9 +966,32 @@ export async function registerChatRoutes(
     }
 
     const conversation = runPreparationResult.conversation;
+    const attachmentResult =
+      body.files && body.files.length > 0
+        ? await resolveConversationAttachments(
+            workspaceService,
+            access.user,
+            conversation.id,
+            body.files,
+            fallbackTraceId
+          )
+        : {
+            ok: true as const,
+            attachments: [],
+          };
+
+    if (!attachmentResult.ok) {
+      reply.code(attachmentResult.statusCode);
+      return attachmentResult.response;
+    }
+
     const traceId = conversation.run.traceId || fallbackTraceId;
     const startedAt = Date.now();
-    const assistantText = buildAssistantText(conversation, body.messages);
+    const assistantText = buildAssistantText(
+      conversation,
+      body.messages,
+      attachmentResult.attachments
+    );
     const model = resolveModelName(
       {
         app_id: appId,
@@ -878,6 +1028,7 @@ export async function registerChatRoutes(
         stream: Boolean(body.stream),
         variables: body.inputs ?? {},
         files: body.files ?? [],
+        attachments: attachmentResult.attachments,
       },
       totalSteps: 1,
     });
@@ -903,6 +1054,7 @@ export async function registerChatRoutes(
       return reply.send(
         Readable.from(
           streamCompletionEvents({
+            attachments: attachmentResult.attachments,
             conversation: runningResult.data,
             created,
             model,
@@ -922,8 +1074,11 @@ export async function registerChatRoutes(
       runId: conversation.run.id,
       status: 'succeeded',
       messageHistory: buildPersistedHistory(body.messages, {
-        content: assistantText,
-        status: 'completed',
+        latestUserAttachments: attachmentResult.attachments,
+        assistantMessage: {
+          content: assistantText,
+          status: 'completed',
+        },
       }),
       outputs: {
         assistant: {

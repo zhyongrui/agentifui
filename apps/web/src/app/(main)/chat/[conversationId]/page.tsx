@@ -1,7 +1,12 @@
 'use client';
 
+import {
+  WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES,
+  WORKSPACE_ATTACHMENT_MAX_BYTES,
+} from '@agentifui/shared/apps';
 import type {
   WorkspaceConversation,
+  WorkspaceConversationAttachment,
   WorkspaceConversationMessage,
   WorkspaceRun,
   WorkspaceRunSummary,
@@ -9,13 +14,14 @@ import type {
 import type { ChatCompletionMessage, ChatGatewayErrorResponse } from '@agentifui/shared/chat';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState, type ChangeEvent } from 'react';
 
 import { MainSectionNav } from '../../../../components/main-section-nav';
 import {
   fetchWorkspaceConversation,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceRun,
+  uploadWorkspaceConversationFile,
 } from '../../../../lib/apps-client';
 import { clearAuthSession } from '../../../../lib/auth-session';
 import { stopChatCompletion, streamChatCompletion } from '../../../../lib/chat-client';
@@ -25,6 +31,14 @@ function toGatewayMessages(messages: WorkspaceConversationMessage[]): ChatComple
   return messages.map(message => ({
     role: message.role,
     content: message.content,
+  }));
+}
+
+function toGatewayFileReferences(attachments: WorkspaceConversationAttachment[]) {
+  return attachments.map(attachment => ({
+    type: 'local' as const,
+    file_id: attachment.id,
+    transfer_method: 'local_file' as const,
   }));
 }
 
@@ -38,7 +52,9 @@ function isGatewayErrorResponse(error: unknown): error is ChatGatewayErrorRespon
 }
 
 function buildLocalMessage(
-  input: Pick<WorkspaceConversationMessage, 'role' | 'content' | 'status'>
+  input: Pick<WorkspaceConversationMessage, 'role' | 'content' | 'status'> & {
+    attachments?: WorkspaceConversationAttachment[];
+  }
 ): WorkspaceConversationMessage {
   return {
     id: `local_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
@@ -46,6 +62,7 @@ function buildLocalMessage(
     content: input.content,
     status: input.status,
     createdAt: new Date().toISOString(),
+    attachments: input.attachments,
   };
 }
 
@@ -68,6 +85,37 @@ function formatReplayContent(content: unknown): string {
       return value.type === 'text' && typeof value.text === 'string' ? [value.text] : [];
     })
     .join('\n');
+}
+
+function formatAttachmentSize(sizeBytes: number) {
+  if (sizeBytes >= 1024 * 1024) {
+    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  if (sizeBytes >= 1024) {
+    return `${Math.ceil(sizeBytes / 1024)} KB`;
+  }
+
+  return `${sizeBytes} B`;
+}
+
+function attachmentsToText(attachments: WorkspaceConversationAttachment[]) {
+  return attachments.map(
+    attachment =>
+      `${attachment.fileName} (${attachment.contentType}, ${formatAttachmentSize(attachment.sizeBytes)})`
+  );
+}
+
+async function fileToBase64(file: File) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary);
 }
 
 function buildReplayMessages(run: WorkspaceRun): Array<{ id: string; role: string; content: string }> {
@@ -110,6 +158,42 @@ function buildAssistantReplay(run: WorkspaceRun): string {
   return typeof content === 'string' ? content : '';
 }
 
+function buildReplayAttachments(run: WorkspaceRun): WorkspaceConversationAttachment[] {
+  const rawAttachments = run.inputs.attachments;
+
+  if (!Array.isArray(rawAttachments)) {
+    return [];
+  }
+
+  return rawAttachments.flatMap(entry => {
+    if (typeof entry !== 'object' || entry === null) {
+      return [];
+    }
+
+    const attachment = entry as Record<string, unknown>;
+
+    if (
+      typeof attachment.id !== 'string' ||
+      typeof attachment.fileName !== 'string' ||
+      typeof attachment.contentType !== 'string' ||
+      typeof attachment.sizeBytes !== 'number' ||
+      typeof attachment.uploadedAt !== 'string'
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: attachment.id,
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        sizeBytes: attachment.sizeBytes,
+        uploadedAt: attachment.uploadedAt,
+      },
+    ];
+  });
+}
+
 export default function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
   const router = useRouter();
@@ -121,9 +205,11 @@ export default function ConversationPage() {
   const [runs, setRuns] = useState<WorkspaceRunSummary[]>([]);
   const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
   const [draft, setDraft] = useState('');
+  const [draftAttachments, setDraftAttachments] = useState<WorkspaceConversationAttachment[]>([]);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [isAwaitingRunMetadata, setIsAwaitingRunMetadata] = useState(false);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
@@ -228,11 +314,13 @@ export default function ConversationPage() {
     setRuns([]);
     setSelectedRun(null);
     setDraft('');
+    setDraftAttachments([]);
     setComposerError(null);
     setLastTraceId(null);
     activeAssistantMessageIdRef.current = null;
     activeRunIdRef.current = null;
     stopRequestedRef.current = false;
+    setIsUploadingAttachments(false);
     setIsAwaitingRunMetadata(false);
   }, [conversationId]);
 
@@ -269,19 +357,111 @@ export default function ConversationPage() {
     };
   }, [conversationId, router, session]);
 
+  async function handleAttachmentSelect(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files ?? []);
+    event.target.value = '';
+
+    if (!session || !conversation || selectedFiles.length === 0) {
+      return;
+    }
+
+    setComposerError(null);
+    setIsUploadingAttachments(true);
+
+    try {
+      const uploadedAttachments: WorkspaceConversationAttachment[] = [];
+
+      for (const file of selectedFiles) {
+        const contentType = file.type.trim().toLowerCase();
+
+        if (
+          !contentType ||
+          !(WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES as readonly string[]).includes(contentType)
+        ) {
+          setComposerError(`Unsupported attachment type: ${file.name}.`);
+          continue;
+        }
+
+        if (file.size > WORKSPACE_ATTACHMENT_MAX_BYTES) {
+          setComposerError(
+            `${file.name} exceeds the ${formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} limit.`
+          );
+          continue;
+        }
+
+        const result = await uploadWorkspaceConversationFile(session.sessionToken, conversation.id, {
+          fileName: file.name,
+          contentType,
+          base64Data: await fileToBase64(file),
+        });
+
+        if (!result.ok) {
+          if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+            clearAuthSession(window.sessionStorage);
+            router.replace('/login');
+            return;
+          }
+
+          if (result.error.code === 'WORKSPACE_FORBIDDEN') {
+            router.replace('/auth/pending');
+            return;
+          }
+
+          if (result.error.code === 'WORKSPACE_NOT_FOUND') {
+            setConversationError(
+              'This conversation is no longer available. Return to the apps workspace and relaunch it.'
+            );
+            return;
+          }
+
+          setComposerError(result.error.message);
+          continue;
+        }
+
+        uploadedAttachments.push(result.data);
+      }
+
+      if (uploadedAttachments.length > 0) {
+        setDraftAttachments(currentAttachments => [...currentAttachments, ...uploadedAttachments]);
+      }
+    } catch {
+      setComposerError('The attachment upload failed. Please retry.');
+    } finally {
+      setIsUploadingAttachments(false);
+    }
+  }
+
+  function handleAttachmentRemove(attachmentId: string) {
+    setDraftAttachments(currentAttachments =>
+      currentAttachments.filter(attachment => attachment.id !== attachmentId)
+    );
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const nextDraft = draft.trim();
+    const nextAttachments = draftAttachments;
 
-    if (!session || !conversation || !nextDraft || isStreaming) {
+    if (
+      !session ||
+      !conversation ||
+      isStreaming ||
+      isUploadingAttachments ||
+      (nextDraft.length === 0 && nextAttachments.length === 0)
+    ) {
       return;
     }
 
+    const messageContent =
+      nextDraft.length > 0
+        ? nextDraft
+        : `Attached ${nextAttachments.length} file${nextAttachments.length === 1 ? '' : 's'}.`;
     const userMessage = buildLocalMessage({
       role: 'user',
-      content: nextDraft,
+      content: messageContent,
       status: 'completed',
+      attachments: nextAttachments,
     });
     const assistantMessage = buildLocalMessage({
       role: 'assistant',
@@ -295,6 +475,7 @@ export default function ConversationPage() {
     stopRequestedRef.current = false;
     setComposerError(null);
     setDraft('');
+    setDraftAttachments([]);
     setIsStreaming(true);
     setIsStopping(false);
     setIsAwaitingRunMetadata(true);
@@ -318,6 +499,7 @@ export default function ConversationPage() {
           app_id: conversation.app.id,
           conversation_id: conversation.id,
           messages: toGatewayMessages(nextMessages),
+          files: toGatewayFileReferences(nextAttachments),
         },
         {
           onMetadata: metadata => {
@@ -499,6 +681,7 @@ export default function ConversationPage() {
 
   const replayMessages = selectedRun ? buildReplayMessages(selectedRun) : [];
   const replayAssistant = selectedRun ? buildAssistantReplay(selectedRun) : '';
+  const replayAttachments = selectedRun ? buildReplayAttachments(selectedRun) : [];
 
   return (
     <div className="chat-surface stack">
@@ -506,11 +689,11 @@ export default function ConversationPage() {
 
       <header className="chat-header">
         <div>
-          <span className="eyebrow">R9 Run Replay</span>
+          <span className="eyebrow">R12 Attachments</span>
           <h1>{conversation.title}</h1>
           <p className="lead">
             The conversation surface now keeps independent runs per completion, supports live stop
-            control and lets you query replayable run state from the persisted workspace boundary.
+            control and can bind uploaded workspace attachments onto the persisted chat boundary.
           </p>
         </div>
         <div className="workspace-badges">
@@ -596,6 +779,16 @@ export default function ConversationPage() {
                   </span>
                 </div>
                 <p>{message.content || (message.status === 'streaming' ? 'Streaming...' : '')}</p>
+                {message.attachments && message.attachments.length > 0 ? (
+                  <ul className="chat-attachment-list">
+                    {message.attachments.map(attachment => (
+                      <li key={attachment.id}>
+                        {attachment.fileName} · {attachment.contentType} ·{' '}
+                        {formatAttachmentSize(attachment.sizeBytes)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </article>
             ))}
           </div>
@@ -614,13 +807,53 @@ export default function ConversationPage() {
             onChange={event => setDraft(event.target.value)}
             disabled={isStreaming}
           />
+          <label className="field" htmlFor="chat-attachment">
+            Attachments
+          </label>
+          <input
+            id="chat-attachment"
+            type="file"
+            multiple
+            accept={WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES.join(',')}
+            onChange={event => void handleAttachmentSelect(event)}
+            disabled={isStreaming || isUploadingAttachments}
+          />
+          <p className="chat-composer-hint">
+            Up to {formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} per file. Supported: text,
+            JSON, CSV, PDF, PNG, JPEG, WEBP, GIF.
+          </p>
+          {draftAttachments.length > 0 ? (
+            <div className="chat-attachment-draft-list">
+              {draftAttachments.map(attachment => (
+                <div key={attachment.id} className="chat-attachment-chip">
+                  <span>{attachmentsToText([attachment])[0]}</span>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => handleAttachmentRemove(attachment.id)}
+                    disabled={isStreaming}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="actions">
             <button
               className="primary"
               type="submit"
-              disabled={isStreaming || draft.trim().length === 0}
+              disabled={
+                isStreaming ||
+                isUploadingAttachments ||
+                (draft.trim().length === 0 && draftAttachments.length === 0)
+              }
             >
-              {isStreaming ? 'Streaming...' : 'Send message'}
+              {isUploadingAttachments
+                ? 'Uploading...'
+                : isStreaming
+                  ? 'Streaming...'
+                  : 'Send message'}
             </button>
             {isStreaming ? (
               <button
@@ -701,6 +934,11 @@ export default function ConversationPage() {
                     <strong>{selectedRun.elapsedTime} ms</strong>
                     <p>{selectedRun.finishedAt ?? 'in progress'}</p>
                   </article>
+                  <article className="chat-meta-card">
+                    <span>Attached files</span>
+                    <strong>{replayAttachments.length}</strong>
+                    <p>Run inputs keep attachment metadata for replay and follow-on audit work.</p>
+                  </article>
                 </div>
 
                 <div className="run-replay-stack">
@@ -716,6 +954,17 @@ export default function ConversationPage() {
                         'No prompt snapshot was stored for this run.'}
                     </p>
                   </article>
+                  {replayAttachments.length > 0 ? (
+                    <article className="chat-bubble user">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Attached files</span>
+                        <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <p>{attachmentsToText(replayAttachments).join('\n')}</p>
+                    </article>
+                  ) : null}
                   <article className="chat-bubble assistant">
                     <div className="chat-bubble-meta">
                       <span className="chat-bubble-label">Assistant output</span>

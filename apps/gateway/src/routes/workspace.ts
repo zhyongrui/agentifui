@@ -1,8 +1,14 @@
+import {
+  WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES,
+  WORKSPACE_ATTACHMENT_MAX_BYTES,
+} from '@agentifui/shared/apps';
 import type {
   WorkspaceAppLaunchRequest,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationUploadRequest,
+  WorkspaceConversationUploadResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
@@ -51,6 +57,24 @@ function isStringArray(value: unknown): value is string[] {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function decodeBase64Payload(value: string): Buffer | null {
+  const normalized = value.trim();
+
+  if (
+    normalized.length === 0 ||
+    normalized.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)
+  ) {
+    return null;
+  }
+
+  try {
+    return Buffer.from(normalized, 'base64');
+  } catch {
+    return null;
+  }
 }
 
 async function requireActiveWorkspaceSession(
@@ -286,6 +310,87 @@ export async function registerWorkspaceRoutes(
     }
 
     const response: WorkspaceConversationResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.post('/workspace/conversations/:conversationId/uploads', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+    const body = (request.body ?? {}) as Partial<WorkspaceConversationUploadRequest>;
+    const fileName = body.fileName?.trim();
+    const contentType = body.contentType?.trim().toLowerCase();
+    const base64Data = body.base64Data?.trim();
+
+    if (!conversationId || !fileName || !contentType || !base64Data) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace uploads require a conversation id, file name, content type, and base64 payload.'
+      );
+    }
+
+    const bytes = decodeBase64Payload(base64Data);
+
+    if (!bytes || bytes.byteLength === 0) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace uploads require a valid non-empty base64 payload.'
+      );
+    }
+
+    if (
+      !(WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES as readonly string[]).includes(contentType)
+    ) {
+      reply.code(409);
+      return buildErrorResponse(
+        'WORKSPACE_UPLOAD_BLOCKED',
+        'The uploaded file type is not allowed in the current workspace.',
+        {
+          acceptedContentTypes: WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES,
+          contentType,
+        }
+      );
+    }
+
+    if (bytes.byteLength > WORKSPACE_ATTACHMENT_MAX_BYTES) {
+      reply.code(409);
+      return buildErrorResponse(
+        'WORKSPACE_UPLOAD_BLOCKED',
+        'The uploaded file exceeds the current workspace attachment limit.',
+        {
+          maxBytes: WORKSPACE_ATTACHMENT_MAX_BYTES,
+          sizeBytes: bytes.byteLength,
+        }
+      );
+    }
+
+    const result = await workspaceService.uploadConversationFileForUser(access.user, {
+      conversationId,
+      fileName,
+      contentType,
+      bytes,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationUploadResponse = {
       ok: true,
       data: result.data,
     };

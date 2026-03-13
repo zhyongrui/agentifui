@@ -283,6 +283,23 @@ test('register/login/workspace controls work for a normal active user', async ({
   ]);
   await expectConversationSurface(page, 'Policy Watch');
   await expect(page.getByText('Run status')).toBeVisible();
+  await Promise.all([
+    page.waitForResponse(
+      response =>
+        response.request().method() === 'POST' &&
+        response.url().includes('/api/gateway/workspace/conversations/') &&
+        response.url().includes('/uploads'),
+      {
+        timeout: 60_000,
+      }
+    ),
+    page.locator('#chat-attachment').setInputFiles({
+      name: 'brief.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('Policy attachment'),
+    }),
+  ]);
+  await expect(page.getByText('brief.txt (text/plain, 17 B)')).toBeVisible();
   await page.getByLabel('Message').fill('Summarize the current policy changes for my group.');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(
@@ -290,11 +307,13 @@ test('register/login/workspace controls work for a normal active user', async ({
   ).toBeVisible({
     timeout: 60_000,
   });
+  await expect(page.getByText('brief.txt')).toBeVisible();
   await expect(
     page.locator('article.chat-meta-card').filter({
       has: page.getByText('Run status'),
     }).getByText('succeeded')
   ).toBeVisible();
+  await expect(page.locator('.run-replay-stack').getByText('Attached files')).toBeVisible();
 
   await page.getByLabel('Message').fill(buildLongStopPrompt());
   await page.getByRole('button', { name: 'Send message' }).click();

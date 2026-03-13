@@ -728,6 +728,14 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.chat-attachment-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
 .chat-bubble.user {
   justify-self: end;
   background: rgba(13, 107, 77, 0.12);
@@ -750,6 +758,28 @@ button:disabled {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.9);
   resize: vertical;
+}
+
+.chat-composer-hint {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chat-attachment-draft-list {
+  display: grid;
+  gap: 10px;
+}
+
+.chat-attachment-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .status-stopped {

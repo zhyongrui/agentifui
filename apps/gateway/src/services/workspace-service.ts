@@ -2,6 +2,7 @@ import type { AuthUser } from '@agentifui/shared/auth';
 import type {
   WorkspaceAppLaunch,
   WorkspaceCatalog,
+  WorkspaceConversationAttachment,
   WorkspaceConversation,
   WorkspaceConversationMessage,
   WorkspacePreferences,
@@ -21,6 +22,7 @@ import {
   resolveDefaultMemberGroupIds,
   resolveSeededWorkspaceAppsForUser,
 } from './workspace-catalog-fixtures.js';
+import type { WorkspaceFileStorage } from './workspace-file-storage.js';
 
 type WorkspaceLaunchFailure = {
   ok: false;
@@ -74,6 +76,18 @@ type WorkspaceRunCreateInput = {
   triggeredFrom: WorkspaceRunTrigger;
 };
 
+type WorkspaceConversationUploadInput = {
+  conversationId: string;
+  fileName: string;
+  contentType: string;
+  bytes: Buffer;
+};
+
+type WorkspaceConversationAttachmentLookupInput = {
+  conversationId: string;
+  fileIds: string[];
+};
+
 type WorkspaceRunUpdateInput = {
   conversationId: string;
   runId: string;
@@ -87,6 +101,20 @@ type WorkspaceRunUpdateInput = {
   totalSteps?: number;
   finishedAt?: string | null;
 };
+
+type WorkspaceConversationUploadResult =
+  | {
+      ok: true;
+      data: WorkspaceConversationAttachment;
+    }
+  | WorkspaceLookupFailure;
+
+type WorkspaceConversationAttachmentLookupResult =
+  | {
+      ok: true;
+      data: WorkspaceConversationAttachment[];
+    }
+  | WorkspaceLookupFailure;
 
 type WorkspaceService = {
   getCatalogForUser(user: AuthUser): WorkspaceCatalog | Promise<WorkspaceCatalog>;
@@ -111,6 +139,16 @@ type WorkspaceService = {
     conversationId: string
   ): WorkspaceConversationRunsResult | Promise<WorkspaceConversationRunsResult>;
   getRunForUser(user: AuthUser, runId: string): WorkspaceRunResult | Promise<WorkspaceRunResult>;
+  uploadConversationFileForUser(
+    user: AuthUser,
+    input: WorkspaceConversationUploadInput
+  ): WorkspaceConversationUploadResult | Promise<WorkspaceConversationUploadResult>;
+  listConversationAttachmentsForUser(
+    user: AuthUser,
+    input: WorkspaceConversationAttachmentLookupInput
+  ):
+    | WorkspaceConversationAttachmentLookupResult
+    | Promise<WorkspaceConversationAttachmentLookupResult>;
   createConversationRunForUser(
     user: AuthUser,
     input: WorkspaceRunCreateInput
@@ -126,6 +164,13 @@ type WorkspaceConversationRecord = WorkspaceConversation & {
 };
 
 type WorkspaceRunRecord = WorkspaceRun & {
+  userId: string;
+};
+
+type WorkspaceConversationAttachmentRecord = {
+  attachment: WorkspaceConversationAttachment;
+  conversationId: string;
+  storageKey: string | null;
   userId: string;
 };
 
@@ -245,11 +290,15 @@ function createRunRecord(input: {
   };
 }
 
-export function createWorkspaceService(): WorkspaceService {
+export function createWorkspaceService(options: {
+  fileStorage?: WorkspaceFileStorage;
+} = {}): WorkspaceService {
   const preferencesByUserId = new Map<string, WorkspacePreferences>();
   const conversationsById = new Map<string, WorkspaceConversationRecord>();
   const runsById = new Map<string, WorkspaceRunRecord>();
   const runIdsByConversationId = new Map<string, string[]>();
+  const attachmentsByConversationId = new Map<string, string[]>();
+  const attachmentsById = new Map<string, WorkspaceConversationAttachmentRecord>();
 
   function getContextForUser(user: AuthUser) {
     const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
@@ -522,6 +571,87 @@ export function createWorkspaceService(): WorkspaceService {
         data: runData,
       };
     },
+    async uploadConversationFileForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const attachmentId = `file_${randomUUID()}`;
+      let storageKey: string | null = null;
+
+      if (options.fileStorage) {
+        const stored = await options.fileStorage.saveFile({
+          tenantId: user.tenantId,
+          userId: user.id,
+          fileId: attachmentId,
+          fileName: input.fileName,
+          bytes: input.bytes,
+        });
+        storageKey = stored.storageKey;
+      }
+
+      const attachment: WorkspaceConversationAttachment = {
+        id: attachmentId,
+        fileName: input.fileName,
+        contentType: input.contentType,
+        sizeBytes: input.bytes.byteLength,
+        uploadedAt: new Date().toISOString(),
+      };
+
+      attachmentsById.set(attachmentId, {
+        attachment,
+        conversationId: input.conversationId,
+        storageKey,
+        userId: user.id,
+      });
+      attachmentsByConversationId.set(input.conversationId, [
+        ...(attachmentsByConversationId.get(input.conversationId) ?? []),
+        attachmentId,
+      ]);
+
+      return {
+        ok: true,
+        data: attachment,
+      };
+    },
+    listConversationAttachmentsForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const attachments = input.fileIds.flatMap(fileId => {
+        const record = attachmentsById.get(fileId);
+
+        if (
+          !record ||
+          record.userId !== user.id ||
+          record.conversationId !== input.conversationId
+        ) {
+          return [];
+        }
+
+        return [record.attachment];
+      });
+
+      return {
+        ok: true,
+        data: attachments,
+      };
+    },
     createConversationRunForUser(user, input) {
       const conversation = conversationsById.get(input.conversationId);
 
@@ -621,8 +751,12 @@ export function createWorkspaceService(): WorkspaceService {
 }
 
 export type {
+  WorkspaceConversationAttachmentLookupInput,
+  WorkspaceConversationAttachmentLookupResult,
   WorkspaceConversationResult,
   WorkspaceConversationRunsResult,
+  WorkspaceConversationUploadInput,
+  WorkspaceConversationUploadResult,
   WorkspaceLaunchResult,
   WorkspaceRunCreateInput,
   WorkspaceRunResult,
