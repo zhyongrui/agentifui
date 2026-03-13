@@ -23,6 +23,7 @@ export type ProtectedPath =
   | '/admin'
   | '/apps'
   | '/chat'
+  | '/chat/shared'
   | '/settings/profile'
   | '/settings/security';
 

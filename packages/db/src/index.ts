@@ -22,6 +22,7 @@ export const schemaModules = [
   'runs',
   'workspace_uploaded_files',
   'workspace_app_launches',
+  'workspace_conversation_shares',
 ] as const;
 
 export type SchemaModule = (typeof schemaModules)[number];

@@ -2,9 +2,12 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationShareResponse,
+  WorkspaceConversationSharesResponse,
   WorkspaceConversationUploadResponse,
   WorkspaceConversationRunsResponse,
   WorkspacePreferencesResponse,
+  WorkspaceSharedConversationResponse,
   WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
 import { describe, expect, it } from 'vitest';
@@ -660,6 +663,172 @@ describe('workspace routes', () => {
           code: 'WORKSPACE_UPLOAD_BLOCKED',
         },
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('creates, lists, revokes, and reads group-scoped conversation shares', async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
+
+    authService.register({
+      email: 'owner@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Owner',
+    });
+    authService.register({
+      email: 'reader@example.com',
+      password: 'Secure123',
+      displayName: 'Reader',
+    });
+
+    const ownerLogin = authService.login({
+      email: 'owner@iflabx.com',
+      password: 'Secure123',
+    });
+    const readerLogin = authService.login({
+      email: 'reader@example.com',
+      password: 'Secure123',
+    });
+
+    expect(ownerLogin.ok).toBe(true);
+    expect(readerLogin.ok).toBe(true);
+
+    if (!ownerLogin.ok || !readerLogin.ok) {
+      throw new Error('expected both logins to succeed');
+    }
+
+    try {
+      const launch = await app.inject({
+        method: 'POST',
+        url: '/workspace/apps/launch',
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          appId: 'app_policy_watch',
+          activeGroupId: 'grp_research',
+        },
+      });
+      const conversationId = (launch.json() as WorkspaceAppLaunchResponse).data.conversationId;
+
+      if (!conversationId) {
+        throw new Error('expected launch payload to include a conversation id');
+      }
+
+      const createShare = await app.inject({
+        method: 'POST',
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          groupId: 'grp_research',
+        },
+      });
+
+      expect(createShare.statusCode).toBe(200);
+      const share = (createShare.json() as WorkspaceConversationShareResponse).data;
+      expect(share).toMatchObject({
+        id: expect.stringMatching(/^share_/),
+        conversationId,
+        status: 'active',
+        access: 'read_only',
+        group: {
+          id: 'grp_research',
+        },
+        shareUrl: expect.stringMatching(/^\/chat\/shared\/share_/),
+      });
+
+      const listShares = await app.inject({
+        method: 'GET',
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(listShares.statusCode).toBe(200);
+      expect((listShares.json() as WorkspaceConversationSharesResponse).data.shares).toEqual([
+        expect.objectContaining({
+          id: share.id,
+          status: 'active',
+        }),
+      ]);
+
+      const sharedRead = await app.inject({
+        method: 'GET',
+        url: `/workspace/shares/${share.id}`,
+        headers: {
+          authorization: `Bearer ${readerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(sharedRead.statusCode).toBe(200);
+      expect((sharedRead.json() as WorkspaceSharedConversationResponse).data).toMatchObject({
+        share: {
+          id: share.id,
+          group: {
+            id: 'grp_research',
+          },
+        },
+        conversation: {
+          id: conversationId,
+          app: {
+            id: 'app_policy_watch',
+          },
+        },
+      });
+
+      const revokeShare = await app.inject({
+        method: 'DELETE',
+        url: `/workspace/conversations/${conversationId}/shares/${share.id}`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(revokeShare.statusCode).toBe(200);
+      expect((revokeShare.json() as WorkspaceConversationShareResponse).data).toMatchObject({
+        id: share.id,
+        status: 'revoked',
+      });
+
+      const sharedReadAfterRevoke = await app.inject({
+        method: 'GET',
+        url: `/workspace/shares/${share.id}`,
+        headers: {
+          authorization: `Bearer ${readerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(sharedReadAfterRevoke.statusCode).toBe(404);
+
+      const auditEvents = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'workspace.conversation_share.created',
+            entityType: 'conversation_share',
+            entityId: share.id,
+          }),
+          expect.objectContaining({
+            action: 'workspace.conversation_share.accessed',
+            entityType: 'conversation_share',
+            entityId: share.id,
+          }),
+          expect.objectContaining({
+            action: 'workspace.conversation_share.revoked',
+            entityType: 'conversation_share',
+            entityId: share.id,
+          }),
+        ])
+      );
     } finally {
       await app.close();
     }

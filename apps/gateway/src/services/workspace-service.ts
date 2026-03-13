@@ -4,6 +4,7 @@ import type {
   WorkspaceCatalog,
   WorkspaceConversationAttachment,
   WorkspaceConversation,
+  WorkspaceConversationShare,
   WorkspaceConversationMessage,
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
@@ -88,6 +89,16 @@ type WorkspaceConversationAttachmentLookupInput = {
   fileIds: string[];
 };
 
+type WorkspaceConversationShareCreateInput = {
+  conversationId: string;
+  groupId: string;
+};
+
+type WorkspaceConversationShareRevokeInput = {
+  conversationId: string;
+  shareId: string;
+};
+
 type WorkspaceRunUpdateInput = {
   conversationId: string;
   runId: string;
@@ -115,6 +126,40 @@ type WorkspaceConversationAttachmentLookupResult =
       data: WorkspaceConversationAttachment[];
     }
   | WorkspaceLookupFailure;
+
+type WorkspaceConversationShareResult =
+  | {
+      ok: true;
+      data: WorkspaceConversationShare;
+    }
+  | WorkspaceLookupFailure;
+
+type WorkspaceConversationSharesResult =
+  | {
+      ok: true;
+      data: {
+        conversationId: string;
+        shares: WorkspaceConversationShare[];
+      };
+    }
+  | WorkspaceLookupFailure;
+
+type WorkspaceSharedConversationResult =
+  | {
+      ok: true;
+      data: {
+        share: WorkspaceConversationShare;
+        conversation: WorkspaceConversation;
+      };
+    }
+  | WorkspaceLookupFailure
+  | {
+      ok: false;
+      statusCode: 403;
+      code: 'WORKSPACE_FORBIDDEN';
+      message: string;
+      details?: unknown;
+    };
 
 type WorkspaceService = {
   getCatalogForUser(user: AuthUser): WorkspaceCatalog | Promise<WorkspaceCatalog>;
@@ -149,6 +194,22 @@ type WorkspaceService = {
   ):
     | WorkspaceConversationAttachmentLookupResult
     | Promise<WorkspaceConversationAttachmentLookupResult>;
+  listConversationSharesForUser(
+    user: AuthUser,
+    conversationId: string
+  ): WorkspaceConversationSharesResult | Promise<WorkspaceConversationSharesResult>;
+  createConversationShareForUser(
+    user: AuthUser,
+    input: WorkspaceConversationShareCreateInput
+  ): WorkspaceConversationShareResult | Promise<WorkspaceConversationShareResult>;
+  revokeConversationShareForUser(
+    user: AuthUser,
+    input: WorkspaceConversationShareRevokeInput
+  ): WorkspaceConversationShareResult | Promise<WorkspaceConversationShareResult>;
+  getSharedConversationForUser(
+    user: AuthUser,
+    shareId: string
+  ): WorkspaceSharedConversationResult | Promise<WorkspaceSharedConversationResult>;
   createConversationRunForUser(
     user: AuthUser,
     input: WorkspaceRunCreateInput
@@ -174,6 +235,16 @@ type WorkspaceConversationAttachmentRecord = {
   userId: string;
 };
 
+type WorkspaceConversationShareRecord = {
+  conversationId: string;
+  createdAt: string;
+  creatorUserId: string;
+  group: WorkspaceConversationShare['group'];
+  id: string;
+  revokedAt: string | null;
+  status: WorkspaceConversationShare['status'];
+};
+
 function buildEmptyPreferences(): WorkspacePreferences {
   return {
     favoriteAppIds: [],
@@ -193,6 +264,10 @@ function recordRecentApp(currentIds: string[], appId: string, limit = 4) {
 
 function buildLaunchUrl(conversationId: string) {
   return `/chat/${conversationId}`;
+}
+
+function buildShareUrl(shareId: string) {
+  return `/chat/shared/${shareId}`;
 }
 
 function buildTraceId() {
@@ -299,6 +374,8 @@ export function createWorkspaceService(options: {
   const runIdsByConversationId = new Map<string, string[]>();
   const attachmentsByConversationId = new Map<string, string[]>();
   const attachmentsById = new Map<string, WorkspaceConversationAttachmentRecord>();
+  const sharesById = new Map<string, WorkspaceConversationShareRecord>();
+  const shareIdsByConversationId = new Map<string, string[]>();
 
   function getContextForUser(user: AuthUser) {
     const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
@@ -342,6 +419,28 @@ export function createWorkspaceService(options: {
     return (runIdsByConversationId.get(conversationId) ?? [])
       .map(runId => runsById.get(runId))
       .filter((run): run is WorkspaceRunRecord => Boolean(run))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  function toWorkspaceConversationShare(
+    share: WorkspaceConversationShareRecord
+  ): WorkspaceConversationShare {
+    return {
+      id: share.id,
+      conversationId: share.conversationId,
+      status: share.status,
+      access: 'read_only',
+      shareUrl: buildShareUrl(share.id),
+      group: share.group,
+      createdAt: share.createdAt,
+      revokedAt: share.revokedAt,
+    };
+  }
+
+  function listShareRecords(conversationId: string) {
+    return (shareIdsByConversationId.get(conversationId) ?? [])
+      .map(shareId => sharesById.get(shareId))
+      .filter((share): share is WorkspaceConversationShareRecord => Boolean(share))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -652,6 +751,162 @@ export function createWorkspaceService(options: {
         data: attachments,
       };
     },
+    listConversationSharesForUser(user, conversationId) {
+      const conversation = conversationsById.get(conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          conversationId,
+          shares: listShareRecords(conversationId).map(toWorkspaceConversationShare),
+        },
+      };
+    },
+    createConversationShareForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const context = getContextForUser(user);
+      const targetGroup = context.groups.find(group => group.id === input.groupId);
+
+      if (!targetGroup) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace group could not be found.',
+        };
+      }
+
+      const existingShare = listShareRecords(input.conversationId).find(
+        share => share.group.id === input.groupId
+      );
+      const now = new Date().toISOString();
+
+      if (existingShare) {
+        existingShare.status = 'active';
+        existingShare.revokedAt = null;
+
+        return {
+          ok: true,
+          data: toWorkspaceConversationShare(existingShare),
+        };
+      }
+
+      const share: WorkspaceConversationShareRecord = {
+        id: `share_${randomUUID()}`,
+        conversationId: input.conversationId,
+        creatorUserId: user.id,
+        group: targetGroup,
+        status: 'active',
+        createdAt: now,
+        revokedAt: null,
+      };
+
+      sharesById.set(share.id, share);
+      shareIdsByConversationId.set(input.conversationId, [
+        ...(shareIdsByConversationId.get(input.conversationId) ?? []),
+        share.id,
+      ]);
+
+      return {
+        ok: true,
+        data: toWorkspaceConversationShare(share),
+      };
+    },
+    revokeConversationShareForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+      const share = sharesById.get(input.shareId);
+
+      if (
+        !conversation ||
+        conversation.userId !== user.id ||
+        !share ||
+        share.conversationId !== input.conversationId
+      ) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace share could not be found.',
+        };
+      }
+
+      share.status = 'revoked';
+      share.revokedAt = new Date().toISOString();
+
+      return {
+        ok: true,
+        data: toWorkspaceConversationShare(share),
+      };
+    },
+    getSharedConversationForUser(user, shareId) {
+      const share = sharesById.get(shareId);
+
+      if (!share || share.status !== 'active') {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace share could not be found.',
+        };
+      }
+
+      const context = getContextForUser(user);
+
+      if (!context.memberGroupIds.includes(share.group.id)) {
+        return {
+          ok: false,
+          statusCode: 403,
+          code: 'WORKSPACE_FORBIDDEN',
+          message: 'The current user is not allowed to access this shared conversation.',
+        };
+      }
+
+      const conversation = conversationsById.get(share.conversationId);
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const latestRun = listRunRecords(conversation.id)[0];
+
+      if (latestRun) {
+        updateConversationLatestRun(conversation, latestRun);
+      }
+
+      const { userId, ...conversationData } = conversation;
+
+      return {
+        ok: true,
+        data: {
+          share: toWorkspaceConversationShare(share),
+          conversation: conversationData,
+        },
+      };
+    },
     createConversationRunForUser(user, input) {
       const conversation = conversationsById.get(input.conversationId);
 
@@ -755,11 +1010,16 @@ export type {
   WorkspaceConversationAttachmentLookupResult,
   WorkspaceConversationResult,
   WorkspaceConversationRunsResult,
+  WorkspaceConversationShareCreateInput,
+  WorkspaceConversationShareResult,
+  WorkspaceConversationShareRevokeInput,
+  WorkspaceConversationSharesResult,
   WorkspaceConversationUploadInput,
   WorkspaceConversationUploadResult,
   WorkspaceLaunchResult,
   WorkspaceRunCreateInput,
   WorkspaceRunResult,
   WorkspaceRunUpdateInput,
+  WorkspaceSharedConversationResult,
   WorkspaceService,
 };

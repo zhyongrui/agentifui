@@ -723,18 +723,17 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 
 当前默认按下面顺序执行，不再每轮重新定义优先级：
 
-1. `R12-B1` / `R12-B4` 分享、协作与会话访问控制
-2. `R12-B5` / `R12-B6` 受分享访问边界与分享审计
-3. `R12-C1` / `R12-C4` 执行时间线、状态流和历史回源
-4. `R12-C5` / `R12-C7` timeline UI、历史筛选与 replay 联动
-5. `R12-D1` / `R12-D4` quota、历史列表与 workspace 收口
-6. `R13-B1` / `R13-B4` 稳定公网入口与进程管理
+1. `R12-C1` / `R12-C4` 执行时间线、状态流和历史回源
+2. `R12-C5` / `R12-C7` timeline UI、历史筛选与 replay 联动
+3. `R12-D1` / `R12-D4` quota、历史列表与 workspace 收口
+4. `R13-B1` / `R13-B4` 稳定公网入口与进程管理
+5. `R13-C1` / `R13-C4` CI、观测与发布质量门槛
 
-如果 `R12-B` 被环境阻塞，则按下面的降级顺序切换：
+如果 `R12-C` 被环境阻塞，则按下面的降级顺序切换：
 
-1. `R12-C` 执行时间线与历史回源
-2. `R12-D` quota 与历史状态收口
-3. `R13-B` 稳定公网入口与部署硬化
+1. `R12-D` quota 与历史状态收口
+2. `R13-B` 稳定公网入口与部署硬化
+3. `R13-C` CI、观测与发布质量门槛
 
 ## 13. 2026-03-12 进度快照
 
@@ -797,9 +796,15 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - Gateway 已具备本地文件系统存储抽象和 `POST /workspace/conversations/:conversationId/uploads`
   - transcript、run replay 和 chat composer 已能挂接上传文件
   - 浏览器回归已覆盖 upload -> completion -> replay -> stop 的完整链路
-- 后续产品主线已切到 `R12-B`：
-  - conversation 分享与协作
+- `S2` 已完成第一版 conversation 分享与协作闭环：
+  - shared 合同已新增 conversation share DTO、分享状态与只读访问级别
+  - Gateway 已支持 owner-only share create/list/revoke 和 `GET /workspace/shares/:shareId`
+  - shared conversation 访问已要求登录且校验 group membership / revoked 状态
+  - Web `/chat/[conversationId]` 已新增 share panel，`/chat/shared/[shareId]` 已提供只读 transcript 视图
+  - 浏览器回归已覆盖 owner 创建分享、reader 打开只读 transcript 的链路
+- 后续产品主线已切到 `R12-C`：
   - timeline / history 回源
+  - timeline UI 与 replay 联动
   - quota 与公网部署硬化
 
 ## 14. 关联文档

@@ -65,6 +65,9 @@ export type AuthAuditAction =
   | 'auth.mfa.disabled'
   | 'workspace.preferences.updated'
   | 'workspace.app.launched'
+  | 'workspace.conversation_share.created'
+  | 'workspace.conversation_share.revoked'
+  | 'workspace.conversation_share.accessed'
   | 'workspace.run.stop_requested'
   | 'admin.workspace.read'
   | 'admin.workspace_grant.created'
@@ -76,6 +79,7 @@ export type AuthAuditEntityType =
   | 'session'
   | 'workspace_app'
   | 'conversation'
+  | 'conversation_share'
   | 'run';
 
 export type AuthAuditEvent = {

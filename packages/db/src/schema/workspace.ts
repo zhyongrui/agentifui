@@ -29,6 +29,11 @@ export const conversationStatusEnum = pgEnum('conversation_status', [
   'archived',
   'deleted',
 ]);
+export const conversationShareStatusEnum = pgEnum('conversation_share_status', [
+  'active',
+  'revoked',
+]);
+export const conversationShareAccessEnum = pgEnum('conversation_share_access', ['read_only']);
 export const runTypeEnum = pgEnum('run_type', ['workflow', 'agent', 'generation']);
 export const runStatusEnum = pgEnum('run_status', [
   'pending',
@@ -264,5 +269,42 @@ export const workspaceAppLaunches = pgTable(
     workspaceAppLaunchesConversationIndex: index('workspace_app_launches_conversation_idx').on(
       table.conversationId
     ),
+  })
+);
+
+export const workspaceConversationShares = pgTable(
+  'workspace_conversation_shares',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    conversationId: varchar('conversation_id', { length: 120 })
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    creatorUserId: varchar('creator_user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sharedGroupId: varchar('shared_group_id', { length: 120 })
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    status: conversationShareStatusEnum('status').notNull().default('active'),
+    access: conversationShareAccessEnum('access').notNull().default('read_only'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  table => ({
+    workspaceConversationSharesTenantIndex: index('workspace_conversation_shares_tenant_idx').on(
+      table.tenantId
+    ),
+    workspaceConversationSharesConversationIndex: index(
+      'workspace_conversation_shares_conversation_idx'
+    ).on(table.conversationId),
+    workspaceConversationSharesSharedGroupIndex: index(
+      'workspace_conversation_shares_shared_group_idx'
+    ).on(table.sharedGroupId),
+    workspaceConversationSharesConversationGroupUnique: uniqueIndex(
+      'workspace_conversation_shares_conversation_group_unique'
+    ).on(table.conversationId, table.sharedGroupId),
   })
 );

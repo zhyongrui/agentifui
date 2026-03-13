@@ -17,6 +17,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useRef, useState, type ChangeEvent } from 'react';
 
 import { MainSectionNav } from '../../../../components/main-section-nav';
+import { ConversationSharePanel } from '../../../../components/conversation-share-panel';
 import {
   fetchWorkspaceConversation,
   fetchWorkspaceConversationRuns,
@@ -747,6 +748,12 @@ export default function ConversationPage() {
           </article>
         </div>
       </section>
+
+      <ConversationSharePanel
+        activeGroupId={conversation.activeGroup.id}
+        conversationId={conversation.id}
+        sessionToken={session.sessionToken}
+      />
 
       <section className="chat-panel">
         <div className="chat-panel-header">

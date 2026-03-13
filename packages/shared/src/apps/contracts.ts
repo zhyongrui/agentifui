@@ -99,6 +99,8 @@ export type WorkspaceAppLaunchRequest = {
 export type WorkspaceAppLaunchStatus = 'handoff_ready' | 'conversation_ready';
 
 export type WorkspaceConversationStatus = 'active' | 'archived' | 'deleted';
+export type WorkspaceConversationShareStatus = 'active' | 'revoked';
+export type WorkspaceConversationShareAccess = 'read_only';
 
 export type WorkspaceRunType = 'workflow' | 'agent' | 'generation';
 
@@ -217,6 +219,42 @@ export type WorkspaceConversation = {
 export type WorkspaceConversationResponse = {
   ok: true;
   data: WorkspaceConversation;
+};
+
+export type WorkspaceConversationShare = {
+  id: string;
+  conversationId: string;
+  status: WorkspaceConversationShareStatus;
+  access: WorkspaceConversationShareAccess;
+  shareUrl: string;
+  group: WorkspaceGroup;
+  createdAt: string;
+  revokedAt: string | null;
+};
+
+export type WorkspaceConversationShareCreateRequest = {
+  groupId: string;
+};
+
+export type WorkspaceConversationShareResponse = {
+  ok: true;
+  data: WorkspaceConversationShare;
+};
+
+export type WorkspaceConversationSharesResponse = {
+  ok: true;
+  data: {
+    conversationId: string;
+    shares: WorkspaceConversationShare[];
+  };
+};
+
+export type WorkspaceSharedConversationResponse = {
+  ok: true;
+  data: {
+    share: WorkspaceConversationShare;
+    conversation: WorkspaceConversation;
+  };
 };
 
 export type WorkspaceConversationUploadRequest = {

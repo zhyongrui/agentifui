@@ -4,12 +4,16 @@ import type {
   WorkspaceApp,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationShareCreateRequest,
+  WorkspaceConversationShareResponse,
+  WorkspaceConversationSharesResponse,
   WorkspaceConversationUploadRequest,
   WorkspaceConversationUploadResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceSharedConversationResponse,
   WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
 
@@ -156,6 +160,60 @@ export async function uploadWorkspaceConversationFile(
       body: input,
     }
   );
+}
+
+export async function fetchWorkspaceConversationShares(
+  sessionToken: string,
+  conversationId: string
+): Promise<WorkspaceConversationSharesResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationSharesResponse>(
+    `/workspace/conversations/${conversationId}/shares`,
+    {
+      method: 'GET',
+      sessionToken,
+    }
+  );
+}
+
+export async function createWorkspaceConversationShare(
+  sessionToken: string,
+  conversationId: string,
+  input: WorkspaceConversationShareCreateRequest
+): Promise<WorkspaceConversationShareResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationShareResponse>(
+    `/workspace/conversations/${conversationId}/shares`,
+    {
+      method: 'POST',
+      sessionToken,
+      body: input,
+    }
+  );
+}
+
+export async function revokeWorkspaceConversationShare(
+  sessionToken: string,
+  conversationId: string,
+  shareId: string
+): Promise<WorkspaceConversationShareResponse | WorkspaceErrorResponse> {
+  const response = await fetch(`${getGatewayBaseUrl()}/workspace/conversations/${conversationId}/shares/${shareId}`, {
+    method: 'DELETE',
+    headers: {
+      authorization: `Bearer ${sessionToken}`,
+    },
+    cache: 'no-store',
+  });
+
+  return (await response.json()) as WorkspaceConversationShareResponse | WorkspaceErrorResponse;
+}
+
+export async function fetchWorkspaceSharedConversation(
+  sessionToken: string,
+  shareId: string
+): Promise<WorkspaceSharedConversationResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceSharedConversationResponse>(`/workspace/shares/${shareId}`, {
+    method: 'GET',
+    sessionToken,
+  });
 }
 
 export async function fetchWorkspaceRun(

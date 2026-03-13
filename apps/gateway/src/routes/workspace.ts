@@ -7,12 +7,16 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationShareCreateRequest,
+  WorkspaceConversationShareResponse,
+  WorkspaceConversationSharesResponse,
   WorkspaceConversationUploadRequest,
   WorkspaceConversationUploadResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceSharedConversationResponse,
   WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
 import type { AuthUser } from '@agentifui/shared/auth';
@@ -398,6 +402,155 @@ export async function registerWorkspaceRoutes(
     return response;
   });
 
+  app.get('/workspace/conversations/:conversationId/shares', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+
+    if (!conversationId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace share lookup requires a conversation id.'
+      );
+    }
+
+    const result = await workspaceService.listConversationSharesForUser(access.user, conversationId);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationSharesResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.post('/workspace/conversations/:conversationId/shares', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+    const body = (request.body ?? {}) as Partial<WorkspaceConversationShareCreateRequest>;
+    const groupId = body.groupId?.trim();
+
+    if (!conversationId || !groupId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace share creation requires a conversation id and group id.'
+      );
+    }
+
+    const result = await workspaceService.createConversationShareForUser(access.user, {
+      conversationId,
+      groupId,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationShareResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.conversation_share.created',
+      entityType: 'conversation_share',
+      entityId: result.data.id,
+      ipAddress: request.ip,
+      payload: {
+        shareId: result.data.id,
+        conversationId: result.data.conversationId,
+        groupId: result.data.group.id,
+        groupName: result.data.group.name,
+        shareUrl: result.data.shareUrl,
+      },
+    });
+
+    return response;
+  });
+
+  app.delete('/workspace/conversations/:conversationId/shares/:shareId', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+      shareId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+    const shareId = params.shareId?.trim();
+
+    if (!conversationId || !shareId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace share revoke requires a conversation id and share id.'
+      );
+    }
+
+    const result = await workspaceService.revokeConversationShareForUser(access.user, {
+      conversationId,
+      shareId,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationShareResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.conversation_share.revoked',
+      entityType: 'conversation_share',
+      entityId: result.data.id,
+      ipAddress: request.ip,
+      payload: {
+        shareId: result.data.id,
+        conversationId: result.data.conversationId,
+        groupId: result.data.group.id,
+        groupName: result.data.group.name,
+      },
+    });
+
+    return response;
+  });
+
   app.get('/workspace/conversations/:conversationId/runs', async (request, reply) => {
     const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
 
@@ -466,6 +619,57 @@ export async function registerWorkspaceRoutes(
       ok: true,
       data: result.data,
     };
+
+    return response;
+  });
+
+  app.get('/workspace/shares/:shareId', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      shareId?: string;
+    };
+    const shareId = params.shareId?.trim();
+
+    if (!shareId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace shared conversation lookup requires a share id.'
+      );
+    }
+
+    const result = await workspaceService.getSharedConversationForUser(access.user, shareId);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceSharedConversationResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.conversation_share.accessed',
+      entityType: 'conversation_share',
+      entityId: result.data.share.id,
+      ipAddress: request.ip,
+      payload: {
+        shareId: result.data.share.id,
+        conversationId: result.data.share.conversationId,
+        groupId: result.data.share.group.id,
+        groupName: result.data.share.group.name,
+      },
+    });
 
     return response;
   });

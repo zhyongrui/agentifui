@@ -499,6 +499,76 @@ test('mfa setup, mfa login verification, and disable flow work end-to-end', asyn
   ).toHaveText('Disabled');
 });
 
+test('conversation shares allow another group member to open a read-only shared transcript', async ({ page }) => {
+  const ownerEmail = uniqueEmail('share-owner');
+  const readerEmail = uniqueEmail('share-reader');
+
+  await register(page, {
+    email: ownerEmail,
+    displayName: 'Share Owner',
+  });
+  await register(page, {
+    email: readerEmail,
+    displayName: 'Share Reader',
+  });
+
+  await login(page, {
+    email: ownerEmail,
+  });
+  await expectAppsWorkspace(page);
+
+  await appCard(page, 'Policy Watch').getByRole('button', { name: /切换到 Research Lab/ }).click();
+  await expect(page.getByLabel('Working group')).toHaveValue('grp_research');
+  await Promise.all([
+    waitForGatewayPost(page, '/workspace/apps/launch'),
+    appCard(page, 'Policy Watch').getByRole('button', { name: '打开应用' }).click(),
+  ]);
+  await expectConversationSurface(page, 'Policy Watch');
+  await page.getByLabel('Message').fill('Share this transcript with my research team.');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(
+    page.getByText('Policy Watch is now reachable through the AgentifUI gateway.')
+  ).toBeVisible({
+    timeout: 60_000,
+  });
+
+  await page.getByLabel('Share group').selectOption('grp_research');
+  await Promise.all([
+    page.waitForResponse(
+      response =>
+        response.request().method() === 'POST' &&
+        response.url().includes('/api/gateway/workspace/conversations/') &&
+        response.url().includes('/shares'),
+      {
+        timeout: 60_000,
+      }
+    ),
+    page.getByRole('button', { name: 'Create read-only share' }).click(),
+  ]);
+
+  const sharedHref = await page.getByRole('link', { name: 'Open shared view' }).first().getAttribute('href');
+
+  expect(sharedHref).toMatch(/\/chat\/shared\/share_/);
+
+  await logout(page);
+  await login(page, {
+    email: readerEmail,
+  });
+  await page.goto(sharedHref ?? '/apps');
+  await expect(page).toHaveURL(/\/chat\/shared\/share_/);
+  await expect(
+    page.getByText('This is a read-only shared workspace conversation.')
+  ).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(
+    page.locator('.chat-bubble.user p', {
+      hasText: 'Share this transcript with my research team.',
+    })
+  ).toBeVisible();
+  await expect(page.getByLabel('Message')).toHaveCount(0);
+});
+
 test('security and admin users see different workspace catalogs', async ({ page }) => {
   const securityEmail = uniqueEmail('security-audit');
   const adminEmail = uniqueEmail('admin');

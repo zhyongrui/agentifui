@@ -5,6 +5,7 @@ import {
   type WorkspaceApp,
   type WorkspaceConversationAttachment,
   type WorkspaceConversation,
+  type WorkspaceConversationShare,
   type WorkspaceConversationMessage,
   type WorkspaceGroup,
   type WorkspacePreferences,
@@ -29,11 +30,16 @@ import type {
   WorkspaceConversationRunsResult,
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
+  WorkspaceConversationShareCreateInput,
+  WorkspaceConversationShareResult,
+  WorkspaceConversationShareRevokeInput,
+  WorkspaceConversationSharesResult,
   WorkspaceConversationUploadInput,
   WorkspaceConversationUploadResult,
   WorkspaceLaunchResult,
   WorkspaceRunCreateInput,
   WorkspaceRunResult,
+  WorkspaceSharedConversationResult,
   WorkspaceRunUpdateInput,
   WorkspaceService,
 } from './workspace-service.js';
@@ -146,6 +152,17 @@ type WorkspaceUploadedFileRow = {
   file_name: string;
   id: string;
   size_bytes: number;
+};
+
+type WorkspaceConversationShareRow = {
+  conversation_id: string;
+  created_at: Date | string;
+  group_description: string | null;
+  group_id: string;
+  group_name: string;
+  id: string;
+  revoked_at: Date | string | null;
+  status: WorkspaceConversationShare['status'];
 };
 
 async function listMemberGroupIds(database: DatabaseClient, userId: string) {
@@ -529,6 +546,10 @@ function buildLaunchUrl(conversationId: string) {
   return `/chat/${conversationId}`;
 }
 
+function buildShareUrl(shareId: string) {
+  return `/chat/shared/${shareId}`;
+}
+
 function buildTraceId() {
   return randomUUID().replace(/-/g, '');
 }
@@ -653,6 +674,23 @@ function toWorkspaceConversationAttachment(row: WorkspaceUploadedFileRow): Works
     contentType: row.content_type,
     sizeBytes: row.size_bytes,
     uploadedAt: toIso(row.created_at)!,
+  };
+}
+
+function toWorkspaceConversationShare(row: WorkspaceConversationShareRow): WorkspaceConversationShare {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    status: row.status,
+    access: 'read_only',
+    shareUrl: buildShareUrl(row.id),
+    group: {
+      id: row.group_id,
+      name: row.group_name,
+      description: row.group_description ?? '',
+    },
+    createdAt: toIso(row.created_at)!,
+    revokedAt: toIso(row.revoked_at),
   };
 }
 
@@ -1024,6 +1062,52 @@ async function readConversationForUser(
   return row ? toWorkspaceConversation(row) : null;
 }
 
+async function readConversationById(
+  database: DatabaseClient,
+  conversationId: string
+): Promise<WorkspaceConversation | null> {
+  const [row] = await database<ConversationRow[]>`
+    select
+      c.id,
+      c.title,
+      c.status,
+      c.inputs as conversation_inputs,
+      c.created_at,
+      c.updated_at,
+      l.id as launch_id,
+      a.id as app_id,
+      a.slug as app_slug,
+      a.name as app_name,
+      a.summary as app_summary,
+      a.kind as app_kind,
+      a.status as app_status,
+      a.short_code as app_short_code,
+      g.id as active_group_id,
+      g.name as active_group_name,
+      g.description as active_group_description,
+      r.id as run_id,
+      r.type as run_type,
+      r.status as run_status,
+      r.triggered_from as run_triggered_from,
+      r.trace_id as run_trace_id,
+      r.created_at as run_created_at,
+      r.finished_at as run_finished_at,
+      r.elapsed_time as run_elapsed_time,
+      r.total_tokens as run_total_tokens,
+      r.total_steps as run_total_steps
+    from conversations c
+    inner join workspace_apps a on a.id = c.app_id
+    left join groups g on g.id = c.active_group_id
+    inner join runs r on r.conversation_id = c.id
+    left join workspace_app_launches l on l.conversation_id = c.id
+    where c.id = ${conversationId}
+    order by r.created_at desc
+    limit 1
+  `;
+
+  return row ? toWorkspaceConversation(row) : null;
+}
+
 async function readConversationRunsForUser(
   database: DatabaseClient,
   user: AuthUser,
@@ -1228,6 +1312,242 @@ async function listConversationAttachmentsForUser(
 
       return attachment ? [attachment] : [];
     }),
+  };
+}
+
+async function listConversationSharesForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  conversationId: string
+): Promise<WorkspaceConversationSharesResult> {
+  const conversation = await readConversationForUser(database, user, conversationId);
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace conversation could not be found.',
+    };
+  }
+
+  const rows = await database<WorkspaceConversationShareRow[]>`
+    select
+      s.id,
+      s.conversation_id,
+      s.status,
+      s.created_at,
+      s.revoked_at,
+      g.id as group_id,
+      g.name as group_name,
+      g.description as group_description
+    from workspace_conversation_shares s
+    inner join groups g on g.id = s.shared_group_id
+    where s.conversation_id = ${conversationId}
+    order by s.created_at desc
+  `;
+
+  return {
+    ok: true,
+    data: {
+      conversationId,
+      shares: rows.map(toWorkspaceConversationShare),
+    },
+  };
+}
+
+async function createConversationShareForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceConversationShareCreateInput
+): Promise<WorkspaceConversationShareResult> {
+  const conversation = await readConversationForUser(database, user, input.conversationId);
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace conversation could not be found.',
+    };
+  }
+
+  const context = await resolveWorkspaceContext(database, user);
+  const targetGroup = context.groups.find(group => group.id === input.groupId);
+
+  if (!targetGroup) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace group could not be found.',
+    };
+  }
+
+  const shareId = `share_${randomUUID()}`;
+
+  await database`
+    insert into workspace_conversation_shares (
+      id,
+      tenant_id,
+      conversation_id,
+      creator_user_id,
+      shared_group_id,
+      status,
+      access,
+      created_at,
+      revoked_at
+    )
+    values (
+      ${shareId},
+      ${user.tenantId},
+      ${input.conversationId},
+      ${user.id},
+      ${input.groupId},
+      'active',
+      'read_only',
+      now(),
+      null
+    )
+    on conflict (conversation_id, shared_group_id) do update
+    set status = 'active',
+        access = 'read_only',
+        revoked_at = null
+  `;
+
+  const [row] = await database<WorkspaceConversationShareRow[]>`
+    select
+      s.id,
+      s.conversation_id,
+      s.status,
+      s.created_at,
+      s.revoked_at,
+      g.id as group_id,
+      g.name as group_name,
+      g.description as group_description
+    from workspace_conversation_shares s
+    inner join groups g on g.id = s.shared_group_id
+    where s.conversation_id = ${input.conversationId}
+      and s.shared_group_id = ${input.groupId}
+    limit 1
+  `;
+
+  if (!row) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace share could not be found.',
+    };
+  }
+
+  return {
+    ok: true,
+    data: toWorkspaceConversationShare(row),
+  };
+}
+
+async function revokeConversationShareForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceConversationShareRevokeInput
+): Promise<WorkspaceConversationShareResult> {
+  const rows = await database<WorkspaceConversationShareRow[]>`
+    update workspace_conversation_shares s
+    set status = 'revoked',
+        revoked_at = now()
+    from conversations c, groups g
+    where s.id = ${input.shareId}
+      and s.conversation_id = ${input.conversationId}
+      and c.id = s.conversation_id
+      and c.user_id = ${user.id}
+      and g.id = s.shared_group_id
+    returning
+      s.id,
+      s.conversation_id,
+      s.status,
+      s.created_at,
+      s.revoked_at,
+      g.id as group_id,
+      g.name as group_name,
+      g.description as group_description
+  `;
+
+  const row = rows[0];
+
+  if (!row) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace share could not be found.',
+    };
+  }
+
+  return {
+    ok: true,
+    data: toWorkspaceConversationShare(row),
+  };
+}
+
+async function getSharedConversationForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  shareId: string
+): Promise<WorkspaceSharedConversationResult> {
+  const [shareRow] = await database<WorkspaceConversationShareRow[]>`
+    select
+      s.id,
+      s.conversation_id,
+      s.status,
+      s.created_at,
+      s.revoked_at,
+      g.id as group_id,
+      g.name as group_name,
+      g.description as group_description
+    from workspace_conversation_shares s
+    inner join groups g on g.id = s.shared_group_id
+    where s.id = ${shareId}
+    limit 1
+  `;
+
+  if (!shareRow || shareRow.status !== 'active') {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace share could not be found.',
+    };
+  }
+
+  const context = await resolveWorkspaceContext(database, user);
+
+  if (!context.memberGroupIds.includes(shareRow.group_id)) {
+    return {
+      ok: false,
+      statusCode: 403,
+      code: 'WORKSPACE_FORBIDDEN',
+      message: 'The current user is not allowed to access this shared conversation.',
+    };
+  }
+
+  const conversation = await readConversationById(database, shareRow.conversation_id);
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'The target workspace conversation could not be found.',
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      share: toWorkspaceConversationShare(shareRow),
+      conversation,
+    },
   };
 }
 
@@ -1657,6 +1977,27 @@ export function createPersistentWorkspaceService(
       input
     ): Promise<WorkspaceConversationAttachmentLookupResult> {
       return listConversationAttachmentsForUser(database, user, input);
+    },
+    async listConversationSharesForUser(
+      user,
+      conversationId
+    ): Promise<WorkspaceConversationSharesResult> {
+      return listConversationSharesForUser(database, user, conversationId);
+    },
+    async createConversationShareForUser(
+      user,
+      input
+    ): Promise<WorkspaceConversationShareResult> {
+      return createConversationShareForUser(database, user, input);
+    },
+    async revokeConversationShareForUser(
+      user,
+      input
+    ): Promise<WorkspaceConversationShareResult> {
+      return revokeConversationShareForUser(database, user, input);
+    },
+    async getSharedConversationForUser(user, shareId): Promise<WorkspaceSharedConversationResult> {
+      return getSharedConversationForUser(database, user, shareId);
     },
     async createConversationRunForUser(user, input): Promise<WorkspaceConversationResult> {
       const conversation = await createConversationRunForUser(database, user, input);

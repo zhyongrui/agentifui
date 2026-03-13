@@ -782,6 +782,21 @@ button:disabled {
   background: rgba(255, 255, 255, 0.82);
 }
 
+.share-panel-create,
+.share-panel-list {
+  display: grid;
+  gap: 12px;
+}
+
+.share-panel-create select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
 .status-stopped {
   color: #9a6112;
 }
