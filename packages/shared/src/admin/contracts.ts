@@ -51,6 +51,74 @@ export type AdminUsersResponse = {
   };
 };
 
+export type AdminTenantStatus = 'active' | 'suspended';
+
+export type AdminTenantPrimaryAdmin = {
+  id: string;
+  email: string;
+  displayName: string;
+};
+
+export type AdminTenantSummary = {
+  id: string;
+  slug: string;
+  name: string;
+  status: AdminTenantStatus;
+  createdAt: string;
+  updatedAt: string;
+  userCount: number;
+  groupCount: number;
+  appCount: number;
+  adminCount: number;
+  primaryAdmin: AdminTenantPrimaryAdmin | null;
+};
+
+export type AdminTenantsResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    tenants: AdminTenantSummary[];
+  };
+};
+
+export type AdminTenantBootstrapInvitation = {
+  invitationId: string;
+  invitedUserId: string;
+  email: string;
+  inviteToken: string;
+  inviteUrl: string;
+  expiresAt: string;
+};
+
+export type AdminTenantCreateRequest = {
+  name: string;
+  slug: string;
+  adminEmail: string;
+  adminDisplayName?: string | null;
+};
+
+export type AdminTenantCreateResponse = {
+  ok: true;
+  data: {
+    tenant: AdminTenantSummary;
+    bootstrapInvitation: AdminTenantBootstrapInvitation;
+  };
+};
+
+export type AdminTenantStatusUpdateRequest = {
+  status: AdminTenantStatus;
+  reason?: string | null;
+};
+
+export type AdminTenantStatusUpdateResponse = {
+  ok: true;
+  data: {
+    tenant: AdminTenantSummary;
+    previousStatus: AdminTenantStatus;
+    reason: string | null;
+  };
+};
+
 export type AdminGroupAppGrant = Pick<WorkspaceApp, 'id' | 'slug' | 'name' | 'shortCode' | 'status'>;
 
 export type AdminGroupSummary = Pick<WorkspaceGroup, 'id' | 'name' | 'description'> & {

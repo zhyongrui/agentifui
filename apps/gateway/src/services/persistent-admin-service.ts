@@ -8,15 +8,22 @@ import type {
   AdminAuditEventSummary,
   AdminAuditFilters,
   AdminAuditPayloadMode,
+  AdminTenantSummary,
   AdminErrorCode,
   AdminGroupSummary,
   AdminUserSummary,
 } from '@agentifui/shared/admin';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { AdminService } from './admin-service.js';
 import { inspectAdminAuditPayload } from './admin-audit-pii.js';
-import { resolveDefaultRoleIds } from './workspace-catalog-fixtures.js';
+import {
+  resolveDefaultMemberGroupIds,
+  resolveDefaultRoleIds,
+  WORKSPACE_APPS,
+  WORKSPACE_GROUPS,
+} from './workspace-catalog-fixtures.js';
+import { buildDefaultQuotaLimitRecords } from './workspace-quota.js';
 
 type UserRow = {
   created_at: Date | string;
@@ -41,6 +48,42 @@ type UserRoleRow = {
 };
 
 type MfaRow = {
+  user_id: string;
+};
+
+type TenantRow = {
+  created_at: Date | string;
+  id: string;
+  name: string;
+  slug: string;
+  status: AdminTenantSummary['status'];
+  updated_at: Date | string;
+};
+
+type TenantUserCountRow = {
+  tenant_id: string;
+  user_count: number;
+};
+
+type TenantGroupCountRow = {
+  tenant_id: string;
+  group_count: number;
+};
+
+type TenantAppCountRow = {
+  tenant_id: string;
+  app_count: number;
+};
+
+type TenantAdminCountRow = {
+  tenant_id: string;
+  admin_count: number;
+};
+
+type TenantPrimaryAdminRow = {
+  tenant_id: string;
+  user_display_name: string;
+  user_email: string;
   user_id: string;
 };
 
@@ -117,11 +160,17 @@ type TenantUserLookupRow = {
   status: AdminUserSummary['status'];
 };
 
+type ExistingTenantRow = {
+  id: string;
+  slug: string;
+  status: AdminTenantSummary['status'];
+};
+
 type AuditEventRow = {
   action: string;
   actor_user_id: string | null;
   entity_id: string | null;
-  entity_type: 'conversation' | 'run' | 'session' | 'user' | 'workspace_app';
+  entity_type: 'conversation' | 'run' | 'session' | 'tenant' | 'user' | 'workspace_app';
   id: string;
   ip_address: string | null;
   level: 'critical' | 'info' | 'warning';
@@ -290,6 +339,177 @@ function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
+function normalizeTenantSlug(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildTenantIdFromSlug(slug: string) {
+  return `tenant-${slug}`;
+}
+
+function buildTenantScopedId(tenantId: string, baseId: string) {
+  return `${tenantId}:${baseId}`;
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function hashToken(value: string) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+async function seedTenantWorkspaceResources(database: DatabaseClient, tenantId: string) {
+  const groupIdByBaseId = new Map<string, string>();
+  const appIdByBaseId = new Map<string, string>();
+
+  for (const group of WORKSPACE_GROUPS) {
+    const tenantGroupId = buildTenantScopedId(tenantId, group.id);
+    groupIdByBaseId.set(group.id, tenantGroupId);
+
+    await database`
+      insert into groups (
+        id,
+        tenant_id,
+        slug,
+        name,
+        description,
+        created_at,
+        updated_at
+      )
+      values (
+        ${tenantGroupId},
+        ${tenantId},
+        ${group.id.replace(/^grp_/, '').replace(/_/g, '-')},
+        ${group.name},
+        ${group.description},
+        now(),
+        now()
+      )
+    `;
+  }
+
+  for (const app of WORKSPACE_APPS) {
+    const tenantAppId = buildTenantScopedId(tenantId, app.id);
+    appIdByBaseId.set(app.id, tenantAppId);
+
+    await database`
+      insert into workspace_apps (
+        id,
+        tenant_id,
+        slug,
+        name,
+        summary,
+        kind,
+        status,
+        short_code,
+        tags,
+        launch_cost,
+        sort_order,
+        created_at,
+        updated_at
+      )
+      values (
+        ${tenantAppId},
+        ${tenantId},
+        ${app.slug},
+        ${app.name},
+        ${app.summary},
+        ${app.kind},
+        ${app.status},
+        ${app.shortCode},
+        ${JSON.stringify(app.tags)}::jsonb,
+        ${app.launchCost},
+        ${app.sortOrder},
+        now(),
+        now()
+      )
+    `;
+  }
+
+  for (const app of WORKSPACE_APPS) {
+    const tenantAppId = appIdByBaseId.get(app.id)!;
+
+    for (const groupId of app.grantedGroupIds) {
+      const tenantGroupId = groupIdByBaseId.get(groupId);
+
+      if (!tenantGroupId) {
+        continue;
+      }
+
+      await database`
+        insert into workspace_group_app_grants (
+          id,
+          tenant_id,
+          group_id,
+          app_id,
+          created_at
+        )
+        values (
+          ${randomUUID()},
+          ${tenantId},
+          ${tenantGroupId},
+          ${tenantAppId},
+          now()
+        )
+      `;
+
+      await database`
+        insert into workspace_app_access_grants (
+          id,
+          tenant_id,
+          app_id,
+          subject_type,
+          subject_id,
+          effect,
+          created_at
+        )
+        values (
+          ${randomUUID()},
+          ${tenantId},
+          ${tenantAppId},
+          'group',
+          ${tenantGroupId},
+          'allow',
+          now()
+        )
+      `;
+    }
+
+    for (const roleId of app.grantedRoleIds) {
+      await database`
+        insert into workspace_app_access_grants (
+          id,
+          tenant_id,
+          app_id,
+          subject_type,
+          subject_id,
+          effect,
+          created_at
+        )
+        values (
+          ${randomUUID()},
+          ${tenantId},
+          ${tenantAppId},
+          'role',
+          ${roleId},
+          'allow',
+          now()
+        )
+      `;
+    }
+  }
+
+  return {
+    groupIdByBaseId,
+    appIdByBaseId,
+  };
+}
+
 function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
   return {
     action: filters.action?.trim() || null,
@@ -446,6 +666,118 @@ async function listAppSummariesForTenant(database: DatabaseClient, tenantId: str
   });
 }
 
+async function listTenantSummaries(database: DatabaseClient) {
+  const [tenants, userCounts, groupCounts, appCounts, adminCounts, primaryAdminRows] =
+    await Promise.all([
+      database<TenantRow[]>`
+        select id, slug, name, status, created_at, updated_at
+        from tenants
+        order by created_at asc, slug asc
+      `,
+      database<TenantUserCountRow[]>`
+        select tenant_id, count(*)::int as user_count
+        from users
+        group by tenant_id
+      `,
+      database<TenantGroupCountRow[]>`
+        select tenant_id, count(*)::int as group_count
+        from groups
+        group by tenant_id
+      `,
+      database<TenantAppCountRow[]>`
+        select tenant_id, count(*)::int as app_count
+        from workspace_apps
+        group by tenant_id
+      `,
+      database<TenantAdminCountRow[]>`
+        select tenant_id, count(distinct user_id)::int as admin_count
+        from rbac_user_roles
+        where role_id in ('tenant_admin', 'root_admin')
+          and (expires_at is null or expires_at > now())
+        group by tenant_id
+      `,
+      database<TenantPrimaryAdminRow[]>`
+        select distinct on (rur.tenant_id)
+          rur.tenant_id,
+          u.id as user_id,
+          u.email as user_email,
+          u.display_name as user_display_name
+        from rbac_user_roles rur
+        inner join users u on u.id = rur.user_id
+        where rur.role_id in ('tenant_admin', 'root_admin')
+          and (rur.expires_at is null or rur.expires_at > now())
+        order by rur.tenant_id asc, rur.created_at asc, u.created_at asc
+      `,
+    ]);
+
+  const userCountByTenantId = new Map(userCounts.map(row => [row.tenant_id, row.user_count]));
+  const groupCountByTenantId = new Map(groupCounts.map(row => [row.tenant_id, row.group_count]));
+  const appCountByTenantId = new Map(appCounts.map(row => [row.tenant_id, row.app_count]));
+  const adminCountByTenantId = new Map(adminCounts.map(row => [row.tenant_id, row.admin_count]));
+  const primaryAdminByTenantId = new Map(
+    primaryAdminRows.map(row => [
+      row.tenant_id,
+      {
+        id: row.user_id,
+        email: row.user_email,
+        displayName: row.user_display_name,
+      },
+    ])
+  );
+
+  return tenants.map(tenant => ({
+    id: tenant.id,
+    slug: tenant.slug,
+    name: tenant.name,
+    status: tenant.status,
+    createdAt: toIso(tenant.created_at)!,
+    updatedAt: toIso(tenant.updated_at)!,
+    userCount: userCountByTenantId.get(tenant.id) ?? 0,
+    groupCount: groupCountByTenantId.get(tenant.id) ?? 0,
+    appCount: appCountByTenantId.get(tenant.id) ?? 0,
+    adminCount: adminCountByTenantId.get(tenant.id) ?? 0,
+    primaryAdmin: primaryAdminByTenantId.get(tenant.id) ?? null,
+  }));
+}
+
+async function findTenantSummary(database: DatabaseClient, tenantId: string) {
+  const tenants = await listTenantSummaries(database);
+
+  return tenants.find(tenant => tenant.id === tenantId) ?? null;
+}
+
+async function seedTenantQuotaLimits(
+  database: DatabaseClient,
+  user: AuthUser,
+  memberGroupIds: string[]
+) {
+  const seeds = buildDefaultQuotaLimitRecords(user, memberGroupIds);
+
+  for (const seed of seeds) {
+    await database`
+      insert into workspace_quota_limits (
+        id,
+        tenant_id,
+        scope,
+        scope_id,
+        scope_label,
+        monthly_limit,
+        base_used
+      )
+      values (
+        ${`quota_${seed.scope}_${seed.scopeId}`},
+        ${user.tenantId},
+        ${seed.scope},
+        ${seed.scopeId},
+        ${seed.scopeLabel},
+        ${seed.limit},
+        ${seed.baseUsed}
+      )
+      on conflict (tenant_id, scope, scope_id) do nothing
+    `;
+  }
+}
+
 function toMutationError(
   code: AdminMutationErrorResult['code'],
   message: string,
@@ -467,6 +799,355 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
       const roleIds = await ensureDefaultRoles(database, user);
 
       return roleIds.includes('tenant_admin') || roleIds.includes('root_admin');
+    },
+    async canReadPlatformAdminForUser(user) {
+      const roleIds = await ensureDefaultRoles(database, user);
+
+      return roleIds.includes('root_admin');
+    },
+    async listTenantsForUser() {
+      return listTenantSummaries(database);
+    },
+    async createTenantForUser(user, input) {
+      const name = input.name.trim();
+      const slug = normalizeTenantSlug(input.slug);
+      const adminEmail = normalizeEmail(input.adminEmail);
+      const adminDisplayName = input.adminDisplayName?.trim() || adminEmail.split('@')[0] || 'Tenant Admin';
+
+      if (!name || !slug || !adminEmail || !isValidEmail(adminEmail)) {
+        return toMutationError(
+          'ADMIN_INVALID_PAYLOAD',
+          'Tenant creation requires a tenant name, slug and bootstrap admin email.',
+          undefined,
+          400
+        );
+      }
+
+      const tenantId = buildTenantIdFromSlug(slug);
+      const [existingTenant] = await database<ExistingTenantRow[]>`
+        select id, slug, status
+        from tenants
+        where id = ${tenantId}
+           or slug = ${slug}
+        limit 1
+      `;
+
+      if (existingTenant) {
+        return toMutationError(
+          'ADMIN_CONFLICT',
+          'A tenant with this slug already exists.',
+          {
+            tenantId: existingTenant.id,
+            slug: existingTenant.slug,
+          },
+          409
+        );
+      }
+
+      const [existingUser] = await database<{ id: string; tenant_id: string }[]>`
+        select id, tenant_id
+        from users
+        where lower(email) = ${adminEmail}
+        limit 1
+      `;
+
+      if (existingUser) {
+        return toMutationError(
+          'ADMIN_CONFLICT',
+          'The bootstrap admin email already belongs to an existing account.',
+          {
+            adminEmail,
+            userId: existingUser.id,
+            tenantId: existingUser.tenant_id,
+          },
+          409
+        );
+      }
+
+      const [existingInvitation] = await database<{ id: string; tenant_id: string }[]>`
+        select id, tenant_id
+        from invitations
+        where lower(email) = ${adminEmail}
+          and status = 'pending'
+        limit 1
+      `;
+
+      if (existingInvitation) {
+        return toMutationError(
+          'ADMIN_CONFLICT',
+          'The bootstrap admin email already has a pending invitation.',
+          {
+            adminEmail,
+            invitationId: existingInvitation.id,
+            tenantId: existingInvitation.tenant_id,
+          },
+          409
+        );
+      }
+
+      const invitedUserId = randomUUID();
+      const invitationId = randomUUID();
+      const invitationToken = randomUUID();
+      const invitationExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const invitationUrl = `/invite/accept?token=${invitationToken}`;
+
+      await database.begin(async transaction => {
+        const tx = transaction as unknown as DatabaseClient;
+
+        await tx`
+          insert into tenants (
+            id,
+            slug,
+            name,
+            status,
+            metadata,
+            created_at,
+            updated_at
+          )
+          values (
+            ${tenantId},
+            ${slug},
+            ${name},
+            'active',
+            ${JSON.stringify({
+              bootstrapAdminEmail: adminEmail,
+              createdByRootAdminUserId: user.id,
+            })}::jsonb,
+            now(),
+            now()
+          )
+        `;
+
+        const seededResources = await seedTenantWorkspaceResources(tx, tenantId);
+
+        await tx`
+          insert into users (
+            id,
+            tenant_id,
+            email,
+            display_name,
+            status,
+            password_hash,
+            failed_login_count,
+            locked_until,
+            is_email_verified,
+            last_login_at,
+            created_at,
+            updated_at
+          )
+          values (
+            ${invitedUserId},
+            ${tenantId},
+            ${adminEmail},
+            ${adminDisplayName},
+            'pending',
+            null,
+            0,
+            null,
+            false,
+            null,
+            now(),
+            now()
+          )
+        `;
+
+        const memberGroupIds = resolveDefaultMemberGroupIds(adminEmail)
+          .map(groupId => seededResources.groupIdByBaseId.get(groupId))
+          .filter((groupId): groupId is string => Boolean(groupId));
+
+        for (const [index, groupId] of memberGroupIds.entries()) {
+          await tx`
+            insert into group_members (
+              id,
+              tenant_id,
+              group_id,
+              user_id,
+              role,
+              is_primary,
+              created_at
+            )
+            values (
+              ${randomUUID()},
+              ${tenantId},
+              ${groupId},
+              ${invitedUserId},
+              'member',
+              ${index === 0},
+              now()
+            )
+          `;
+        }
+
+        for (const roleId of ['tenant_admin', 'user']) {
+          await tx`
+            insert into rbac_user_roles (
+              id,
+              tenant_id,
+              user_id,
+              role_id,
+              created_at
+            )
+            values (
+              ${randomUUID()},
+              ${tenantId},
+              ${invitedUserId},
+              ${roleId},
+              now()
+            )
+            on conflict (tenant_id, user_id, role_id) do nothing
+          `;
+        }
+
+        const bootstrapAdminUser: AuthUser = {
+          id: invitedUserId,
+          tenantId,
+          email: adminEmail,
+          displayName: adminDisplayName,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          lastLoginAt: null,
+        };
+
+        await seedTenantQuotaLimits(tx, bootstrapAdminUser, memberGroupIds);
+
+        await tx`
+          insert into invitations (
+            id,
+            tenant_id,
+            invited_by_user_id,
+            email,
+            token_hash,
+            status,
+            expires_at,
+            accepted_at,
+            created_at
+          )
+          values (
+            ${invitationId},
+            ${tenantId},
+            ${user.id},
+            ${adminEmail},
+            ${hashToken(invitationToken)},
+            'pending',
+            ${invitationExpiresAt}::timestamptz,
+            null,
+            now()
+          )
+        `;
+      });
+
+      const tenant = await findTenantSummary(database, tenantId);
+
+      if (!tenant) {
+        return toMutationError(
+          'ADMIN_NOT_FOUND',
+          'The created tenant could not be loaded from persistence.',
+          {
+            tenantId,
+          }
+        );
+      }
+
+      return {
+        ok: true,
+        data: {
+          tenant,
+          bootstrapInvitation: {
+            invitationId,
+            invitedUserId,
+            email: adminEmail,
+            inviteToken: invitationToken,
+            inviteUrl: invitationUrl,
+            expiresAt: invitationExpiresAt,
+          },
+        },
+      };
+    },
+    async updateTenantStatusForUser(user, input) {
+      const tenantId = input.tenantId.trim();
+      const reason = input.reason?.trim() || null;
+
+      if (!tenantId || (input.status !== 'active' && input.status !== 'suspended')) {
+        return toMutationError(
+          'ADMIN_INVALID_PAYLOAD',
+          'Tenant status updates require a tenant id and active/suspended status.',
+          undefined,
+          400
+        );
+      }
+
+      if (tenantId === user.tenantId && input.status === 'suspended') {
+        return toMutationError(
+          'ADMIN_CONFLICT',
+          'Root admins cannot suspend their current tenant while using it.',
+          {
+            tenantId,
+          },
+          409
+        );
+      }
+
+      const [existingTenant] = await database<ExistingTenantRow[]>`
+        select id, slug, status
+        from tenants
+        where id = ${tenantId}
+        limit 1
+      `;
+
+      if (!existingTenant) {
+        return toMutationError(
+          'ADMIN_NOT_FOUND',
+          'The target tenant could not be found.',
+          {
+            tenantId,
+          }
+        );
+      }
+
+      if (existingTenant.status === input.status) {
+        return toMutationError(
+          'ADMIN_CONFLICT',
+          `The tenant is already ${input.status}.`,
+          {
+            tenantId,
+            status: input.status,
+          },
+          409
+        );
+      }
+
+      await database`
+        update tenants
+        set status = ${input.status},
+            metadata = coalesce(metadata, '{}'::jsonb) || ${JSON.stringify({
+              lastLifecycleActorUserId: user.id,
+              lastLifecycleReason: reason,
+              lastLifecycleStatus: input.status,
+            })}::jsonb,
+            updated_at = now()
+        where id = ${tenantId}
+      `;
+
+      const tenant = await findTenantSummary(database, tenantId);
+
+      if (!tenant) {
+        return toMutationError(
+          'ADMIN_NOT_FOUND',
+          'The updated tenant could not be loaded from persistence.',
+          {
+            tenantId,
+          }
+        );
+      }
+
+      return {
+        ok: true,
+        data: {
+          tenant,
+          previousStatus: existingTenant.status,
+          reason,
+        },
+      };
     },
     async listUsersForUser(user) {
       const [users, memberships, roles, mfaRows] = await Promise.all([

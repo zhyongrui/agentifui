@@ -71,12 +71,16 @@ export type AuthAuditAction =
   | 'workspace.quota.launch_blocked'
   | 'workspace.quota.usage_recorded'
   | 'workspace.run.stop_requested'
+  | 'admin.tenant.created'
+  | 'admin.tenant.suspended'
+  | 'admin.tenant.reactivated'
   | 'admin.workspace.read'
   | 'admin.workspace_grant.created'
   | 'admin.workspace_grant.revoked'
   | 'admin.workspace_grant.rejected';
 
 export type AuthAuditEntityType =
+  | 'tenant'
   | 'user'
   | 'session'
   | 'workspace_app'

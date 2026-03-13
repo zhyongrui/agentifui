@@ -41,16 +41,33 @@ export async function migrateDatabase(
     .sort((left, right) => left.localeCompare(right));
 
   await client.unsafe(`
-    create table if not exists _agentifui_migrations (
+    create table if not exists public._agentifui_migrations (
       filename varchar(255) primary key,
       applied_at timestamptz not null default now()
     );
   `);
 
-  const appliedRows = await client<{ filename: string }[]>`
-    select filename
-    from _agentifui_migrations
-  `;
+  let appliedRows: { filename: string }[] = [];
+
+  try {
+    appliedRows = (await client.unsafe(
+      'select filename from public._agentifui_migrations'
+    )) as { filename: string }[];
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : null;
+
+    if (code !== '42P01') {
+      throw error;
+    }
+
+    await client.unsafe(`
+      create table if not exists public._agentifui_migrations (
+        filename varchar(255) primary key,
+        applied_at timestamptz not null default now()
+      );
+    `);
+  }
+
   const appliedFiles = new Set(appliedRows.map(row => row.filename));
 
   for (const filename of migrationFiles) {
@@ -63,7 +80,7 @@ export async function migrateDatabase(
     await client.begin(async transaction => {
       await transaction.unsafe(sql);
       await transaction.unsafe(
-        'insert into _agentifui_migrations (filename) values ($1)',
+        'insert into public._agentifui_migrations (filename) values ($1)',
         [filename]
       );
     });

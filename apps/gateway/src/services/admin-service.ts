@@ -7,6 +7,8 @@ import type {
   AdminAuditEventSummary,
   AdminAuditFilters,
   AdminAuditPayloadMode,
+  AdminTenantBootstrapInvitation,
+  AdminTenantSummary,
   AdminErrorCode,
   AdminGroupSummary,
   AdminUserSummary,
@@ -48,8 +50,49 @@ type RevokeAppGrantInput = {
   grantId: string;
 };
 
+type CreateTenantInput = {
+  name: string;
+  slug: string;
+  adminEmail: string;
+  adminDisplayName?: string | null;
+};
+
+type UpdateTenantStatusInput = {
+  tenantId: string;
+  status: AdminTenantSummary['status'];
+  reason?: string | null;
+};
+
 type AdminService = {
   canReadAdminForUser(user: AuthUser): boolean | Promise<boolean>;
+  canReadPlatformAdminForUser(user: AuthUser): boolean | Promise<boolean>;
+  listTenantsForUser(user: AuthUser): AdminTenantSummary[] | Promise<AdminTenantSummary[]>;
+  createTenantForUser(
+    user: AuthUser,
+    input: CreateTenantInput
+  ): Promise<
+    AdminMutationResult<{
+      tenant: AdminTenantSummary;
+      bootstrapInvitation: AdminTenantBootstrapInvitation;
+    }>
+  > | AdminMutationResult<{
+    tenant: AdminTenantSummary;
+    bootstrapInvitation: AdminTenantBootstrapInvitation;
+  }>;
+  updateTenantStatusForUser(
+    user: AuthUser,
+    input: UpdateTenantStatusInput
+  ): Promise<
+    AdminMutationResult<{
+      tenant: AdminTenantSummary;
+      previousStatus: AdminTenantSummary['status'];
+      reason: string | null;
+    }>
+  > | AdminMutationResult<{
+    tenant: AdminTenantSummary;
+    previousStatus: AdminTenantSummary['status'];
+    reason: string | null;
+  }>;
   listUsersForUser(user: AuthUser): AdminUserSummary[] | Promise<AdminUserSummary[]>;
   listGroupsForUser(user: AuthUser): AdminGroupSummary[] | Promise<AdminGroupSummary[]>;
   listAppsForUser(user: AuthUser): AdminAppSummary[] | Promise<AdminAppSummary[]>;
@@ -120,6 +163,28 @@ function canReadAdmin(email: string) {
   const roleIds = resolveDefaultRoleIds(email);
 
   return roleIds.includes('tenant_admin') || roleIds.includes('root_admin');
+}
+
+function canReadPlatformAdmin(email: string) {
+  return resolveDefaultRoleIds(email).includes('root_admin');
+}
+
+function formatTenantName(tenantId: string) {
+  return tenantId
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function normalizeTenantSlug(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildTenantIdFromSlug(slug: string) {
+  return `tenant-${slug}`;
 }
 
 function buildInMemoryAuditEvent(
@@ -208,6 +273,33 @@ function buildInMemoryUsers(user: AuthUser): AdminUserSummary[] {
       mfaEnabled: true,
       roleIds: ['user'],
       groupMemberships: toGroupMemberships('security-audit@example.net'),
+    },
+  ];
+}
+
+function buildInMemoryTenants(user: AuthUser): AdminTenantSummary[] {
+  const users = buildInMemoryUsers(user);
+  const primaryAdmin = canReadAdmin(user.email)
+    ? {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+      }
+    : null;
+
+  return [
+    {
+      id: user.tenantId,
+      slug: user.tenantId.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      name: formatTenantName(user.tenantId),
+      status: 'active',
+      createdAt: user.createdAt,
+      updatedAt: user.lastLoginAt ?? user.createdAt,
+      userCount: users.length,
+      groupCount: WORKSPACE_GROUPS.length,
+      appCount: WORKSPACE_APPS.length,
+      adminCount: primaryAdmin ? 1 : 0,
+      primaryAdmin,
     },
   ];
 }
@@ -306,10 +398,150 @@ function matchesAuditFilters(event: AdminAuditEventSummary, filters: AdminAuditF
 
 export function createAdminService(): AdminService {
   const memoryGrants: InMemoryAppGrant[] = [];
+  const memoryTenants = new Map<string, AdminTenantSummary>();
 
   return {
     canReadAdminForUser(user) {
       return canReadAdmin(user.email);
+    },
+    canReadPlatformAdminForUser(user) {
+      return canReadPlatformAdmin(user.email);
+    },
+    listTenantsForUser(user) {
+      const tenants = new Map(buildInMemoryTenants(user).map(tenant => [tenant.id, tenant]));
+
+      for (const tenant of memoryTenants.values()) {
+        tenants.set(tenant.id, tenant);
+      }
+
+      return [...tenants.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    },
+    createTenantForUser(user, input) {
+      const slug = normalizeTenantSlug(input.slug);
+      const name = input.name.trim();
+      const adminEmail = input.adminEmail.trim().toLowerCase();
+
+      if (!slug || !name || !adminEmail) {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: 'ADMIN_INVALID_PAYLOAD',
+          message: 'Tenant creation requires a tenant name, slug and bootstrap admin email.',
+        };
+      }
+
+      const tenantId = buildTenantIdFromSlug(slug);
+
+      if (memoryTenants.has(tenantId)) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: 'ADMIN_CONFLICT',
+          message: 'A tenant with this slug already exists.',
+          details: {
+            slug,
+            tenantId,
+          },
+        };
+      }
+
+      const createdAt = new Date().toISOString();
+      const invitedUserId = `user_${randomUUID()}`;
+      const inviteToken = randomUUID();
+      const invitationId = `invite_${randomUUID()}`;
+      const tenant: AdminTenantSummary = {
+        id: tenantId,
+        slug,
+        name,
+        status: 'active',
+        createdAt,
+        updatedAt: createdAt,
+        userCount: 1,
+        groupCount: WORKSPACE_GROUPS.length,
+        appCount: WORKSPACE_APPS.length,
+        adminCount: 1,
+        primaryAdmin: {
+          id: invitedUserId,
+          email: adminEmail,
+          displayName: input.adminDisplayName?.trim() || adminEmail.split('@')[0] || 'Tenant Admin',
+        },
+      };
+
+      memoryTenants.set(tenant.id, tenant);
+
+      return {
+        ok: true,
+        data: {
+          tenant,
+          bootstrapInvitation: {
+            invitationId,
+            invitedUserId,
+            email: adminEmail,
+            inviteToken,
+            inviteUrl: `/invite/accept?token=${inviteToken}`,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        },
+      };
+    },
+    updateTenantStatusForUser(user, input) {
+      const tenantId = input.tenantId.trim();
+      const existingTenant =
+        memoryTenants.get(tenantId) ?? buildInMemoryTenants(user).find(tenant => tenant.id === tenantId);
+
+      if (!existingTenant) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The target tenant could not be found.',
+          details: {
+            tenantId,
+          },
+        };
+      }
+
+      if (tenantId === user.tenantId && input.status === 'suspended') {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: 'ADMIN_CONFLICT',
+          message: 'Root admins cannot suspend their current tenant while using it.',
+          details: {
+            tenantId,
+          },
+        };
+      }
+
+      if (existingTenant.status === input.status) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: 'ADMIN_CONFLICT',
+          message: `The tenant is already ${input.status}.`,
+          details: {
+            tenantId,
+            status: input.status,
+          },
+        };
+      }
+
+      const updatedTenant: AdminTenantSummary = {
+        ...existingTenant,
+        status: input.status,
+        updatedAt: new Date().toISOString(),
+      };
+
+      memoryTenants.set(updatedTenant.id, updatedTenant);
+
+      return {
+        ok: true,
+        data: {
+          tenant: updatedTenant,
+          previousStatus: existingTenant.status,
+          reason: input.reason?.trim() || null,
+        },
+      };
     },
     listUsersForUser(user) {
       return buildInMemoryUsers(user);

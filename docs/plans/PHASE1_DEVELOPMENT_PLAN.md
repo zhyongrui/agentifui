@@ -697,6 +697,23 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 | R13-A5 | 平台审计页 | 平台级别查看多租户高风险事件 | UI 可用 |
 | R13-A6 | root_admin 边界强化 | root_admin 与 tenant_admin 差异固化 | 权限测试通过 |
 
+当前进度补充：
+
+- `R13-A1` 已完成：
+  - shared admin 合同已补齐 platform tenant summary、create、suspend/reactivate DTO
+  - audit 合同已补齐 `admin.tenant.created`、`admin.tenant.suspended`、`admin.tenant.reactivated`
+- `R13-A2` 已完成：
+  - `GET /admin/tenants` 已限制为 `root_admin`
+  - Web `/admin/tenants` 已有真实 inventory 视图
+- `R13-A3` 已完成：
+  - `POST /admin/tenants` 可创建新租户、默认 groups/apps/quota、bootstrap admin 和 invitation
+  - 新租户资源使用 tenant-scoped id 复制，避免复用根租户固定 `grp_*` / `app_*` 主键
+- `R13-A4` 已完成：
+  - `PUT /admin/tenants/:tenantId/status` 支持 suspend/reactivate
+  - tenant suspend 通过 auth service 的 effective user status 映射拦截登录、MFA、workspace 访问
+  - root admin 不能在当前会话里 suspend 自己所在 tenant
+- `R13-A5` / `R13-A6` 仍待完成，是当前 Phase 1 最后一个激活块
+
 #### R13-B `S3-3` 稳定公网入口与部署硬化
 
 | 编号 | 任务 | 目标 | 完成定义 |
@@ -723,16 +740,15 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 
 当前默认按下面顺序执行，不再每轮重新定义优先级：
 
-1. `R13-A1` / `R13-A2` 平台管理合同与 tenant list 读接口
-2. `R13-A3` / `R13-A4` tenant create、suspend、reactivate
-3. `R13-A5` / `R13-A6` 平台审计页与 root_admin 权限边界
-4. `Phase 1` 收尾回归、部署复核与遗留文档清理
+1. `R13-A5` / `R13-A6` 平台审计页与 root_admin 权限边界
+2. `Phase 1` 收尾回归、部署复核与遗留文档清理
+3. 新阶段长期计划整理
 
 一旦 `R13-A` 全部完成，就意味着当前 `PHASE1` 任务板收口，下一轮应立即开启新的阶段性规划，而不是停在“已完成”状态。
 
 如果公网入口或部署环境被阻塞，则按下面的降级顺序切换：
 
-1. `R13-A` 平台管理与租户生命周期
+1. `R13-A5` / `R13-A6`
 2. `Phase 1` 收尾回归与发布复核
 
 ## 13. 2026-03-12 进度快照

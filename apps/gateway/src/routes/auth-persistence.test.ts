@@ -2,6 +2,8 @@ import type {
   AdminAppsResponse,
   AdminAuditResponse,
   AdminGroupsResponse,
+  AdminTenantCreateResponse,
+  AdminTenantStatusUpdateResponse,
   AdminUsersResponse,
 } from '@agentifui/shared/admin';
 import type {
@@ -2179,6 +2181,280 @@ describe.sequential('persistent auth runtime', () => {
             }),
           ])
         );
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'persists platform tenant lifecycle and enforces suspended tenant access boundaries',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'root-admin@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Root Admin',
+          },
+        });
+
+        const rootAdminLogin = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'root-admin@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(rootAdminLogin.statusCode).toBe(200);
+        const rootAdminSessionToken = rootAdminLogin.json().data.sessionToken as string;
+
+        const createTenantResponse = await app.inject({
+          method: 'POST',
+          url: '/admin/tenants',
+          headers: {
+            authorization: `Bearer ${rootAdminSessionToken}`,
+          },
+          payload: {
+            name: 'Acme Platform',
+            slug: 'acme-platform',
+            adminEmail: 'owner@acme.example',
+            adminDisplayName: 'Acme Owner',
+          },
+        });
+
+        expect(createTenantResponse.statusCode).toBe(200);
+        const createdTenantBody = createTenantResponse.json() as AdminTenantCreateResponse;
+        expect(createdTenantBody.data.tenant).toMatchObject({
+          id: 'tenant-acme-platform',
+          slug: 'acme-platform',
+          status: 'active',
+          groupCount: 3,
+          appCount: 7,
+          adminCount: 1,
+          primaryAdmin: {
+            email: 'owner@acme.example',
+          },
+        });
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const [groupCounts, appCounts, quotaCounts, roleRows, auditRows] = await Promise.all([
+            runtimeDatabase<{ count: number }[]>`
+              select count(*)::int as count
+              from groups
+              where tenant_id = 'tenant-acme-platform'
+            `,
+            runtimeDatabase<{ count: number }[]>`
+              select count(*)::int as count
+              from workspace_apps
+              where tenant_id = 'tenant-acme-platform'
+            `,
+            runtimeDatabase<{ count: number }[]>`
+              select count(*)::int as count
+              from workspace_quota_limits
+              where tenant_id = 'tenant-acme-platform'
+            `,
+            runtimeDatabase<{ role_id: string }[]>`
+              select role_id
+              from rbac_user_roles
+              where tenant_id = 'tenant-acme-platform'
+              order by role_id asc
+            `,
+            runtimeDatabase<{ action: string }[]>`
+              select action
+              from audit_events
+              where tenant_id = 'tenant-acme-platform'
+                and entity_id = 'tenant-acme-platform'
+              order by occurred_at asc
+            `,
+          ]);
+
+          expect(groupCounts[0]?.count).toBe(3);
+          expect(appCounts[0]?.count).toBe(7);
+          expect(quotaCounts[0]?.count).toBe(4);
+          expect(roleRows.map(row => row.role_id)).toEqual(['tenant_admin', 'user']);
+          expect(auditRows).toEqual([
+            {
+              action: 'admin.tenant.created',
+            },
+          ]);
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
+
+        const acceptInvitationResponse = await app.inject({
+          method: 'POST',
+          url: '/auth/invitations/accept',
+          payload: {
+            token: createdTenantBody.data.bootstrapInvitation.inviteToken,
+            password: 'Secure123',
+            displayName: 'Acme Owner Activated',
+          },
+        });
+
+        expect(acceptInvitationResponse.statusCode).toBe(200);
+        expect(acceptInvitationResponse.json().data.user).toMatchObject({
+          tenantId: 'tenant-acme-platform',
+          email: 'owner@acme.example',
+          status: 'active',
+        });
+
+        const tenantAdminLogin = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'owner@acme.example',
+            password: 'Secure123',
+          },
+        });
+
+        expect(tenantAdminLogin.statusCode).toBe(200);
+        const tenantAdminSessionToken = tenantAdminLogin.json().data.sessionToken as string;
+
+        const tenantWorkspaceBeforeSuspend = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${tenantAdminSessionToken}`,
+          },
+        });
+
+        expect(tenantWorkspaceBeforeSuspend.statusCode).toBe(200);
+        expect(
+          (tenantWorkspaceBeforeSuspend.json() as WorkspaceCatalogResponse).data.apps.map(
+            workspaceApp => workspaceApp.name
+          )
+        ).toContain('Tenant Control');
+
+        const suspendTenantResponse = await app.inject({
+          method: 'PUT',
+          url: '/admin/tenants/tenant-acme-platform/status',
+          headers: {
+            authorization: `Bearer ${rootAdminSessionToken}`,
+          },
+          payload: {
+            status: 'suspended',
+            reason: 'maintenance window',
+          },
+        });
+
+        expect(suspendTenantResponse.statusCode).toBe(200);
+        expect((suspendTenantResponse.json() as AdminTenantStatusUpdateResponse).data).toMatchObject({
+          previousStatus: 'active',
+          tenant: {
+            status: 'suspended',
+          },
+        });
+
+        const tenantWorkspaceAfterSuspend = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${tenantAdminSessionToken}`,
+          },
+        });
+
+        expect(tenantWorkspaceAfterSuspend.statusCode).toBe(403);
+        expect(tenantWorkspaceAfterSuspend.json()).toMatchObject({
+          ok: false,
+          error: {
+            code: 'WORKSPACE_FORBIDDEN',
+            details: {
+              status: 'suspended',
+            },
+          },
+        });
+
+        const tenantLoginWhileSuspended = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'owner@acme.example',
+            password: 'Secure123',
+          },
+        });
+
+        expect(tenantLoginWhileSuspended.statusCode).toBe(403);
+        expect(tenantLoginWhileSuspended.json()).toMatchObject({
+          ok: false,
+          error: {
+            code: 'AUTH_FORBIDDEN',
+            details: {
+              tenantStatus: 'suspended',
+            },
+          },
+        });
+
+        const reactivateTenantResponse = await app.inject({
+          method: 'PUT',
+          url: '/admin/tenants/tenant-acme-platform/status',
+          headers: {
+            authorization: `Bearer ${rootAdminSessionToken}`,
+          },
+          payload: {
+            status: 'active',
+            reason: 'maintenance complete',
+          },
+        });
+
+        expect(reactivateTenantResponse.statusCode).toBe(200);
+        expect((reactivateTenantResponse.json() as AdminTenantStatusUpdateResponse).data).toMatchObject({
+          previousStatus: 'suspended',
+          tenant: {
+            status: 'active',
+          },
+        });
+
+        const tenantWorkspaceAfterReactivate = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${tenantAdminSessionToken}`,
+          },
+        });
+
+        expect(tenantWorkspaceAfterReactivate.statusCode).toBe(200);
+
+        const verificationDatabase = createPersistentTestDatabase();
+
+        try {
+          const lifecycleAuditRows = await verificationDatabase<{ action: string }[]>`
+            select action
+            from audit_events
+            where tenant_id = 'tenant-acme-platform'
+              and entity_id = 'tenant-acme-platform'
+            order by occurred_at asc
+          `;
+
+          expect(lifecycleAuditRows).toEqual([
+            {
+              action: 'admin.tenant.created',
+            },
+            {
+              action: 'admin.tenant.suspended',
+            },
+            {
+              action: 'admin.tenant.reactivated',
+            },
+          ]);
+        } finally {
+          await verificationDatabase.end({ timeout: 5 });
+        }
       } finally {
         if (!appClosed) {
           await app.close();

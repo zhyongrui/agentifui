@@ -775,3 +775,61 @@ test('admin pages render persisted governance data for tenant admins', async ({ 
   await expectAppsWorkspace(page);
   await expect(appCard(page, 'Tenant Control')).toBeVisible();
 });
+
+test('root admins can open the platform tenant inventory page', async ({ page }) => {
+  const rootAdminEmail = uniqueEmail('root-admin');
+  const tenantAdminEmail = uniqueEmail('tenant-owner');
+  const tenantName = 'Acme Platform Tenant';
+
+  await register(page, {
+    email: rootAdminEmail,
+    displayName: 'Root Admin Browser User',
+  });
+  await expect(page).toHaveURL(/\/login\?registered=1$/);
+  await login(page, {
+    email: rootAdminEmail,
+  });
+  await expectAppsWorkspace(page);
+
+  await page.getByRole('link', { name: 'Admin preview' }).click();
+  await expect(page).toHaveURL(/\/admin\/users$/);
+
+  await page.getByRole('link', { name: 'Tenants' }).click();
+  await expect(page).toHaveURL(/\/admin\/tenants$/);
+  await expect(page.getByRole('heading', { name: 'Tenants' })).toBeVisible();
+  await expect(page.getByText('Total tenants')).toBeVisible();
+
+  await page.getByLabel('Tenant name').fill(tenantName);
+  await page.getByLabel('Tenant slug').fill('acme-platform');
+  await page.getByLabel('Bootstrap admin email').fill(tenantAdminEmail);
+  await page.getByLabel('Bootstrap admin display name').fill('Acme Owner');
+  await Promise.all([
+    waitForGatewayPost(page, '/admin/tenants'),
+    page.getByRole('button', { name: 'Create tenant' }).click(),
+  ]);
+
+  await expect(
+    page.getByText(`Bootstrap invite ready for ${tenantAdminEmail}.`)
+  ).toBeVisible();
+  await expect(page.getByText('/invite/accept?token=')).toBeVisible();
+
+  const tenantCard = page.locator('article.admin-card').filter({
+    has: page.getByRole('heading', { name: tenantName }),
+  });
+  await expect(tenantCard).toBeVisible();
+  await expect(tenantCard.getByText('active')).toBeVisible();
+
+  await Promise.all([
+    waitForGatewayPut(page, '/admin/tenants/tenant-acme-platform/status'),
+    tenantCard.getByRole('button', { name: 'Suspend tenant' }).click(),
+  ]);
+  await expect(page.getByText(`${tenantName} is now suspended.`)).toBeVisible();
+  await expect(tenantCard.getByText('suspended')).toBeVisible();
+
+  await Promise.all([
+    waitForGatewayPut(page, '/admin/tenants/tenant-acme-platform/status'),
+    tenantCard.getByRole('button', { name: 'Reactivate tenant' }).click(),
+  ]);
+  await expect(page.getByText(`${tenantName} is now active.`)).toBeVisible();
+  await expect(tenantCard.getByText('active')).toBeVisible();
+});

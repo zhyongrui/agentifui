@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createAdminTenant,
   createAdminAppGrant,
   exportAdminAudit,
   fetchAdminApps,
   fetchAdminAudit,
   fetchAdminGroups,
+  fetchAdminTenants,
   fetchAdminUsers,
   revokeAdminAppGrant,
+  updateAdminTenantStatus,
 } from './admin-client.js';
 
 afterEach(() => {
@@ -16,10 +19,10 @@ afterEach(() => {
 });
 
 describe('admin client', () => {
-  it('loads admin users through the same-origin gateway proxy', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
+  it('loads admin users and platform tenants through the same-origin gateway proxy', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
         json: async () => ({
           ok: true,
           data: {
@@ -28,21 +31,46 @@ describe('admin client', () => {
           },
         }),
       })
-    );
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-12T00:00:00.000Z',
+            tenants: [],
+          },
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
 
-    const result = await fetchAdminUsers('session-123');
+    const [usersResult, tenantsResult] = await Promise.all([
+      fetchAdminUsers('session-123'),
+      fetchAdminTenants('session-123'),
+    ]);
 
-    expect(fetch).toHaveBeenCalledWith('/api/gateway/admin/users', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/admin/users', {
       method: 'GET',
       headers: {
         authorization: 'Bearer session-123',
       },
       cache: 'no-store',
     });
-    expect(result).toMatchObject({
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/admin/tenants', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(usersResult).toMatchObject({
       ok: true,
       data: {
         users: [],
+      },
+    });
+    expect(tenantsResult).toMatchObject({
+      ok: true,
+      data: {
+        tenants: [],
       },
     });
   });
@@ -287,6 +315,107 @@ describe('admin client', () => {
       ok: true,
       data: {
         revokedGrantId: 'grant-1',
+      },
+    });
+  });
+
+  it('posts and updates platform tenants through the same-origin gateway proxy', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            tenant: {
+              id: 'tenant-acme',
+              slug: 'acme',
+              status: 'active',
+            },
+            bootstrapInvitation: {
+              invitationId: 'invite-1',
+              email: 'owner@acme.example',
+              inviteUrl: '/invite/accept?token=token-1',
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            tenant: {
+              id: 'tenant-acme',
+              slug: 'acme',
+              status: 'suspended',
+            },
+            previousStatus: 'active',
+            reason: 'maintenance window',
+          },
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const [createResult, updateResult] = await Promise.all([
+      createAdminTenant('session-123', {
+        name: 'Acme',
+        slug: 'acme',
+        adminEmail: 'owner@acme.example',
+        adminDisplayName: 'Acme Owner',
+      }),
+      updateAdminTenantStatus('session-123', 'tenant-acme', {
+        status: 'suspended',
+        reason: 'maintenance window',
+      }),
+    ]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/admin/tenants', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Acme',
+        slug: 'acme',
+        adminEmail: 'owner@acme.example',
+        adminDisplayName: 'Acme Owner',
+      }),
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/gateway/admin/tenants/tenant-acme/status',
+      {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer session-123',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: 'suspended',
+          reason: 'maintenance window',
+        }),
+        cache: 'no-store',
+      }
+    );
+    expect(createResult).toMatchObject({
+      ok: true,
+      data: {
+        tenant: {
+          id: 'tenant-acme',
+        },
+        bootstrapInvitation: {
+          invitationId: 'invite-1',
+        },
+      },
+    });
+    expect(updateResult).toMatchObject({
+      ok: true,
+      data: {
+        tenant: {
+          status: 'suspended',
+        },
+        previousStatus: 'active',
       },
     });
   });

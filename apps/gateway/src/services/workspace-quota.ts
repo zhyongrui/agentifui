@@ -18,7 +18,7 @@ type WorkspaceQuotaUsageTotals = {
 };
 
 function buildGroupQuotaSeed(groupId: string): WorkspaceQuotaLimitRecord {
-  if (groupId === 'grp_research') {
+  if (groupId === 'grp_research' || groupId.includes('grp_research')) {
     return {
       scope: 'group',
       scopeId: groupId,
@@ -28,7 +28,7 @@ function buildGroupQuotaSeed(groupId: string): WorkspaceQuotaLimitRecord {
     };
   }
 
-  if (groupId === 'grp_security') {
+  if (groupId === 'grp_security' || groupId.includes('grp_security')) {
     return {
       scope: 'group',
       scopeId: groupId,

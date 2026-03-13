@@ -5,6 +5,7 @@ import type {
   AdminAuditActionCount,
   AdminAuditEventSummary,
   AdminGroupSummary,
+  AdminTenantSummary,
   AdminUserSummary,
 } from '@agentifui/shared/admin';
 import { describe, expect, it, vi } from 'vitest';
@@ -72,6 +73,26 @@ const adminGroups: AdminGroupSummary[] = [
         status: 'ready',
       },
     ],
+  },
+];
+
+const adminTenants: AdminTenantSummary[] = [
+  {
+    id: 'tenant-dev',
+    slug: 'tenant-dev',
+    name: 'Tenant Dev',
+    status: 'active',
+    createdAt: '2026-03-12T00:00:00.000Z',
+    updatedAt: '2026-03-12T00:10:00.000Z',
+    userCount: 3,
+    groupCount: 3,
+    appCount: 7,
+    adminCount: 1,
+    primaryAdmin: {
+      id: 'user-admin',
+      email: 'admin@iflabx.com',
+      displayName: 'Admin User',
+    },
   },
 ];
 
@@ -143,9 +164,36 @@ const auditEvents: AdminAuditEventSummary[] = [
   },
 ];
 
-function createAdminService(canReadAdmin = true) {
+function createAdminService(canReadAdmin = true, canReadPlatformAdmin = false) {
   return {
     canReadAdminForUser: vi.fn().mockResolvedValue(canReadAdmin),
+    canReadPlatformAdminForUser: vi.fn().mockResolvedValue(canReadPlatformAdmin),
+    listTenantsForUser: vi.fn().mockResolvedValue(adminTenants),
+    createTenantForUser: vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        tenant: adminTenants[0],
+        bootstrapInvitation: {
+          invitationId: 'invite-1',
+          invitedUserId: 'user-admin',
+          email: 'owner@example.com',
+          inviteToken: 'token-1',
+          inviteUrl: '/invite/accept?token=token-1',
+          expiresAt: '2026-03-19T00:00:00.000Z',
+        },
+      },
+    }),
+    updateTenantStatusForUser: vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        tenant: {
+          ...adminTenants[0],
+          status: 'suspended',
+        },
+        previousStatus: 'active',
+        reason: 'maintenance window',
+      },
+    }),
     listUsersForUser: vi.fn().mockResolvedValue(adminUsers),
     listGroupsForUser: vi.fn().mockResolvedValue(adminGroups),
     listAppsForUser: vi.fn().mockResolvedValue(adminApps),
@@ -225,6 +273,224 @@ describe('admin routes', () => {
       });
     } finally {
       await app.close();
+    }
+  });
+
+  it('rejects tenant admins from platform tenant inventory and allows root admins through', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Tenant Admin',
+    });
+    authService.register({
+      email: 'root-admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Root Admin',
+    });
+
+    const tenantAdminLogin = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+    const rootAdminLogin = authService.login({
+      email: 'root-admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(tenantAdminLogin.ok).toBe(true);
+    expect(rootAdminLogin.ok).toBe(true);
+
+    if (!tenantAdminLogin.ok || !rootAdminLogin.ok) {
+      throw new Error('expected admin logins to succeed');
+    }
+
+    const tenantOnlyAdminService = createAdminService(true, false);
+    const rootAdminService = createAdminService(true, true);
+    const tenantApp = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService: tenantOnlyAdminService,
+    });
+    const rootApp = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService: rootAdminService,
+    });
+
+    try {
+      const forbiddenResponse = await tenantApp.inject({
+        method: 'GET',
+        url: '/admin/tenants',
+        headers: {
+          authorization: `Bearer ${tenantAdminLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(forbiddenResponse.statusCode).toBe(403);
+      expect(forbiddenResponse.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'ADMIN_FORBIDDEN',
+        },
+      });
+
+      const allowedResponse = await rootApp.inject({
+        method: 'GET',
+        url: '/admin/tenants',
+        headers: {
+          authorization: `Bearer ${rootAdminLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(allowedResponse.statusCode).toBe(200);
+      expect(allowedResponse.json()).toMatchObject({
+        ok: true,
+        data: {
+          tenants: adminTenants,
+        },
+      });
+    } finally {
+      await Promise.all([tenantApp.close(), rootApp.close()]);
+    }
+  });
+
+  it('allows root admins to create and suspend platform tenants while blocking tenant admins', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Tenant Admin',
+    });
+    authService.register({
+      email: 'root-admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Root Admin',
+    });
+
+    const tenantAdminLogin = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+    const rootAdminLogin = authService.login({
+      email: 'root-admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(tenantAdminLogin.ok).toBe(true);
+    expect(rootAdminLogin.ok).toBe(true);
+
+    if (!tenantAdminLogin.ok || !rootAdminLogin.ok) {
+      throw new Error('expected admin logins to succeed');
+    }
+
+    const tenantOnlyAdminService = createAdminService(true, false);
+    const rootAdminService = createAdminService(true, true);
+    const tenantApp = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService: tenantOnlyAdminService,
+    });
+    const rootAuditService = createAuditService();
+    const rootApp = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService: rootAdminService,
+      auditService: rootAuditService,
+    });
+
+    try {
+      const forbiddenCreateResponse = await tenantApp.inject({
+        method: 'POST',
+        url: '/admin/tenants',
+        headers: {
+          authorization: `Bearer ${tenantAdminLogin.data.sessionToken}`,
+        },
+        payload: {
+          name: 'Acme Tenant',
+          slug: 'acme',
+          adminEmail: 'owner@example.com',
+        },
+      });
+
+      expect(forbiddenCreateResponse.statusCode).toBe(403);
+      expect(forbiddenCreateResponse.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: 'ADMIN_FORBIDDEN',
+        },
+      });
+
+      const createResponse = await rootApp.inject({
+        method: 'POST',
+        url: '/admin/tenants',
+        headers: {
+          authorization: `Bearer ${rootAdminLogin.data.sessionToken}`,
+        },
+        payload: {
+          name: 'Acme Tenant',
+          slug: 'acme',
+          adminEmail: 'owner@example.com',
+          adminDisplayName: 'Acme Owner',
+        },
+      });
+
+      expect(createResponse.statusCode).toBe(200);
+      expect(rootAdminService.createTenantForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'root-admin@iflabx.com',
+        }),
+        {
+          name: 'Acme Tenant',
+          slug: 'acme',
+          adminEmail: 'owner@example.com',
+          adminDisplayName: 'Acme Owner',
+        }
+      );
+
+      const suspendResponse = await rootApp.inject({
+        method: 'PUT',
+        url: '/admin/tenants/tenant-dev/status',
+        headers: {
+          authorization: `Bearer ${rootAdminLogin.data.sessionToken}`,
+        },
+        payload: {
+          status: 'suspended',
+          reason: 'maintenance window',
+        },
+      });
+
+      expect(suspendResponse.statusCode).toBe(200);
+      expect(rootAdminService.updateTenantStatusForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'root-admin@iflabx.com',
+        }),
+        {
+          tenantId: 'tenant-dev',
+          status: 'suspended',
+          reason: 'maintenance window',
+        }
+      );
+
+      const auditEvents = await rootAuditService.listEvents({
+        actorUserId: rootAdminLogin.data.user.id,
+      });
+      expect(auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'admin.tenant.created',
+            entityType: 'tenant',
+            entityId: 'tenant-dev',
+          }),
+          expect.objectContaining({
+            action: 'admin.tenant.suspended',
+            entityType: 'tenant',
+            entityId: 'tenant-dev',
+          }),
+        ])
+      );
+    } finally {
+      await Promise.all([tenantApp.close(), rootApp.close()]);
     }
   });
 

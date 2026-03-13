@@ -9,6 +9,11 @@ import type {
   AdminAuditResponse,
   AdminErrorResponse,
   AdminGroupsResponse,
+  AdminTenantCreateRequest,
+  AdminTenantCreateResponse,
+  AdminTenantStatusUpdateRequest,
+  AdminTenantStatusUpdateResponse,
+  AdminTenantsResponse,
   AdminUsersResponse,
 } from '@agentifui/shared/admin';
 
@@ -24,7 +29,7 @@ async function fetchAdminJson<TSuccess>(
   sessionToken: string,
   options: {
     body?: unknown;
-    method?: 'DELETE' | 'GET' | 'POST';
+    method?: 'DELETE' | 'GET' | 'POST' | 'PUT';
   } = {}
 ): Promise<TSuccess | AdminErrorResponse> {
   const response = await fetch(`${GATEWAY_PROXY_BASE_PATH}${path}`, {
@@ -106,6 +111,37 @@ export async function fetchAdminUsers(
   sessionToken: string
 ): Promise<AdminUsersResponse | AdminErrorResponse> {
   return fetchAdminJson<AdminUsersResponse>('/admin/users', sessionToken);
+}
+
+export async function fetchAdminTenants(
+  sessionToken: string
+): Promise<AdminTenantsResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminTenantsResponse>('/admin/tenants', sessionToken);
+}
+
+export async function createAdminTenant(
+  sessionToken: string,
+  payload: AdminTenantCreateRequest
+): Promise<AdminTenantCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminTenantCreateResponse>('/admin/tenants', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function updateAdminTenantStatus(
+  sessionToken: string,
+  tenantId: string,
+  payload: AdminTenantStatusUpdateRequest
+): Promise<AdminTenantStatusUpdateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminTenantStatusUpdateResponse>(
+    `/admin/tenants/${tenantId}/status`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
 }
 
 export async function fetchAdminGroups(

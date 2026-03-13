@@ -186,6 +186,10 @@ function resolveDefaultMemberGroupIds(email: string): string[] {
 function resolveDefaultRoleIds(email: string): string[] {
   const normalizedEmail = email.toLowerCase();
 
+  if (normalizedEmail.startsWith('root') || normalizedEmail.includes('platform-admin')) {
+    return ['root_admin', 'tenant_admin', 'user'];
+  }
+
   if (normalizedEmail.startsWith('admin') || normalizedEmail.includes('owner')) {
     return ['tenant_admin', 'user'];
   }

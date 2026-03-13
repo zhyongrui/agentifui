@@ -5,6 +5,10 @@ import { usePathname } from 'next/navigation';
 
 const ADMIN_ITEMS = [
   {
+    href: '/admin/tenants',
+    label: 'Tenants',
+  },
+  {
     href: '/admin/users',
     label: 'Users',
   },

@@ -38,6 +38,7 @@ const MFA_TICKET_TTL_MS = 10 * 60 * 1000;
 type UserRow = {
   id: string;
   tenant_id: string;
+  tenant_status?: 'active' | 'suspended';
   email: string;
   display_name: string;
   status: AuthUser['status'];
@@ -103,13 +104,20 @@ function isExpired(value: Date | string) {
   return Date.now() > Date.parse(value instanceof Date ? value.toISOString() : value);
 }
 
+function toEffectiveUserStatus(
+  userStatus: AuthUser['status'],
+  tenantStatus?: 'active' | 'suspended'
+) {
+  return tenantStatus === 'suspended' ? 'suspended' : userStatus;
+}
+
 function toAuthUser(row: UserRow): AuthUser {
   return {
     id: row.id,
     tenantId: row.tenant_id,
     email: row.email,
     displayName: row.display_name,
-    status: row.status,
+    status: toEffectiveUserStatus(row.status, row.tenant_status),
     createdAt: toIso(row.created_at)!,
     lastLoginAt: toIso(row.last_login_at),
   };
@@ -137,19 +145,21 @@ function fail<T>(
 async function findUserByEmail(database: DatabaseClient, email: string) {
   const [user] = await database<UserRow[]>`
     select
-      id,
-      tenant_id,
-      email,
-      display_name,
-      status,
-      password_hash,
-      failed_login_count,
-      locked_until,
-      last_login_at,
-      created_at
-    from users
-    where email = ${email}
-    order by created_at asc
+      u.id,
+      u.tenant_id,
+      t.status as tenant_status,
+      u.email,
+      u.display_name,
+      u.status,
+      u.password_hash,
+      u.failed_login_count,
+      u.locked_until,
+      u.last_login_at,
+      u.created_at
+    from users u
+    inner join tenants t on t.id = u.tenant_id
+    where u.email = ${email}
+    order by u.created_at asc
     limit 1
   `;
 
@@ -159,18 +169,20 @@ async function findUserByEmail(database: DatabaseClient, email: string) {
 async function findUserById(database: DatabaseClient, userId: string) {
   const [user] = await database<UserRow[]>`
     select
-      id,
-      tenant_id,
-      email,
-      display_name,
-      status,
-      password_hash,
-      failed_login_count,
-      locked_until,
-      last_login_at,
-      created_at
-    from users
-    where id = ${userId}
+      u.id,
+      u.tenant_id,
+      t.status as tenant_status,
+      u.email,
+      u.display_name,
+      u.status,
+      u.password_hash,
+      u.failed_login_count,
+      u.locked_until,
+      u.last_login_at,
+      u.created_at
+    from users u
+    inner join tenants t on t.id = u.tenant_id
+    where u.id = ${userId}
     limit 1
   `;
 
@@ -405,25 +417,16 @@ async function issueSession(
 }
 
 async function finalizeSuccessfulLoginState(database: DatabaseClient, userId: string) {
-  const [user] = await database<UserRow[]>`
+  await database`
     update users
     set failed_login_count = 0,
         locked_until = null,
         last_login_at = now(),
         updated_at = now()
     where id = ${userId}
-    returning
-      id,
-      tenant_id,
-      email,
-      display_name,
-      status,
-      password_hash,
-      failed_login_count,
-      locked_until,
-      last_login_at,
-      created_at
   `;
+
+  const user = await findUserById(database, userId);
 
   if (!user) {
     throw new Error(`Unable to finalize login for missing user ${userId}.`);
@@ -663,7 +666,15 @@ export function createPersistentAuthService(
       const email = normalizeEmail(invitation.email);
       const existingUser = await findUserByEmail(database, email);
 
-      if (existingUser) {
+      if (existingUser && existingUser.tenant_id !== invitation.tenant_id) {
+        return fail(
+          409,
+          'AUTH_EMAIL_ALREADY_EXISTS',
+          'An account already exists for this email address.'
+        );
+      }
+
+      if (existingUser && existingUser.status !== 'pending') {
         return fail(
           409,
           'AUTH_EMAIL_ALREADY_EXISTS',
@@ -682,49 +693,69 @@ export function createPersistentAuthService(
       const passwordHash = hashPassword(input.password);
       const [user] = await database.begin(async transaction => {
         const tx = asDatabaseClient(transaction);
-        const [createdUser] = await tx<UserRow[]>`
-          insert into users (
-            id,
-            tenant_id,
-            email,
-            display_name,
-            status,
-            password_hash,
-            failed_login_count,
-            locked_until,
-            is_email_verified,
-            last_login_at,
-            created_at,
-            updated_at
-          )
-          values (
-            ${userId},
-            ${invitation.tenant_id},
-            ${email},
-            ${displayName},
-            'active',
-            ${passwordHash},
-            0,
-            null,
-            false,
-            null,
-            now(),
-            now()
-          )
-          returning
-            id,
-            tenant_id,
-            email,
-            display_name,
-            status,
-            password_hash,
-            failed_login_count,
-            locked_until,
-            last_login_at,
-            created_at
-        `;
+        const activatedUser =
+          existingUser && existingUser.status === 'pending'
+            ? await (async () => {
+                await tx`
+                  update users
+                  set display_name = ${displayName},
+                      status = 'active',
+                      password_hash = ${passwordHash},
+                      failed_login_count = 0,
+                      locked_until = null,
+                      updated_at = now()
+                  where id = ${existingUser.id}
+                `;
 
-        if (!createdUser) {
+                return findUserById(tx, existingUser.id);
+              })()
+            : await (async () => {
+                const [createdUser] = await tx<UserRow[]>`
+                  insert into users (
+                    id,
+                    tenant_id,
+                    email,
+                    display_name,
+                    status,
+                    password_hash,
+                    failed_login_count,
+                    locked_until,
+                    is_email_verified,
+                    last_login_at,
+                    created_at,
+                    updated_at
+                  )
+                  values (
+                    ${userId},
+                    ${invitation.tenant_id},
+                    ${email},
+                    ${displayName},
+                    'active',
+                    ${passwordHash},
+                    0,
+                    null,
+                    false,
+                    null,
+                    now(),
+                    now()
+                  )
+                  returning
+                    id,
+                    tenant_id,
+                    email,
+                    display_name,
+                    status,
+                    password_hash,
+                    failed_login_count,
+                    locked_until,
+                    last_login_at,
+                    created_at
+                `;
+
+                return createdUser ?? null;
+              })();
+
+        if (!activatedUser) {
           throw new Error('Invitation activation did not return a persisted user.');
         }
 
@@ -736,19 +767,19 @@ export function createPersistentAuthService(
         `;
 
         await upsertCredentialAccount(tx, {
-          userId: createdUser.id,
+          userId: activatedUser.id,
           passwordHash,
         });
 
         await insertAuthIdentity(tx, {
-          tenantId: createdUser.tenant_id,
-          userId: createdUser.id,
+          tenantId: activatedUser.tenant_id,
+          userId: activatedUser.id,
           provider: 'password',
-          providerUserId: createdUser.email,
-          email: createdUser.email,
+          providerUserId: activatedUser.email,
+          email: activatedUser.email,
         });
 
-        return [createdUser];
+        return [activatedUser];
       });
 
       return {
@@ -818,6 +849,17 @@ export function createPersistentAuthService(
         );
       }
 
+      if (user.tenant_status === 'suspended') {
+        return fail(
+          403,
+          'AUTH_FORBIDDEN',
+          'This tenant is suspended and cannot accept new sign-ins.',
+          {
+            tenantStatus: 'suspended',
+          }
+        );
+      }
+
       if (user.status === 'pending') {
         return fail(
           403,
@@ -870,6 +912,17 @@ export function createPersistentAuthService(
       const existingUser = await findUserByEmail(database, email);
 
       if (existingUser) {
+        if (existingUser.tenant_status === 'suspended') {
+          return fail(
+            403,
+            'AUTH_FORBIDDEN',
+            'This tenant is suspended and cannot accept SSO sign-ins.',
+            {
+              tenantStatus: 'suspended',
+            }
+          );
+        }
+
         const mfaFactor =
           existingUser.status === 'active'
             ? await findActiveMfaFactor(database, existingUser.id)
@@ -1018,12 +1071,18 @@ export function createPersistentAuthService(
 
     async getUserBySessionToken(sessionToken: string) {
       if (options.betterAuthCore) {
-        const user = toAuthUserFromSessionLookup(
-          await options.betterAuthCore.findSession(sessionToken)
-        );
+        const sessionLookup = await options.betterAuthCore.findSession(sessionToken);
+        const sessionUserId =
+          sessionLookup && typeof sessionLookup.user?.id === 'string'
+            ? sessionLookup.user.id
+            : null;
 
-        if (user) {
-          return user;
+        if (sessionUserId) {
+          const persistedUser = await findUserById(database, sessionUserId);
+
+          if (persistedUser) {
+            return toAuthUser(persistedUser);
+          }
         }
       }
 
@@ -1032,6 +1091,7 @@ export function createPersistentAuthService(
         select
           u.id,
           u.tenant_id,
+          t.status as tenant_status,
           u.email,
           u.display_name,
           u.status,
@@ -1042,6 +1102,7 @@ export function createPersistentAuthService(
           u.created_at
         from auth_sessions s
         inner join users u on u.id = s.user_id
+        inner join tenants t on t.id = u.tenant_id
         where s.session_token_hash = ${sessionTokenHash}
           and s.status = 'active'
         limit 1
@@ -1258,6 +1319,18 @@ export function createPersistentAuthService(
       if (!user) {
         await markChallengeConsumed(database, challenge.id);
         return fail(400, 'AUTH_INVALID_PAYLOAD', 'MFA is not enabled for this account.');
+      }
+
+      if (user.tenant_status === 'suspended') {
+        await markChallengeConsumed(database, challenge.id);
+        return fail(
+          403,
+          'AUTH_FORBIDDEN',
+          'This tenant is suspended and cannot complete sign-in.',
+          {
+            tenantStatus: 'suspended',
+          }
+        );
       }
 
       const factor = await findActiveMfaFactor(database, user.id);

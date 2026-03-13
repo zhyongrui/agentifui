@@ -11,6 +11,11 @@ import type {
   AdminAuditResponse,
   AdminErrorResponse,
   AdminGroupsResponse,
+  AdminTenantCreateRequest,
+  AdminTenantCreateResponse,
+  AdminTenantStatusUpdateRequest,
+  AdminTenantStatusUpdateResponse,
+  AdminTenantsResponse,
   AdminUsersResponse,
 } from '@agentifui/shared/admin';
 import type { AuthAuditEntityType, AuthAuditLevel, AuthUser } from '@agentifui/shared/auth';
@@ -62,6 +67,7 @@ function isAuditEntityType(value: unknown): value is AuthAuditEntityType {
     value === 'conversation' ||
     value === 'run' ||
     value === 'session' ||
+    value === 'tenant' ||
     value === 'user' ||
     value === 'workspace_app'
   );
@@ -73,6 +79,14 @@ function isAuditExportFormat(value: unknown): value is AdminAuditExportFormat {
 
 function isAuditPayloadMode(value: unknown): value is AdminAuditPayloadMode {
   return value === 'masked' || value === 'raw';
+}
+
+function isTenantStatus(value: unknown): value is AdminTenantStatusUpdateRequest['status'] {
+  return value === 'active' || value === 'suspended';
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function readQueryString(value: unknown) {
@@ -361,12 +375,55 @@ async function requireTenantAdminSession(
   };
 }
 
+async function requirePlatformAdminSession(
+  authService: AuthService,
+  adminService: AdminService,
+  authorization: string | undefined
+): Promise<
+  | {
+      ok: true;
+      user: AuthUser;
+    }
+  | {
+      ok: false;
+      statusCode: 401 | 403 | 503;
+      response: AdminErrorResponse;
+    }
+> {
+  const session = await requireTenantAdminSession(authService, adminService, authorization);
+
+  if (!session.ok) {
+    return session;
+  }
+
+  const canReadPlatformAdmin = await adminService.canReadPlatformAdminForUser(session.user);
+
+  if (!canReadPlatformAdmin) {
+    return {
+      ok: false,
+      statusCode: 403,
+      response: buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Root admin access is required to view platform tenant inventory.'
+      ),
+    };
+  }
+
+  return session;
+}
+
 async function recordAdminReadEvent(
   auditService: AuditService,
   input: {
     user: AuthUser;
     ipAddress: string | null;
-    resource: '/admin/apps' | '/admin/audit' | '/admin/audit/export' | '/admin/groups' | '/admin/users';
+    resource:
+      | '/admin/apps'
+      | '/admin/audit'
+      | '/admin/audit/export'
+      | '/admin/groups'
+      | '/admin/tenants'
+      | '/admin/users';
     resultCount?: number;
     filters?: AdminAuditFilters;
     exportFormat?: AdminAuditExportFormat;
@@ -432,6 +489,160 @@ export async function registerAdminRoutes(
   adminService: AdminService,
   auditService: AuditService
 ) {
+  app.post('/admin/tenants', async (request, reply) => {
+    const session = await requirePlatformAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const body = (request.body ?? {}) as Partial<AdminTenantCreateRequest>;
+    const name = body.name?.trim();
+    const slug = body.slug?.trim();
+    const adminEmail = body.adminEmail?.trim().toLowerCase();
+    const adminDisplayName =
+      typeof body.adminDisplayName === 'string' ? body.adminDisplayName : null;
+
+    if (!name || !slug || !adminEmail || !isValidEmail(adminEmail)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Tenant creation requires a tenant name, slug and bootstrap admin email.'
+      );
+    }
+
+    const result = await adminService.createTenantForUser(session.user, {
+      name,
+      slug,
+      adminEmail,
+      adminDisplayName,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    await auditService.recordEvent({
+      tenantId: result.data.tenant.id,
+      actorUserId: session.user.id,
+      action: 'admin.tenant.created',
+      entityType: 'tenant',
+      entityId: result.data.tenant.id,
+      ipAddress: request.ip,
+      payload: {
+        tenantSlug: result.data.tenant.slug,
+        tenantName: result.data.tenant.name,
+        bootstrapAdminEmail: result.data.bootstrapInvitation.email,
+        bootstrapInvitationId: result.data.bootstrapInvitation.invitationId,
+        bootstrapInviteUrl: result.data.bootstrapInvitation.inviteUrl,
+        bootstrapInvitedUserId: result.data.bootstrapInvitation.invitedUserId,
+      },
+    });
+
+    const response: AdminTenantCreateResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.get('/admin/tenants', async (request, reply) => {
+    const session = await requirePlatformAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const response: AdminTenantsResponse = {
+      ok: true,
+      data: {
+        generatedAt: new Date().toISOString(),
+        tenants: await adminService.listTenantsForUser(session.user),
+      },
+    };
+
+    await recordAdminReadEvent(auditService, {
+      user: session.user,
+      ipAddress: request.ip,
+      resource: '/admin/tenants',
+      resultCount: response.data.tenants.length,
+    });
+
+    return response;
+  });
+
+  app.put('/admin/tenants/:tenantId/status', async (request, reply) => {
+    const session = await requirePlatformAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const params = request.params as { tenantId?: string };
+    const body = (request.body ?? {}) as Partial<AdminTenantStatusUpdateRequest>;
+    const tenantId = params.tenantId?.trim();
+    const reason = typeof body.reason === 'string' ? body.reason : null;
+
+    if (!tenantId || !isTenantStatus(body.status)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Tenant status updates require a tenant id and active/suspended status.'
+      );
+    }
+
+    const result = await adminService.updateTenantStatusForUser(session.user, {
+      tenantId,
+      status: body.status,
+      reason,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    await auditService.recordEvent({
+      tenantId: result.data.tenant.id,
+      actorUserId: session.user.id,
+      action: result.data.tenant.status === 'suspended' ? 'admin.tenant.suspended' : 'admin.tenant.reactivated',
+      entityType: 'tenant',
+      entityId: result.data.tenant.id,
+      ipAddress: request.ip,
+      payload: {
+        tenantSlug: result.data.tenant.slug,
+        tenantName: result.data.tenant.name,
+        previousStatus: result.data.previousStatus,
+        nextStatus: result.data.tenant.status,
+        reason: result.data.reason,
+      },
+    });
+
+    const response: AdminTenantStatusUpdateResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
   app.get('/admin/users', async (request, reply) => {
     const session = await requireTenantAdminSession(
       authService,
