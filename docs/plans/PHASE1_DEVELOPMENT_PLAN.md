@@ -723,17 +723,17 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
 
 当前默认按下面顺序执行，不再每轮重新定义优先级：
 
-1. `R13-B2` / `R13-B3` `/api/gateway` 正式反代与 HTTPS 说明
-2. `R13-B5` / `R13-B6` 环境模板、公网浏览器回归脚本
-3. `R13-C1` / `R13-C4` CI、观测与发布质量门槛
-4. `R13-C5` / `R13-C6` smoke 脚本与发布 checklist
-5. `R13-A1` / `R13-A4` 平台管理与租户生命周期
+1. `R13-A1` / `R13-A2` 平台管理合同与 tenant list 读接口
+2. `R13-A3` / `R13-A4` tenant create、suspend、reactivate
+3. `R13-A5` / `R13-A6` 平台审计页与 root_admin 权限边界
+4. `Phase 1` 收尾回归、部署复核与遗留文档清理
+
+一旦 `R13-A` 全部完成，就意味着当前 `PHASE1` 任务板收口，下一轮应立即开启新的阶段性规划，而不是停在“已完成”状态。
 
 如果公网入口或部署环境被阻塞，则按下面的降级顺序切换：
 
-1. `R13-C` CI、观测与发布质量门槛
-2. `R13-A` 平台管理与租户生命周期
-3. `R13-B` 稳定公网入口与部署硬化
+1. `R13-A` 平台管理与租户生命周期
+2. `Phase 1` 收尾回归与发布复核
 
 ## 13. 2026-03-12 进度快照
 
@@ -817,6 +817,13 @@ Stage 1 重点不是功能多，而是把系统地基做稳：
   - 仓库内已新增 `nginx` 反代示例
   - 已新增 `systemd` unit 示例
   - 已新增部署操作文档，覆盖从临时 tunnel 迁移到正式 ingress 的最小路径
+- `R13-B` 已完成稳定公网入口与部署硬化：
+  - `/api/gateway` 同域代理、HTTPS 示例、环境模板、browser/deploy smoke 均已落地
+  - release checklist 和 rollback 路径已写入仓库文档
+- `R13-C` 已完成 CI、观测与发布质量门槛：
+  - GitHub Actions 已拆成 typecheck/build/db-validate/unit/e2e
+  - gateway 已暴露 `GET /metrics` 并记录结构化 `request.completed` 日志
+  - smoke 脚本与发布检查表已可直接执行
 
 ## 14. 关联文档
 

@@ -20,6 +20,10 @@ import { createAdminService, type AdminService } from './services/admin-service.
 import { createAuditService, type AuditService } from './services/audit-service.js';
 import { createAuthService, type AuthService } from './services/auth-service.js';
 import {
+  createObservabilityService,
+  type ObservabilityService,
+} from './services/observability-service.js';
+import {
   createBetterAuthCore,
   type BetterAuthCore,
 } from './services/better-auth-core.js';
@@ -62,6 +66,8 @@ export async function buildApp(
                 : undefined,
           },
   });
+  const observabilityService: ObservabilityService = createObservabilityService();
+  const requestStartTimes = new WeakMap<object, bigint>();
 
   const usePersistentBacking = Boolean(options.database || env.databaseUrl);
   const database =
@@ -139,7 +145,50 @@ export async function buildApp(
   }
 
   await registerBasePlugins(app, env);
-  await registerRootRoutes(app, env);
+  app.addHook('onRequest', async request => {
+    observabilityService.onRequestStarted();
+    requestStartTimes.set(request.raw, process.hrtime.bigint());
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    const startedAt = requestStartTimes.get(request.raw) ?? process.hrtime.bigint();
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    const route = request.routeOptions.url || new URL(request.url, 'http://localhost').pathname;
+
+    observabilityService.onRequestCompleted({
+      method: request.method,
+      route,
+      statusCode: reply.statusCode,
+      durationMs,
+    });
+
+    request.log.info(
+      {
+        requestId: request.id,
+        traceId: request.headers['x-trace-id']?.toString() ?? null,
+        method: request.method,
+        route,
+        statusCode: reply.statusCode,
+        durationMs: Number(durationMs.toFixed(1)),
+      },
+      'request.completed'
+    );
+  });
+
+  app.addHook('onRequestAbort', async request => {
+    observabilityService.onRequestAborted();
+
+    request.log.warn(
+      {
+        requestId: request.id,
+        method: request.method,
+        url: request.url,
+      },
+      'request.aborted'
+    );
+  });
+
+  await registerRootRoutes(app, env, observabilityService);
   await registerAuthRoutes(app, env, authService, auditService);
   await registerAdminRoutes(app, authService, adminService, auditService);
   await registerWorkspaceRoutes(app, authService, workspaceService, auditService);

@@ -17,6 +17,8 @@
     "build": "turbo run build",
     "db:migrate": "npm run migrate --workspace @agentifui/db",
     "db:reset": "npm run reset --workspace @agentifui/db",
+    "smoke:deploy": "node scripts/smoke-deploy.mjs",
+    "smoke:browser": "node scripts/public-browser-smoke.mjs",
     "type-check": "turbo run type-check",
     "lint": "turbo run lint",
     "test": "vitest run",

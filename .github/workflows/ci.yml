@@ -6,17 +6,122 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://agentifui:agentifui@127.0.0.1:5432/agentifui
+  GATEWAY_DEFAULT_TENANT_ID: ci-tenant
+
 jobs:
-  checks:
+  typecheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install
-      - run: pnpm type-check
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @agentifui/shared
+      - run: npm run build --workspace @agentifui/db
+      - run: npm run type-check
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  db-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: agentifui
+          POSTGRES_PASSWORD: agentifui
+          POSTGRES_DB: agentifui
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentifui -d agentifui"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @agentifui/db
+      - run: npm run db:migrate
+      - run: npm run db:reset
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: agentifui
+          POSTGRES_PASSWORD: agentifui
+          POSTGRES_DB: agentifui
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentifui -d agentifui"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @agentifui/shared
+      - run: npm run build --workspace @agentifui/db
+      - run: npm run db:reset
+      - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: agentifui
+          POSTGRES_PASSWORD: agentifui
+          POSTGRES_DB: agentifui
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentifui -d agentifui"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run test:e2e

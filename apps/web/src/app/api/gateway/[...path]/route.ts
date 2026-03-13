@@ -92,3 +92,12 @@ export async function PUT(
 ) {
   return proxyGatewayRequest(request, context);
 }
+
+export async function DELETE(
+  request: NextRequest,
+  context: {
+    params: Promise<{ path: string[] }>;
+  }
+) {
+  return proxyGatewayRequest(request, context);
+}

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-import { GET } from './route.js';
+import { DELETE, GET } from './route.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -57,5 +57,44 @@ describe('gateway proxy route', () => {
     expect(response.headers.get('x-agentifui-exported-at')).toBe('2026-03-12T00:00:00.000Z');
     expect(response.headers.get('x-agentifui-export-count')).toBe('1');
     expect(response.headers.get('x-trace-id')).toBe('trace-123');
+  });
+
+  it('proxies delete requests to the upstream gateway', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+        },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = new NextRequest(
+      'http://localhost:3111/api/gateway/workspace/conversations/conv-1/shares/share-1',
+      {
+        method: 'DELETE',
+        headers: {
+          authorization: 'Bearer session-456',
+        },
+      }
+    );
+
+    const response = await DELETE(request, {
+      params: Promise.resolve({
+        path: ['workspace', 'conversations', 'conv-1', 'shares', 'share-1'],
+      }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
+      'http://127.0.0.1:4000/workspace/conversations/conv-1/shares/share-1'
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'DELETE',
+      headers: expect.any(Headers),
+      cache: 'no-store',
+    });
+    expect(response.status).toBe(200);
   });
 });
