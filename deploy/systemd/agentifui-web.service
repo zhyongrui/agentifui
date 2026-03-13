@@ -1,0 +1,18 @@
+[Unit]
+Description=AgentifUI Web
+After=network.target agentifui-gateway.service
+Requires=agentifui-gateway.service
+
+[Service]
+Type=simple
+User=bistu
+WorkingDirectory=/home/bistu/zyr/pros/agentifui
+EnvironmentFile=/etc/agentifui/agentifui.env
+ExecStart=/usr/bin/env bash -lc 'npm run start --workspace @agentifui/web'
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
