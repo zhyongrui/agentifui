@@ -1,4 +1,9 @@
-import type { WorkspaceArtifact, WorkspaceHitlStep } from "../apps/contracts.js";
+import type {
+  WorkspaceArtifact,
+  WorkspaceCitation,
+  WorkspaceHitlStep,
+  WorkspaceSourceBlock,
+} from "../apps/contracts.js";
 
 export type ChatCompletionRole = "system" | "user" | "assistant" | "tool";
 
@@ -59,6 +64,8 @@ export type ChatCompletionResponse = {
       content: string | null;
       tool_calls?: unknown[];
       artifacts?: WorkspaceArtifact[];
+      citations?: WorkspaceCitation[];
+      source_blocks?: WorkspaceSourceBlock[];
       pending_actions?: WorkspaceHitlStep[];
       suggested_prompts?: string[];
     };
@@ -99,6 +106,8 @@ export type ChatCompletionChunk = {
   conversation_id?: string;
   trace_id?: string;
   artifacts?: WorkspaceArtifact[];
+  citations?: WorkspaceCitation[];
+  source_blocks?: WorkspaceSourceBlock[];
   pending_actions?: WorkspaceHitlStep[];
   suggested_prompts?: string[];
 };

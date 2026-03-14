@@ -7,6 +7,7 @@ import {
   type WorkspaceArtifact,
   type WorkspaceArtifactJsonValue,
   type WorkspaceArtifactSummary,
+  type WorkspaceCitation,
   type WorkspaceConversationAttachment,
   type WorkspaceConversation,
   type WorkspaceConversationMessageFeedback,
@@ -24,6 +25,7 @@ import {
   type WorkspaceRunTimelineEventType,
   type WorkspaceRunTrigger,
   type WorkspaceRunType,
+  type WorkspaceSourceBlock,
 } from "@agentifui/shared/apps";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -737,6 +739,96 @@ function toWorkspaceConversationSuggestedPrompts(
   return prompts.length > 0 ? prompts.slice(0, 3) : undefined;
 }
 
+function toWorkspaceCitation(value: unknown): WorkspaceCitation | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const citation = value as Record<string, unknown>;
+
+  if (
+    typeof citation.id !== "string" ||
+    typeof citation.label !== "string" ||
+    typeof citation.title !== "string" ||
+    typeof citation.sourceBlockId !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: citation.id,
+    label: citation.label,
+    title: citation.title,
+    sourceBlockId: citation.sourceBlockId,
+    href: typeof citation.href === "string" ? citation.href : null,
+    snippet: typeof citation.snippet === "string" ? citation.snippet : null,
+  };
+}
+
+function toWorkspaceCitations(value: unknown): WorkspaceCitation[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const citations = value.flatMap((entry) => {
+    const citation = toWorkspaceCitation(entry);
+    return citation ? [citation] : [];
+  });
+
+  return citations.length > 0 ? citations : undefined;
+}
+
+function toWorkspaceSourceBlock(value: unknown): WorkspaceSourceBlock | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const sourceBlock = value as Record<string, unknown>;
+
+  if (
+    typeof sourceBlock.id !== "string" ||
+    typeof sourceBlock.title !== "string" ||
+    typeof sourceBlock.kind !== "string"
+  ) {
+    return null;
+  }
+
+  const metadata =
+    typeof sourceBlock.metadata === "object" && sourceBlock.metadata !== null
+      ? Object.fromEntries(
+          Object.entries(sourceBlock.metadata as Record<string, unknown>).flatMap(
+            ([key, metadataValue]) =>
+              typeof metadataValue === "string" ? [[key, metadataValue]] : [],
+          ),
+        )
+      : {};
+
+  return {
+    id: sourceBlock.id,
+    kind: sourceBlock.kind as WorkspaceSourceBlock["kind"],
+    title: sourceBlock.title,
+    href: typeof sourceBlock.href === "string" ? sourceBlock.href : null,
+    snippet:
+      typeof sourceBlock.snippet === "string" ? sourceBlock.snippet : null,
+    metadata,
+  };
+}
+
+function toWorkspaceSourceBlocks(
+  value: unknown,
+): WorkspaceSourceBlock[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const sourceBlocks = value.flatMap((entry) => {
+    const sourceBlock = toWorkspaceSourceBlock(entry);
+    return sourceBlock ? [sourceBlock] : [];
+  });
+
+  return sourceBlocks.length > 0 ? sourceBlocks : undefined;
+}
+
 function isWorkspaceArtifactKind(
   value: unknown,
 ): value is WorkspaceArtifact["kind"] {
@@ -958,6 +1050,7 @@ function toWorkspaceConversationMessages(
         createdAt: message.createdAt,
         attachments: toWorkspaceConversationAttachments(message.attachments),
         artifacts: toWorkspaceArtifactSummaries(message.artifacts),
+        citations: toWorkspaceCitations(message.citations),
         feedback: toWorkspaceConversationMessageFeedback(message.feedback),
         suggestedPrompts: toWorkspaceConversationSuggestedPrompts(
           message.suggestedPrompts,
@@ -1195,6 +1288,10 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
     inputs: normalizeJsonRecord(row.inputs),
     outputs: normalizeJsonRecord(row.outputs),
     artifacts: toWorkspaceArtifacts(normalizeJsonRecord(row.outputs).artifacts),
+    citations: toWorkspaceCitations(normalizeJsonRecord(row.outputs).citations) ?? [],
+    sourceBlocks:
+      toWorkspaceSourceBlocks(normalizeJsonRecord(row.outputs).sourceBlocks) ??
+      [],
     usage: toWorkspaceRunUsage(row.outputs, row.total_tokens),
     timeline: [],
   };

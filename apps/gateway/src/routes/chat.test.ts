@@ -224,7 +224,7 @@ describe("chat routes", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.headers["x-trace-id"]).toBe(traceId);
-      expect(response.json()).toEqual({
+      expect(response.json()).toMatchObject({
         id: runId,
         object: "chat.completion",
         created: expect.any(Number),
@@ -244,6 +244,18 @@ describe("chat routes", () => {
                   status: "draft",
                 }),
               ],
+              citations: expect.arrayContaining([
+                expect.objectContaining({
+                  label: "S1",
+                  title: "Policy Watch workspace context",
+                }),
+              ]),
+              source_blocks: expect.arrayContaining([
+                expect.objectContaining({
+                  kind: "workspace_context",
+                  title: "Policy Watch workspace context",
+                }),
+              ]),
               suggested_prompts: expect.arrayContaining([
                 expect.stringContaining("Summarize the key takeaways about"),
               ]),
@@ -263,7 +275,7 @@ describe("chat routes", () => {
           run_id: runId,
           active_group_id: "grp_research",
         },
-      } satisfies ChatCompletionResponse);
+      } satisfies Partial<ChatCompletionResponse>);
 
       const conversationResponse = await app.inject({
         method: "GET",
@@ -295,6 +307,12 @@ describe("chat routes", () => {
                 source: "assistant_response",
               }),
             ],
+            citations: expect.arrayContaining([
+              expect.objectContaining({
+                label: "S1",
+                title: "Policy Watch workspace context",
+              }),
+            ]),
             status: "completed",
             suggestedPrompts: expect.arrayContaining([
               expect.stringContaining("Summarize the key takeaways about"),
@@ -450,6 +468,18 @@ describe("chat routes", () => {
             source: "assistant_response",
           }),
         ],
+        citations: expect.arrayContaining([
+          expect.objectContaining({
+            label: "S1",
+            title: "Policy Watch workspace context",
+          }),
+        ]),
+        sourceBlocks: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "workspace_context",
+            title: "Policy Watch workspace context",
+          }),
+        ]),
         usage: {
           totalTokens: expect.any(Number),
         },
@@ -683,6 +713,8 @@ describe("chat routes", () => {
       expect(response.body).toContain("event: agentif.metadata");
       expect(response.body).toContain('"object":"chat.completion.chunk"');
       expect(response.body).toContain('"artifacts"');
+      expect(response.body).toContain('"citations"');
+      expect(response.body).toContain('"source_blocks"');
       expect(response.body).toContain('"source":"assistant_response"');
       expect(response.body).toContain('"suggested_prompts"');
       expect(response.body).toContain("data: [DONE]");

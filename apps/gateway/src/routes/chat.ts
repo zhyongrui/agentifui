@@ -1,11 +1,13 @@
 import type {
   WorkspaceArtifact,
+  WorkspaceCitation,
   WorkspaceArtifactSummary,
   WorkspaceConversation,
   WorkspaceConversationAttachment,
   WorkspaceHitlStep,
   WorkspaceConversationMessage,
   WorkspaceConversationMessageStatus,
+  WorkspaceSourceBlock,
 } from "@agentifui/shared/apps";
 import type { AuthUser } from "@agentifui/shared/auth";
 import type {
@@ -73,6 +75,10 @@ function buildArtifactTitle(appName: string, latestPrompt: string) {
   return promptTitle.length > 0 ? promptTitle : `${appName} response`;
 }
 
+function buildSourceLabel(index: number) {
+  return `S${index + 1}`;
+}
+
 function toArtifactSummary(artifact: WorkspaceArtifact): WorkspaceArtifactSummary {
   return {
     id: artifact.id,
@@ -115,6 +121,68 @@ function buildAssistantArtifacts(input: {
       content,
     },
   ];
+}
+
+function buildAssistantSources(input: {
+  attachments: WorkspaceConversationAttachment[];
+  conversation: WorkspaceConversation;
+  latestPrompt: string;
+}): {
+  citations: WorkspaceCitation[];
+  sourceBlocks: WorkspaceSourceBlock[];
+} {
+  const sourceBlocks: WorkspaceSourceBlock[] = [
+    {
+      id: `source_${randomUUID()}`,
+      kind: "workspace_context",
+      title: `${input.conversation.app.name} workspace context`,
+      href: null,
+      snippet: `Attributed group ${input.conversation.activeGroup.name}. Latest request: ${
+        input.latestPrompt || "Continue the current workspace task."
+      }`,
+      metadata: {
+        groupId: input.conversation.activeGroup.id,
+        groupName: input.conversation.activeGroup.name,
+        traceId: input.conversation.run.traceId,
+      },
+    },
+    {
+      id: `source_${randomUUID()}`,
+      kind: "app_reference",
+      title: `${input.conversation.app.name} app summary`,
+      href: null,
+      snippet: input.conversation.app.summary,
+      metadata: {
+        appId: input.conversation.app.id,
+        appSlug: input.conversation.app.slug,
+        appKind: input.conversation.app.kind,
+      },
+    },
+    ...input.attachments.map((attachment) => ({
+      id: `source_${randomUUID()}`,
+      kind: "attachment" as const,
+      title: attachment.fileName,
+      href: null,
+      snippet: `${attachment.contentType} · ${attachment.sizeBytes} bytes`,
+      metadata: {
+        attachmentId: attachment.id,
+        contentType: attachment.contentType,
+        sizeBytes: attachment.sizeBytes.toString(),
+      },
+    })),
+  ];
+
+  return {
+    citations: sourceBlocks.map((sourceBlock, index) => ({
+      id: `citation_${randomUUID()}`,
+      label: buildSourceLabel(index),
+      title: sourceBlock.title,
+      sourceBlockId: sourceBlock.id,
+      href: sourceBlock.href,
+      snippet: sourceBlock.snippet,
+    })),
+    sourceBlocks,
+  };
 }
 
 async function recordQuotaUsageAudit(input: {
@@ -428,6 +496,7 @@ function buildPersistedHistory(
     latestUserAttachments?: WorkspaceConversationAttachment[];
     assistantMessage?: {
       artifacts?: WorkspaceArtifact[];
+      citations?: WorkspaceCitation[];
       content: string;
       status: WorkspaceConversationMessageStatus;
       suggestedPrompts?: string[];
@@ -474,6 +543,11 @@ function buildPersistedHistory(
         input.assistantMessage.artifacts &&
         input.assistantMessage.artifacts.length > 0
           ? input.assistantMessage.artifacts.map(toArtifactSummary)
+          : undefined,
+      citations:
+        input.assistantMessage.citations &&
+        input.assistantMessage.citations.length > 0
+          ? input.assistantMessage.citations
           : undefined,
       suggestedPrompts:
         input.assistantMessage.suggestedPrompts &&
@@ -809,7 +883,9 @@ function buildChunkEvent(chunk: ChatCompletionChunk) {
 
 function buildStreamingChunk(input: {
   artifacts?: WorkspaceArtifact[];
+  citations?: WorkspaceCitation[];
   pendingActions?: WorkspaceHitlStep[];
+  sourceBlocks?: WorkspaceSourceBlock[];
   id: string;
   created: number;
   model: string;
@@ -842,8 +918,14 @@ function buildStreamingChunk(input: {
     ...(input.artifacts && input.artifacts.length > 0
       ? { artifacts: input.artifacts }
       : {}),
+    ...(input.citations && input.citations.length > 0
+      ? { citations: input.citations }
+      : {}),
     ...(input.pendingActions && input.pendingActions.length > 0
       ? { pending_actions: input.pendingActions }
+      : {}),
+    ...(input.sourceBlocks && input.sourceBlocks.length > 0
+      ? { source_blocks: input.sourceBlocks }
       : {}),
     ...(input.suggestedPrompts && input.suggestedPrompts.length > 0
       ? { suggested_prompts: input.suggestedPrompts }
@@ -859,7 +941,9 @@ function buildBlockingResponse(input: {
   completionTokens: number;
   assistantText: string;
   artifacts: WorkspaceArtifact[];
+  citations: WorkspaceCitation[];
   pendingActions: WorkspaceHitlStep[];
+  sourceBlocks: WorkspaceSourceBlock[];
   suggestedPrompts: string[];
 }): ChatCompletionResponse {
   return {
@@ -874,6 +958,12 @@ function buildBlockingResponse(input: {
           role: "assistant",
           content: input.assistantText,
           artifacts: input.artifacts,
+          ...(input.citations.length > 0
+            ? { citations: input.citations }
+            : {}),
+          ...(input.sourceBlocks.length > 0
+            ? { source_blocks: input.sourceBlocks }
+            : {}),
           ...(input.pendingActions.length > 0
             ? { pending_actions: input.pendingActions }
             : {}),
@@ -960,6 +1050,11 @@ async function* streamCompletionEvents(input: {
       createdAt: new Date().toISOString(),
       latestPrompt: extractLatestUserPrompt(input.messages),
     });
+    const { citations, sourceBlocks } = buildAssistantSources({
+      attachments: input.attachments,
+      conversation: input.conversation,
+      latestPrompt: extractLatestUserPrompt(input.messages),
+    });
     const pendingActions =
       !wasStopped && assistantContent.trim().length > 0 ? input.pendingActions : [];
     const updateResult =
@@ -971,6 +1066,7 @@ async function* streamCompletionEvents(input: {
           latestUserAttachments: input.attachments,
           assistantMessage: {
             artifacts,
+            citations,
             content: assistantContent,
             status: wasStopped ? "stopped" : "completed",
             suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
@@ -981,10 +1077,13 @@ async function* streamCompletionEvents(input: {
             content: assistantContent,
             finishReason: "stop",
             status: wasStopped ? "stopped" : "completed",
+            citations,
             suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
           },
           artifacts,
+          citations,
           pendingActions,
+          sourceBlocks,
           usage: {
             promptTokens: input.promptTokens,
             completionTokens,
@@ -1007,7 +1106,9 @@ async function* streamCompletionEvents(input: {
       traceId: input.conversation.run.traceId,
       finishReason: "stop",
       artifacts,
+      citations,
       pendingActions,
+      sourceBlocks,
       suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
       usage: {
         prompt_tokens: input.promptTokens,
@@ -1057,6 +1158,11 @@ async function* streamCompletionEvents(input: {
         createdAt: new Date().toISOString(),
         latestPrompt: extractLatestUserPrompt(input.messages),
       });
+      const { citations, sourceBlocks } = buildAssistantSources({
+        attachments: input.attachments,
+        conversation: input.conversation,
+        latestPrompt: extractLatestUserPrompt(input.messages),
+      });
       const fallbackResult =
         await input.workspaceService.updateConversationRunForUser(input.user, {
           conversationId: input.conversation.id,
@@ -1066,6 +1172,7 @@ async function* streamCompletionEvents(input: {
             latestUserAttachments: input.attachments,
             assistantMessage: {
               artifacts,
+              citations,
               content: assistantContent,
               status: streamState?.stopRequested ? "stopped" : "failed",
               suggestedPrompts: undefined,
@@ -1076,10 +1183,13 @@ async function* streamCompletionEvents(input: {
               content: assistantContent,
               finishReason: "stop",
               status: streamState?.stopRequested ? "stopped" : "failed",
+              citations,
               suggestedPrompts: undefined,
             },
             artifacts,
+            citations,
             pendingActions: [],
+            sourceBlocks,
             usage: {
               promptTokens: input.promptTokens,
               completionTokens,
@@ -1430,6 +1540,11 @@ export async function registerChatRoutes(
       createdAt: new Date().toISOString(),
       latestPrompt: extractLatestUserPrompt(body.messages),
     });
+    const { citations, sourceBlocks } = buildAssistantSources({
+      attachments: attachmentResult.attachments,
+      conversation,
+      latestPrompt: extractLatestUserPrompt(body.messages),
+    });
     const updateResult = await workspaceService.updateConversationRunForUser(
       access.user,
       {
@@ -1440,6 +1555,7 @@ export async function registerChatRoutes(
           latestUserAttachments: attachmentResult.attachments,
           assistantMessage: {
             artifacts,
+            citations,
             content: assistantText,
             status: "completed",
             suggestedPrompts,
@@ -1450,10 +1566,13 @@ export async function registerChatRoutes(
             content: assistantText,
             finishReason: "stop",
             status: "completed",
+            citations,
             suggestedPrompts,
           },
           artifacts,
+          citations,
           pendingActions,
+          sourceBlocks,
           usage: {
             promptTokens,
             completionTokens,
@@ -1508,7 +1627,9 @@ export async function registerChatRoutes(
       completionTokens,
       assistantText,
       artifacts,
+      citations,
       pendingActions,
+      sourceBlocks,
       suggestedPrompts,
     });
   });

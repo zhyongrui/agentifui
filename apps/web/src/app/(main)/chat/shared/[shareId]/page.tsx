@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { ChatMarkdown } from "../../../../../components/chat-markdown";
 import { MainSectionNav } from "../../../../../components/main-section-nav";
 import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-artifacts";
+import { WorkspaceCitationList } from "../../../../../components/workspace-sources";
 import { fetchWorkspaceSharedConversation } from "../../../../../lib/apps-client";
 import { clearAuthSession } from "../../../../../lib/auth-session";
 import { useProtectedSession } from "../../../../../lib/use-protected-session";
@@ -159,6 +160,12 @@ export default function SharedConversationPage() {
                     ))}
                   </div>
                 </div>
+              ) : null}
+              {message.citations && message.citations.length > 0 ? (
+                <WorkspaceCitationList
+                  citations={message.citations}
+                  title="Shared citations"
+                />
               ) : null}
               {message.attachments && message.attachments.length > 0 ? (
                 <ul className="chat-attachment-list">

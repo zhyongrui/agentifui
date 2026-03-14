@@ -5,6 +5,7 @@ import type {
   WorkspaceArtifact,
   WorkspaceArtifactJsonValue,
   WorkspaceArtifactSummary,
+  WorkspaceCitation,
   WorkspaceCatalog,
   WorkspaceConversationAttachment,
   WorkspaceConversation,
@@ -29,6 +30,7 @@ import type {
   WorkspaceRunTimelineEventType,
   WorkspaceRunTrigger,
   WorkspaceRunType,
+  WorkspaceSourceBlock,
 } from '@agentifui/shared/apps';
 import { evaluateAppLaunch } from '@agentifui/shared/apps';
 import { randomUUID } from 'node:crypto';
@@ -524,6 +526,89 @@ function readPendingActionsFromOutputs(outputs: Record<string, unknown>): Worksp
   return parseWorkspaceHitlSteps(outputs.pendingActions);
 }
 
+function toWorkspaceCitation(value: unknown): WorkspaceCitation | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const citation = value as Record<string, unknown>;
+
+  if (
+    typeof citation.id !== 'string' ||
+    typeof citation.label !== 'string' ||
+    typeof citation.title !== 'string' ||
+    typeof citation.sourceBlockId !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    id: citation.id,
+    label: citation.label,
+    title: citation.title,
+    sourceBlockId: citation.sourceBlockId,
+    href: typeof citation.href === 'string' ? citation.href : null,
+    snippet: typeof citation.snippet === 'string' ? citation.snippet : null,
+  };
+}
+
+function buildCitationsFromOutputs(outputs: Record<string, unknown>): WorkspaceCitation[] {
+  if (!Array.isArray(outputs.citations)) {
+    return [];
+  }
+
+  return outputs.citations.flatMap((citation) => {
+    const normalized = toWorkspaceCitation(citation);
+    return normalized ? [normalized] : [];
+  });
+}
+
+function toWorkspaceSourceBlock(value: unknown): WorkspaceSourceBlock | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const sourceBlock = value as Record<string, unknown>;
+
+  if (
+    typeof sourceBlock.id !== 'string' ||
+    typeof sourceBlock.title !== 'string' ||
+    typeof sourceBlock.kind !== 'string'
+  ) {
+    return null;
+  }
+
+  const metadata =
+    typeof sourceBlock.metadata === 'object' && sourceBlock.metadata !== null
+      ? Object.fromEntries(
+          Object.entries(sourceBlock.metadata as Record<string, unknown>).flatMap(
+            ([key, metadataValue]) =>
+              typeof metadataValue === 'string' ? [[key, metadataValue]] : []
+          )
+        )
+      : {};
+
+  return {
+    id: sourceBlock.id,
+    kind: sourceBlock.kind as WorkspaceSourceBlock['kind'],
+    title: sourceBlock.title,
+    href: typeof sourceBlock.href === 'string' ? sourceBlock.href : null,
+    snippet: typeof sourceBlock.snippet === 'string' ? sourceBlock.snippet : null,
+    metadata,
+  };
+}
+
+function buildSourceBlocksFromOutputs(outputs: Record<string, unknown>): WorkspaceSourceBlock[] {
+  if (!Array.isArray(outputs.sourceBlocks)) {
+    return [];
+  }
+
+  return outputs.sourceBlocks.flatMap((sourceBlock) => {
+    const normalized = toWorkspaceSourceBlock(sourceBlock);
+    return normalized ? [normalized] : [];
+  });
+}
+
 function isWorkspaceArtifactKind(value: unknown): value is WorkspaceArtifact['kind'] {
   return ['text', 'markdown', 'json', 'table', 'link'].includes(String(value));
 }
@@ -853,6 +938,8 @@ function createRunRecord(input: {
     inputs: {},
     outputs: {},
     artifacts: [],
+    citations: [],
+    sourceBlocks: [],
     usage: {
       promptTokens: 0,
       completionTokens: 0,
@@ -2049,6 +2136,8 @@ export function createWorkspaceService(options: {
           ...input.outputs,
         };
         run.artifacts = buildArtifactsFromOutputs(run.outputs);
+        run.citations = buildCitationsFromOutputs(run.outputs);
+        run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
         appendTimelineEvent(run, 'output_recorded', {
           keys: Object.keys(input.outputs),
         });
@@ -2096,6 +2185,8 @@ export function createWorkspaceService(options: {
       }
 
       run.artifacts = buildArtifactsFromOutputs(run.outputs);
+      run.citations = buildCitationsFromOutputs(run.outputs);
+      run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
       syncRunArtifacts(run, user.id);
       run.usage = buildUsageFromOutputs(run);
 

@@ -969,6 +969,28 @@ $$x^2 + y^2 = z^2$$`);
   ).toBeVisible({
     timeout: 60_000,
   });
+  await expect(
+    conversationPanel.getByText("S1 · Policy Watch workspace context"),
+  ).toBeVisible();
+
+  const runHistoryPanel = page.locator("section.chat-panel").filter({
+    has: page.getByRole("heading", { name: "Run history" }),
+  });
+  await expect(runHistoryPanel.getByText("Replay citations")).toBeVisible();
+  await expect(
+    runHistoryPanel.getByText("S1 · Policy Watch workspace context", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(runHistoryPanel.getByText("Replay source blocks")).toBeVisible();
+  await expect(
+    runHistoryPanel.locator(".artifact-link-card").getByText(
+      "Policy Watch workspace context",
+      {
+        exact: true,
+      },
+    ),
+  ).toBeVisible();
 });
 
 test("assistant suggested prompts can seed the composer", async ({ page }) => {

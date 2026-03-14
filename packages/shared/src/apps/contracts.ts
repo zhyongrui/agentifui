@@ -241,6 +241,30 @@ export type WorkspaceArtifact =
   | WorkspaceTableArtifact
   | WorkspaceLinkArtifact;
 
+export type WorkspaceSourceBlockKind =
+  | "workspace_context"
+  | "app_reference"
+  | "attachment"
+  | "web";
+
+export type WorkspaceSourceBlock = {
+  id: string;
+  kind: WorkspaceSourceBlockKind;
+  title: string;
+  href: string | null;
+  snippet: string | null;
+  metadata: Record<string, string>;
+};
+
+export type WorkspaceCitation = {
+  id: string;
+  label: string;
+  title: string;
+  sourceBlockId: string;
+  href: string | null;
+  snippet: string | null;
+};
+
 export type WorkspaceMessageFeedbackRating = "positive" | "negative";
 
 export type WorkspaceConversationMessageFeedback = {
@@ -256,6 +280,7 @@ export type WorkspaceConversationMessage = {
   createdAt: string;
   attachments?: WorkspaceConversationAttachment[];
   artifacts?: WorkspaceArtifactSummary[];
+  citations?: WorkspaceCitation[];
   feedback?: WorkspaceConversationMessageFeedback | null;
   suggestedPrompts?: string[];
 };
@@ -398,6 +423,8 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
   artifacts: WorkspaceArtifact[];
+  citations: WorkspaceCitation[];
+  sourceBlocks: WorkspaceSourceBlock[];
   usage: WorkspaceRunUsage;
   timeline: WorkspaceRunTimelineEvent[];
 };

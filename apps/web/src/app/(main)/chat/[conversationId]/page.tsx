@@ -37,6 +37,10 @@ import { ChatMarkdown } from "../../../../components/chat-markdown";
 import { ConversationSharePanel } from "../../../../components/conversation-share-panel";
 import { WorkspaceArtifactLinkList } from "../../../../components/workspace-artifacts";
 import {
+  WorkspaceCitationList,
+  WorkspaceSourceBlockList,
+} from "../../../../components/workspace-sources";
+import {
   fetchWorkspaceCatalog,
   fetchWorkspaceConversation,
   fetchWorkspacePendingActions,
@@ -832,11 +836,13 @@ export default function ConversationPage() {
             const delta = chunk.choices[0]?.delta;
             const finishReason = chunk.choices[0]?.finish_reason;
             const suggestedPrompts = chunk.suggested_prompts;
+            const citations = chunk.citations;
 
             if (
               delta?.content ||
               finishReason ||
-              (suggestedPrompts && suggestedPrompts.length > 0)
+              (suggestedPrompts && suggestedPrompts.length > 0) ||
+              (citations && citations.length > 0)
             ) {
               setMessages((currentMessages) =>
                 currentMessages.map((message) =>
@@ -850,6 +856,10 @@ export default function ConversationPage() {
                           suggestedPrompts && suggestedPrompts.length > 0
                             ? suggestedPrompts
                             : message.suggestedPrompts,
+                        citations:
+                          citations && citations.length > 0
+                            ? citations
+                            : message.citations,
                         status: finishReason
                           ? stopRequestedRef.current
                             ? "stopped"
@@ -1336,11 +1346,11 @@ export default function ConversationPage() {
 
       <header className="chat-header">
         <div>
-          <span className="eyebrow">P2-C4</span>
+          <span className="eyebrow">P2-D2</span>
           <h1>{conversation.title}</h1>
           <p className="lead">
-            The conversation surface now shows current human-in-the-loop cards
-            alongside the persisted transcript and run boundary.
+            The conversation surface now keeps persisted citations, source
+            blocks, artifacts, and run replay on the same workspace boundary.
           </p>
         </div>
         <div className="workspace-badges">
@@ -1918,6 +1928,9 @@ export default function ConversationPage() {
                     </div>
                   </div>
                 ) : null}
+                {message.citations && message.citations.length > 0 ? (
+                  <WorkspaceCitationList citations={message.citations} />
+                ) : null}
                 {message.artifacts && message.artifacts.length > 0 ? (
                   <div className="chat-artifact-section">
                     <span className="chat-suggested-prompts-label">
@@ -2111,6 +2124,17 @@ export default function ConversationPage() {
                     </p>
                   </article>
                   <article className="chat-meta-card">
+                    <span>Sources</span>
+                    <strong>
+                      {selectedRun.citations.length} citations ·{" "}
+                      {selectedRun.sourceBlocks.length} blocks
+                    </strong>
+                    <p>
+                      Citation metadata and source blocks are replayable from
+                      persisted run outputs.
+                    </p>
+                  </article>
+                  <article className="chat-meta-card">
                     <span>Timeline events</span>
                     <strong>{selectedRun.timeline.length}</strong>
                     <p>
@@ -2216,6 +2240,38 @@ export default function ConversationPage() {
                         artifacts={selectedRun.artifacts}
                         conversationId={conversation.id}
                         runId={selectedRun.id}
+                      />
+                    </article>
+                  ) : null}
+                  {selectedRun.citations.length > 0 ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Citations</span>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <WorkspaceCitationList
+                        citations={selectedRun.citations}
+                        title="Replay citations"
+                      />
+                    </article>
+                  ) : null}
+                  {selectedRun.sourceBlocks.length > 0 ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Source blocks</span>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <WorkspaceSourceBlockList
+                        sourceBlocks={selectedRun.sourceBlocks}
+                        title="Replay source blocks"
                       />
                     </article>
                   ) : null}

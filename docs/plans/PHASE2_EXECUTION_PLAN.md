@@ -118,7 +118,8 @@ Execution status:
 | completed | `P2-C4` | `/chat/[conversationId]` 已显示 pending-action 卡片，提交与刷新都已验证 |
 | completed | `P2-C5` | HITL responded/cancelled/expired 已进入 audit，超时与放弃状态可持久化 |
 | completed | `P2-D1` | failed run 已带结构化 failure taxonomy，run detail 和 UI 已可读      |
-| active    | `P2-D2` | 下一项，把 citation/source block 接到 assistant 回复和 replay        |
+| completed | `P2-D2` | citation/source block 已接到 blocking/streaming、transcript、replay 和 shared transcript |
+| active    | `P2-D3` | 下一项，把 prompt injection / safety signal 接到 run 和 replay      |
 
 ## 5. First Batch Definition
 
@@ -158,7 +159,7 @@ Current batch status:
 - `P2-C4` complete
 - `P2-C5` complete
 - `P2-D1` complete
-- the active follow-on item is `P2-D2`
+- the active follow-on item is `P2-D3`
 
 ## 6. Detailed Execution Notes
 
@@ -463,6 +464,37 @@ Current batch status:
   - failure taxonomy currently describes persisted run failures only
     - pre-run gateway validation errors (`invalid_messages`, `app_not_authorized`, etc.) still belong to the chat error response path, not workspace run detail
 
+### P2-D2 Citation And Source Blocks
+
+- shared/runtime contract:
+  - `WorkspaceConversationMessage.citations` now carries persisted transcript-level citation summaries
+  - `WorkspaceRun.citations` and `WorkspaceRun.sourceBlocks` now expose replayable source metadata
+  - blocking chat responses now expose `message.citations` and `message.source_blocks`
+  - terminal SSE chunks now expose `citations` and `source_blocks`
+- current semantics:
+  - the placeholder runtime now emits:
+    - one `workspace_context` source block for group/trace context
+    - one `app_reference` source block for the current app summary
+    - one `attachment` source block per uploaded file on the latest user turn
+  - transcript messages only persist citations
+    - full source block payloads live on `runs.outputs.sourceBlocks`
+  - citation chips can already open links when `href` is present
+    - current placeholder payloads are internal-only and keep `href = null`
+- browser/host continuity:
+  - `npm run test:e2e` does not forward extra CLI args on this host
+    - `scripts/run-e2e.mjs` always executes `npx playwright test` without passing through `--grep`
+    - use raw Playwright for targeted browser verification when you only need one scenario
+  - for raw Playwright on this host:
+    - first run `node scripts/prepare-playwright-runtime.mjs`
+    - then export `LD_LIBRARY_PATH` with the printed runtime-lib path
+    - then run `PLAYWRIGHT_BASE_URL=http://127.0.0.1:<port> npx playwright test ... --grep ...`
+  - if `3111/4111` are already occupied, start an isolated test stack on alternate ports
+    - this round used gateway `4000` and web `3116`
+  - the run replay panel now renders the same source title twice:
+    - once in the citation chip list
+    - once in the source block card title
+    - Playwright locators must use exact text or scoped containers to avoid strict-mode collisions
+
 ### Operational Continuity
 
 - browser tests that assert root-admin navigation should wait for `/api/gateway/admin/context`
@@ -533,21 +565,21 @@ Legend:
 - [x] `P2-D1` Add structured failure taxonomy on persisted runs
 - [x] `P2-D1` Show failure stage / code / retryable / detail on conversation run detail
 
-### 7.2 Active Delivery Queue: `P2-D2` Citation And Source Blocks
+### 7.2 Completed Delivery Queue: `P2-D2` Citation And Source Blocks
 
-- [ ] `P2-D2-01` Define `WorkspaceCitation`, `WorkspaceSourceBlock`, and related shared DTOs
-- [ ] `P2-D2-02` Extend blocking chat responses to include citations and grouped source blocks
-- [ ] `P2-D2-03` Extend terminal SSE chunks to expose citations for streaming UIs
-- [ ] `P2-D2-04` Persist citation summaries on assistant transcript messages
-- [ ] `P2-D2-05` Persist full source blocks on run outputs for replay fidelity
-- [ ] `P2-D2-06` Backfill in-memory workspace service so tests and local fallback match persistence semantics
-- [ ] `P2-D2-07` Render inline citation chips in the conversation transcript
-- [ ] `P2-D2-08` Render expandable source cards in selected run replay
-- [ ] `P2-D2-09` Render read-only citations on shared transcript pages
-- [ ] `P2-D2-10` Add copy/open affordances for sources where the payload includes URLs
-- [ ] `P2-D2-11` Cover citation persistence across restart in route and persistence tests
-- [ ] `P2-D2-12` Add browser coverage for citation rendering, refresh, and shared transcript replay
-- [ ] `P2-D2-13` Record any browser-selector gotchas in the dev log after landing the feature
+- [x] `P2-D2-01` Define `WorkspaceCitation`, `WorkspaceSourceBlock`, and related shared DTOs
+- [x] `P2-D2-02` Extend blocking chat responses to include citations and grouped source blocks
+- [x] `P2-D2-03` Extend terminal SSE chunks to expose citations for streaming UIs
+- [x] `P2-D2-04` Persist citation summaries on assistant transcript messages
+- [x] `P2-D2-05` Persist full source blocks on run outputs for replay fidelity
+- [x] `P2-D2-06` Backfill in-memory workspace service so tests and local fallback match persistence semantics
+- [x] `P2-D2-07` Render inline citation chips in the conversation transcript
+- [x] `P2-D2-08` Render expandable source cards in selected run replay
+- [x] `P2-D2-09` Render read-only citations on shared transcript pages
+- [x] `P2-D2-10` Add copy/open affordances for sources where the payload includes URLs
+- [x] `P2-D2-11` Cover citation persistence across restart in route and persistence tests
+- [x] `P2-D2-12` Add browser coverage for citation rendering, refresh, and shared transcript replay
+- [x] `P2-D2-13` Record any browser-selector gotchas in the dev log after landing the feature
 
 ### 7.3 Safety Queue: `P2-D3` Prompt Injection And Safety Signals
 

@@ -1333,6 +1333,12 @@ describe.sequential('persistent auth runtime', () => {
             assistant: {
               content: expect.stringContaining('Policy Watch is now reachable through the AgentifUI gateway.'),
               finishReason: 'stop',
+              citations: expect.arrayContaining([
+                expect.objectContaining({
+                  label: 'S1',
+                  title: 'Policy Watch workspace context',
+                }),
+              ]),
             },
             artifacts: [
               expect.objectContaining({
@@ -1341,6 +1347,18 @@ describe.sequential('persistent auth runtime', () => {
                 status: 'draft',
               }),
             ],
+            citations: expect.arrayContaining([
+              expect.objectContaining({
+                label: 'S1',
+                title: 'Policy Watch workspace context',
+              }),
+            ]),
+            sourceBlocks: expect.arrayContaining([
+              expect.objectContaining({
+                kind: 'workspace_context',
+                title: 'Policy Watch workspace context',
+              }),
+            ]),
           });
           expect(artifactId).toEqual(expect.stringMatching(/^artifact_/));
 
@@ -1394,15 +1412,21 @@ describe.sequential('persistent auth runtime', () => {
               content: expect.stringContaining(
                 'Policy Watch is now reachable through the AgentifUI gateway.'
               ),
-              artifacts: [
-                expect.objectContaining({
-                  kind: 'markdown',
-                  source: 'assistant_response',
-                }),
-              ],
-              status: 'completed',
-            },
-          ],
+            artifacts: [
+              expect.objectContaining({
+                kind: 'markdown',
+                source: 'assistant_response',
+              }),
+            ],
+            citations: expect.arrayContaining([
+              expect.objectContaining({
+                label: 'S1',
+                title: 'Policy Watch workspace context',
+              }),
+            ]),
+            status: 'completed',
+          },
+        ],
         });
 
         const history = await app.inject({
@@ -1445,6 +1469,18 @@ describe.sequential('persistent auth runtime', () => {
               source: 'assistant_response',
             }),
           ],
+          citations: expect.arrayContaining([
+            expect.objectContaining({
+              label: 'S1',
+              title: 'Policy Watch workspace context',
+            }),
+          ]),
+          sourceBlocks: expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'workspace_context',
+              title: 'Policy Watch workspace context',
+            }),
+          ]),
         });
         expect((run.json() as WorkspaceRunResponse).data.timeline).toEqual(
           expect.arrayContaining([
