@@ -18,6 +18,9 @@ import type {
   WorkspaceConversationUploadResponse,
   WorkspaceConversationUpdateRequest,
   WorkspaceConversationUpdateResponse,
+  WorkspacePendingActionRespondRequest,
+  WorkspacePendingActionRespondResponse,
+  WorkspacePendingActionsResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
@@ -172,6 +175,35 @@ export async function fetchWorkspaceConversation(
     {
       method: 'GET',
       sessionToken,
+    }
+  );
+}
+
+export async function fetchWorkspacePendingActions(
+  sessionToken: string,
+  conversationId: string
+): Promise<WorkspacePendingActionsResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspacePendingActionsResponse>(
+    `/workspace/conversations/${conversationId}/pending-actions`,
+    {
+      method: 'GET',
+      sessionToken,
+    }
+  );
+}
+
+export async function respondToWorkspacePendingAction(
+  sessionToken: string,
+  conversationId: string,
+  stepId: string,
+  input: WorkspacePendingActionRespondRequest
+): Promise<WorkspacePendingActionRespondResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspacePendingActionRespondResponse>(
+    `/workspace/conversations/${conversationId}/pending-actions/${stepId}/respond`,
+    {
+      method: 'POST',
+      sessionToken,
+      body: input,
     }
   );
 }

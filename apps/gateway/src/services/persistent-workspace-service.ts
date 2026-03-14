@@ -37,31 +37,38 @@ import {
 } from "./workspace-catalog-fixtures.js";
 import type {
   WorkspaceArtifactResult,
-  WorkspaceConversationResult,
-  WorkspaceConversationRunsResult,
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
-  WorkspaceConversationMessageFeedbackResult,
-  WorkspaceConversationMessageFeedbackUpdateInput,
   WorkspaceConversationListInput,
   WorkspaceConversationListResult,
-  WorkspaceConversationUpdateInput,
+  WorkspaceConversationMessageFeedbackResult,
+  WorkspaceConversationMessageFeedbackUpdateInput,
+  WorkspaceConversationResult,
+  WorkspaceConversationRunsResult,
   WorkspaceConversationShareCreateInput,
   WorkspaceConversationShareResult,
   WorkspaceConversationShareRevokeInput,
   WorkspaceConversationSharesResult,
+  WorkspaceConversationUpdateInput,
   WorkspaceConversationUploadInput,
   WorkspaceConversationUploadResult,
   WorkspaceLaunchResult,
+  WorkspacePendingActionRespondInput,
+  WorkspacePendingActionRespondResult,
+  WorkspacePendingActionsResult,
   WorkspaceRunCreateInput,
   WorkspaceRunResult,
   WorkspaceRunTimelineEventAppendInput,
-  WorkspaceSharedArtifactLookupInput,
-  WorkspaceSharedConversationResult,
   WorkspaceRunUpdateInput,
   WorkspaceService,
+  WorkspaceSharedArtifactLookupInput,
+  WorkspaceSharedConversationResult,
 } from "./workspace-service.js";
 import type { WorkspaceFileStorage } from "./workspace-file-storage.js";
+import {
+  applyWorkspaceHitlStepResponse,
+  parseWorkspaceHitlSteps,
+} from "./workspace-hitl.js";
 import {
   buildDefaultQuotaLimitRecords,
   buildQuotaUsagesByGroupId,
@@ -2078,6 +2085,146 @@ async function readArtifactForUser(
   return row ? toWorkspaceArtifactFromRow(row) : null;
 }
 
+async function listPendingActionsForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  conversationId: string,
+): Promise<WorkspacePendingActionsResult> {
+  const conversation = await readConversationForUser(database, user, conversationId);
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace conversation could not be found.",
+    };
+  }
+
+  const run = await readRunForUser(database, user, conversation.run.id);
+
+  if (!run) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace run could not be found.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      conversationId,
+      runId: run.id,
+      items: parseWorkspaceHitlSteps(run.outputs.pendingActions),
+    },
+  };
+}
+
+async function respondToPendingActionForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspacePendingActionRespondInput,
+): Promise<WorkspacePendingActionRespondResult> {
+  const conversation = await readConversationForUser(
+    database,
+    user,
+    input.conversationId,
+  );
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace conversation could not be found.",
+    };
+  }
+
+  const run = await readRunForUser(database, user, conversation.run.id);
+
+  if (!run) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace run could not be found.",
+    };
+  }
+
+  const pendingActions = parseWorkspaceHitlSteps(run.outputs.pendingActions);
+  const pendingActionIndex = pendingActions.findIndex(
+    (item) => item.id === input.stepId,
+  );
+
+  if (pendingActionIndex < 0) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The requested workspace pending action could not be found.",
+      details: {
+        stepId: input.stepId,
+      },
+    };
+  }
+
+  const respondedAt = new Date().toISOString();
+  const responseResult = applyWorkspaceHitlStepResponse({
+    step: pendingActions[pendingActionIndex]!,
+    request: input.request,
+    actorUserId: user.id,
+    actorDisplayName: user.displayName,
+    respondedAt,
+  });
+
+  if (!responseResult.ok) {
+    return {
+      ok: false,
+      statusCode:
+        responseResult.code === "WORKSPACE_ACTION_CONFLICT" ? 409 : 400,
+      code: responseResult.code,
+      message: responseResult.message,
+      details: responseResult.details,
+    };
+  }
+
+  const items = pendingActions.map((item, index) =>
+    index === pendingActionIndex ? responseResult.item : item,
+  );
+
+  await database.begin(async (transaction) => {
+    const sql = transaction as unknown as DatabaseClient;
+
+    await sql`
+      update runs
+      set outputs = runs.outputs || ${{
+        pendingActions: items,
+      }}::jsonb
+      where id = ${run.id}
+        and conversation_id = ${conversation.id}
+    `;
+
+    await sql`
+      update conversations
+      set updated_at = ${respondedAt}::timestamptz
+      where id = ${conversation.id}
+        and user_id = ${user.id}
+    `;
+  });
+
+  return {
+    ok: true,
+    data: {
+      conversationId: conversation.id,
+      runId: run.id,
+      item: responseResult.item,
+      items,
+    },
+  };
+}
+
 async function readSharedArtifactForUser(
   database: DatabaseClient,
   user: AuthUser,
@@ -3385,6 +3532,18 @@ export function createPersistentWorkspaceService(
         ok: true,
         data: artifact,
       };
+    },
+    async listPendingActionsForUser(
+      user,
+      conversationId,
+    ): Promise<WorkspacePendingActionsResult> {
+      return listPendingActionsForUser(database, user, conversationId);
+    },
+    async respondToPendingActionForUser(
+      user,
+      input,
+    ): Promise<WorkspacePendingActionRespondResult> {
+      return respondToPendingActionForUser(database, user, input);
     },
     async getSharedArtifactForUser(user, input) {
       return readSharedArtifactForUser(database, user, input);

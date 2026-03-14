@@ -5,6 +5,8 @@ import type {
   WorkspaceConversationListResponse,
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
+  WorkspacePendingActionRespondResponse,
+  WorkspacePendingActionsResponse,
   WorkspaceConversationShareResponse,
   WorkspaceConversationSharesResponse,
   WorkspaceConversationUploadResponse,
@@ -1813,6 +1815,253 @@ describe("workspace routes", () => {
           }),
         ])
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("lists pending actions for the latest conversation run", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+
+    const login = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected owner login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_tenant_control",
+          activeGroupId: "grp_product",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include a conversation id");
+      }
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_tenant_control",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Approve this tenant access change.",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+      expect((completion.json() as ChatCompletionResponse).choices[0]?.message).toMatchObject({
+        pending_actions: [
+          expect.objectContaining({
+            kind: "approval",
+            status: "pending",
+          }),
+        ],
+      });
+
+      const pendingActions = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/pending-actions`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(pendingActions.statusCode).toBe(200);
+      expect((pendingActions.json() as WorkspacePendingActionsResponse).data).toMatchObject({
+        conversationId,
+        runId: launchBody.data.runId,
+        items: [
+          expect.objectContaining({
+            kind: "approval",
+            status: "pending",
+            title: "Approve tenant access change",
+          }),
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("responds to approval pending actions and rejects duplicate updates", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+
+    const login = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected owner login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_tenant_control",
+          activeGroupId: "grp_product",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include a conversation id");
+      }
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_tenant_control",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Approve this tenant access change.",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const pendingActions = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/pending-actions`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(pendingActions.statusCode).toBe(200);
+
+      const pendingActionId = (
+        pendingActions.json() as WorkspacePendingActionsResponse
+      ).data.items[0]?.id;
+
+      if (!pendingActionId) {
+        throw new Error("expected a pending action id");
+      }
+
+      const respond = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/pending-actions/${pendingActionId}/respond`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          action: "approve",
+          note: "Reviewed by owner.",
+        },
+      });
+
+      expect(respond.statusCode).toBe(200);
+      expect((respond.json() as WorkspacePendingActionRespondResponse).data).toMatchObject({
+        conversationId,
+        runId: launchBody.data.runId,
+        item: {
+          id: pendingActionId,
+          kind: "approval",
+          status: "approved",
+          response: {
+            action: "approve",
+            actorDisplayName: "Owner",
+            note: "Reviewed by owner.",
+          },
+        },
+      });
+
+      const refreshedPendingActions = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/pending-actions`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(refreshedPendingActions.statusCode).toBe(200);
+      expect(
+        (refreshedPendingActions.json() as WorkspacePendingActionsResponse).data
+          .items,
+      ).toEqual([
+        expect.objectContaining({
+          id: pendingActionId,
+          status: "approved",
+        }),
+      ]);
+
+      const duplicateRespond = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/pending-actions/${pendingActionId}/respond`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          action: "approve",
+        },
+      });
+
+      expect(duplicateRespond.statusCode).toBe(409);
+      expect(duplicateRespond.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_ACTION_CONFLICT",
+        },
+      });
     } finally {
       await app.close();
     }

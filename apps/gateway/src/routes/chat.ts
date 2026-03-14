@@ -3,6 +3,7 @@ import type {
   WorkspaceArtifactSummary,
   WorkspaceConversation,
   WorkspaceConversationAttachment,
+  WorkspaceHitlStep,
   WorkspaceConversationMessage,
   WorkspaceConversationMessageStatus,
 } from "@agentifui/shared/apps";
@@ -26,6 +27,7 @@ import { Readable } from "node:stream";
 
 import type { AuditService } from "../services/audit-service.js";
 import type { AuthService } from "../services/auth-service.js";
+import { buildPlaceholderHitlSteps } from "../services/workspace-hitl.js";
 import { calculateCompletionQuotaCost } from "../services/workspace-quota.js";
 import type { WorkspaceService } from "../services/workspace-service.js";
 
@@ -806,6 +808,7 @@ function buildChunkEvent(chunk: ChatCompletionChunk) {
 
 function buildStreamingChunk(input: {
   artifacts?: WorkspaceArtifact[];
+  pendingActions?: WorkspaceHitlStep[];
   id: string;
   created: number;
   model: string;
@@ -838,6 +841,9 @@ function buildStreamingChunk(input: {
     ...(input.artifacts && input.artifacts.length > 0
       ? { artifacts: input.artifacts }
       : {}),
+    ...(input.pendingActions && input.pendingActions.length > 0
+      ? { pending_actions: input.pendingActions }
+      : {}),
     ...(input.suggestedPrompts && input.suggestedPrompts.length > 0
       ? { suggested_prompts: input.suggestedPrompts }
       : {}),
@@ -852,6 +858,7 @@ function buildBlockingResponse(input: {
   completionTokens: number;
   assistantText: string;
   artifacts: WorkspaceArtifact[];
+  pendingActions: WorkspaceHitlStep[];
   suggestedPrompts: string[];
 }): ChatCompletionResponse {
   return {
@@ -866,6 +873,9 @@ function buildBlockingResponse(input: {
           role: "assistant",
           content: input.assistantText,
           artifacts: input.artifacts,
+          ...(input.pendingActions.length > 0
+            ? { pending_actions: input.pendingActions }
+            : {}),
           suggested_prompts: input.suggestedPrompts,
         },
         finish_reason: "stop",
@@ -895,6 +905,7 @@ async function* streamCompletionEvents(input: {
   model: string;
   promptTokens: number;
   assistantText: string;
+  pendingActions: WorkspaceHitlStep[];
   suggestedPrompts: string[];
   messages: ChatCompletionMessage[];
   startedAt: number;
@@ -948,6 +959,8 @@ async function* streamCompletionEvents(input: {
       createdAt: new Date().toISOString(),
       latestPrompt: extractLatestUserPrompt(input.messages),
     });
+    const pendingActions =
+      !wasStopped && assistantContent.trim().length > 0 ? input.pendingActions : [];
     const updateResult =
       await input.workspaceService.updateConversationRunForUser(input.user, {
         conversationId: input.conversation.id,
@@ -970,6 +983,7 @@ async function* streamCompletionEvents(input: {
             suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
           },
           artifacts,
+          pendingActions,
           usage: {
             promptTokens: input.promptTokens,
             completionTokens,
@@ -992,6 +1006,7 @@ async function* streamCompletionEvents(input: {
       traceId: input.conversation.run.traceId,
       finishReason: "stop",
       artifacts,
+      pendingActions,
       suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
       usage: {
         prompt_tokens: input.promptTokens,
@@ -1062,6 +1077,7 @@ async function* streamCompletionEvents(input: {
               suggestedPrompts: undefined,
             },
             artifacts,
+            pendingActions: [],
             usage: {
               promptTokens: input.promptTokens,
               completionTokens,
@@ -1319,6 +1335,13 @@ export async function registerChatRoutes(
       },
       conversation,
     );
+    const pendingActions = buildPlaceholderHitlSteps({
+      appId,
+      conversationId: conversation.id,
+      createdAt: new Date().toISOString(),
+      latestPrompt: extractLatestUserPrompt(body.messages),
+      runId: conversation.run.id,
+    });
     const promptTokens = body.messages.reduce(
       (total, message) => total + estimateTokens(extractMessageText(message)),
       0,
@@ -1375,6 +1398,7 @@ export async function registerChatRoutes(
             model,
             promptTokens,
             assistantText,
+            pendingActions,
             suggestedPrompts,
             messages: body.messages,
             startedAt,
@@ -1414,6 +1438,7 @@ export async function registerChatRoutes(
             suggestedPrompts,
           },
           artifacts,
+          pendingActions,
           usage: {
             promptTokens,
             completionTokens,
@@ -1468,6 +1493,7 @@ export async function registerChatRoutes(
       completionTokens,
       assistantText,
       artifacts,
+      pendingActions,
       suggestedPrompts,
     });
   });

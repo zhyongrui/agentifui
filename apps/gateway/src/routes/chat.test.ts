@@ -481,6 +481,110 @@ describe("chat routes", () => {
     }
   });
 
+  it("returns input-request pending actions for tenant control workflows", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+
+    const login = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected owner login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_tenant_control",
+          activeGroupId: "grp_product",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include conversation id");
+      }
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_tenant_control",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content:
+                "Open the details form and collect the justification input for this tenant access change.",
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as ChatCompletionResponse).choices[0]?.message).toMatchObject({
+        pending_actions: [
+          expect.objectContaining({
+            kind: "input_request",
+            status: "pending",
+            title: "Collect change request details",
+            submitLabel: "Submit details",
+            fields: [
+              expect.objectContaining({
+                id: "justification",
+                type: "textarea",
+                required: true,
+              }),
+              expect.objectContaining({
+                id: "risk_level",
+                type: "select",
+                required: true,
+                options: expect.arrayContaining([
+                  expect.objectContaining({
+                    id: "low",
+                    value: "low",
+                  }),
+                  expect.objectContaining({
+                    id: "medium",
+                    value: "medium",
+                  }),
+                  expect.objectContaining({
+                    id: "high",
+                    value: "high",
+                  }),
+                ]),
+              }),
+            ],
+          }),
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("creates a new conversation when conversation_id is omitted", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);

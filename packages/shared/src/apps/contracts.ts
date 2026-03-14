@@ -260,6 +260,77 @@ export type WorkspaceConversationMessage = {
   suggestedPrompts?: string[];
 };
 
+export type WorkspaceHitlStepKind = "approval" | "input_request";
+
+export type WorkspaceHitlStepStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "submitted"
+  | "expired"
+  | "cancelled";
+
+export type WorkspaceHitlFieldType = "text" | "textarea" | "select";
+
+export type WorkspaceHitlStepResponseAction = "approve" | "reject" | "submit";
+
+export type WorkspaceHitlOption = {
+  id: string;
+  label: string;
+  value: string;
+  description?: string | null;
+};
+
+export type WorkspaceHitlStepResponse = {
+  action: WorkspaceHitlStepResponseAction;
+  respondedAt: string;
+  actorUserId: string;
+  actorDisplayName: string | null;
+  note?: string | null;
+  values?: Record<string, string>;
+};
+
+type WorkspaceHitlStepBase = {
+  id: string;
+  kind: WorkspaceHitlStepKind;
+  status: WorkspaceHitlStepStatus;
+  title: string;
+  description: string | null;
+  conversationId: string;
+  runId: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null;
+  response?: WorkspaceHitlStepResponse | null;
+};
+
+export type WorkspaceApprovalHitlStep = WorkspaceHitlStepBase & {
+  kind: "approval";
+  approveLabel: string;
+  rejectLabel: string;
+};
+
+export type WorkspaceHitlInputField = {
+  id: string;
+  label: string;
+  type: WorkspaceHitlFieldType;
+  required: boolean;
+  placeholder?: string | null;
+  helpText?: string | null;
+  defaultValue?: string | null;
+  options?: WorkspaceHitlOption[];
+};
+
+export type WorkspaceInputRequestHitlStep = WorkspaceHitlStepBase & {
+  kind: "input_request";
+  submitLabel: string;
+  fields: WorkspaceHitlInputField[];
+};
+
+export type WorkspaceHitlStep =
+  | WorkspaceApprovalHitlStep
+  | WorkspaceInputRequestHitlStep;
+
 export type WorkspaceRunUsage = {
   promptTokens: number;
   completionTokens: number;
@@ -469,6 +540,40 @@ export type WorkspaceRunResponse = {
   data: WorkspaceRun;
 };
 
+export type WorkspacePendingActionsResponse = {
+  ok: true;
+  data: {
+    conversationId: string;
+    runId: string;
+    items: WorkspaceHitlStep[];
+  };
+};
+
+export type WorkspacePendingActionRespondRequest =
+  | {
+      action: "approve";
+      note?: string | null;
+    }
+  | {
+      action: "reject";
+      note?: string | null;
+    }
+  | {
+      action: "submit";
+      note?: string | null;
+      values: Record<string, string>;
+    };
+
+export type WorkspacePendingActionRespondResponse = {
+  ok: true;
+  data: {
+    conversationId: string;
+    runId: string;
+    item: WorkspaceHitlStep;
+    items: WorkspaceHitlStep[];
+  };
+};
+
 export type WorkspaceArtifactResponse = {
   ok: true;
   data: WorkspaceArtifact;
@@ -480,7 +585,8 @@ export type WorkspaceErrorCode =
   | "WORKSPACE_INVALID_PAYLOAD"
   | "WORKSPACE_NOT_FOUND"
   | "WORKSPACE_LAUNCH_BLOCKED"
-  | "WORKSPACE_UPLOAD_BLOCKED";
+  | "WORKSPACE_UPLOAD_BLOCKED"
+  | "WORKSPACE_ACTION_CONFLICT";
 
 export type WorkspaceErrorResponse = {
   ok: false;

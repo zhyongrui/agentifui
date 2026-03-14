@@ -84,6 +84,18 @@ Default execution order after Phase 1 closeout:
 4. `P2-B5` Artifact 审计
 5. `P2-C1` HITL step 合同
 6. `P2-C2` pending-action route
+7. `P2-C3` step 响应提交
+8. `P2-C4` 对话内 HITL 展示
+9. `P2-C5` 审计与超时
+10. `P2-D1` run failure taxonomy
+11. `P2-D2` 引用结果展示
+12. `P2-D3` prompt injection 标记
+13. `P2-D4` app runtime abstraction
+14. `P2-D5` degraded fallback
+15. `P2-E1` session/archive cleanup job
+16. `P2-E2` load/perf smoke
+17. `P2-E3` tenant usage analytics
+18. `P2-E4` backup/export drill
 
 Execution status:
 
@@ -100,7 +112,10 @@ Execution status:
 | completed | `P2-B3` | `/chat/artifacts/[artifactId]` 已上线，消息与 run 入口已接入          |
 | completed | `P2-B4` | owner/shared artifact preview + download 路由已补齐，shared transcript 已接入 |
 | completed | `P2-B5` | artifact generated / viewed / downloaded 已进入 audit                 |
-| active    | `P2-C1` | 下一项，统一 approval / input-request step 合同与持久化边界           |
+| completed | `P2-C1` | approval / input-request / response payload 合同已冻结                |
+| completed | `P2-C2` | `/workspace/conversations/:conversationId/pending-actions` 已可读     |
+| completed | `P2-C3` | `respond` 路由、状态更新和响应持久化已打通                           |
+| active    | `P2-C4` | 下一项，把 current pending-action state 显示进 chat 页面并补浏览器验证 |
 
 ## 5. First Batch Definition
 
@@ -134,7 +149,10 @@ Current batch status:
 - `P2-B3` complete
 - `P2-B4` complete
 - `P2-B5` complete
-- the active follow-on item is `P2-C1`
+- `P2-C1` complete
+- `P2-C2` complete
+- `P2-C3` complete
+- the active follow-on item is `P2-C4`
 
 ## 6. Detailed Execution Notes
 
@@ -329,6 +347,48 @@ Current batch status:
 - admin continuity:
   - `/admin/audit` and export do not need artifact-specific endpoints
   - filter by the new action names instead of adding a dedicated artifact admin surface
+
+### P2-C1 / P2-C2 / P2-C3 HITL 合同、读取与响应边界
+
+- backend contract:
+  - `WorkspaceHitlStep` now models both `approval` and `input_request`
+  - `WorkspaceHitlStep.response` stores:
+    - `action`
+    - `respondedAt`
+    - `actorUserId`
+    - `actorDisplayName`
+    - optional `note`
+    - optional submitted `values`
+  - route surface now includes:
+    - `GET /workspace/conversations/:conversationId/pending-actions`
+    - `POST /workspace/conversations/:conversationId/pending-actions/:stepId/respond`
+- current semantics:
+  - `pending-actions` reads from the latest run on the conversation
+  - the route intentionally returns the full current HITL state for that run, including already-responded items
+  - approval steps accept `approve` / `reject`
+  - input-request steps accept `submit`
+  - required field validation and select-option validation happen before persistence
+  - replaying a non-pending step returns `WORKSPACE_ACTION_CONFLICT`
+- persistence/read-path guardrails:
+  - HITL state currently lives in `runs.outputs.pendingActions`
+  - `messageHistory` is still not the source of truth for HITL cards
+    - the conversation UI work belongs to `P2-C4`
+  - the `runs` table does not have `updated_at`
+    - only `conversations.updated_at` should be bumped when persisting a HITL response
+- testing closeout:
+  - route tests now prove:
+    - approval placeholder steps can be read and approved
+    - duplicate approval attempts conflict
+    - input-request placeholder steps surface on the chat completion contract
+  - persistence tests now prove:
+    - pending actions survive app restart
+    - submitted HITL responses survive app restart
+    - persisted run outputs retain the response payload
+- future-session continuity:
+  - `app_tenant_control` is the deterministic placeholder app for HITL route/persistence coverage
+  - on this host, very large `apply_patch` operations against `workspace.ts` and `/chat/[conversationId]/page.tsx` can time out and truncate the file
+    - if that happens, restore from `git show HEAD:...` before reapplying smaller patches
+  - `npm run type-check` is a good immediate sanity check after any restore on this host because the truncated-file failure mode is syntactically obvious
 
 ### Operational Continuity
 

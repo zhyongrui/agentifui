@@ -4,6 +4,8 @@ import {
   downloadWorkspaceArtifact,
   fetchWorkspaceConversation,
   fetchWorkspaceConversationList,
+  fetchWorkspacePendingActions,
+  respondToWorkspacePendingAction,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceArtifact,
   fetchWorkspaceCatalog,
@@ -310,6 +312,156 @@ describe('apps client', () => {
         pinned: false,
         run: {
           traceId: 'trace-123',
+        },
+      },
+    });
+  });
+
+  it('loads pending actions for a conversation through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            runId: 'run-456',
+            items: [
+              {
+                id: 'hitl-1',
+                kind: 'approval',
+                status: 'pending',
+                title: 'Approve tenant access change',
+                description: 'A tenant-level access change is waiting for approval.',
+                conversationId: 'conv-123',
+                runId: 'run-456',
+                createdAt: '2026-03-14T10:15:00.000Z',
+                updatedAt: '2026-03-14T10:15:00.000Z',
+                expiresAt: '2026-03-15T10:15:00.000Z',
+                approveLabel: 'Approve change',
+                rejectLabel: 'Reject change',
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspacePendingActions('session-123', 'conv-123');
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/gateway/workspace/conversations/conv-123/pending-actions',
+      {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        body: undefined,
+        cache: 'no-store',
+      }
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        runId: 'run-456',
+        items: [
+          {
+            kind: 'approval',
+            status: 'pending',
+          },
+        ],
+      },
+    });
+  });
+
+  it('submits a pending action response through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            runId: 'run-456',
+            item: {
+              id: 'hitl-1',
+              kind: 'input_request',
+              status: 'submitted',
+              title: 'Collect change request details',
+              description: 'Need rollout details.',
+              conversationId: 'conv-123',
+              runId: 'run-456',
+              createdAt: '2026-03-14T10:15:00.000Z',
+              updatedAt: '2026-03-14T10:16:00.000Z',
+              expiresAt: '2026-03-15T10:15:00.000Z',
+              submitLabel: 'Submit details',
+              fields: [
+                {
+                  id: 'justification',
+                  label: 'Business justification',
+                  type: 'textarea',
+                  required: true,
+                },
+              ],
+              response: {
+                action: 'submit',
+                respondedAt: '2026-03-14T10:16:00.000Z',
+                actorUserId: 'user-123',
+                actorDisplayName: 'Reviewer',
+                values: {
+                  justification: 'Need emergency access.',
+                },
+              },
+            },
+            items: [
+              {
+                id: 'hitl-1',
+                kind: 'input_request',
+                status: 'submitted',
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await respondToWorkspacePendingAction(
+      'session-123',
+      'conv-123',
+      'hitl-1',
+      {
+        action: 'submit',
+        values: {
+          justification: 'Need emergency access.',
+        },
+      }
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/gateway/workspace/conversations/conv-123/pending-actions/hitl-1/respond',
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer session-123',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'submit',
+          values: {
+            justification: 'Need emergency access.',
+          },
+        }),
+        cache: 'no-store',
+      }
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        item: {
+          status: 'submitted',
+          response: {
+            action: 'submit',
+          },
         },
       },
     });

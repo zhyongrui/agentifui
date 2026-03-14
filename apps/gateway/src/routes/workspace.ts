@@ -23,6 +23,9 @@ import type {
   WorkspaceConversationUploadResponse,
   WorkspaceConversationUpdateRequest,
   WorkspaceConversationUpdateResponse,
+  WorkspacePendingActionRespondRequest,
+  WorkspacePendingActionRespondResponse,
+  WorkspacePendingActionsResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
@@ -72,6 +75,37 @@ function isStringArray(value: unknown): value is string[] {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every(entry => typeof entry === 'string');
+}
+
+function isPendingActionRespondRequest(
+  value: unknown
+): value is WorkspacePendingActionRespondRequest {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const request = value as Record<string, unknown>;
+
+  if (request.action === 'approve' || request.action === 'reject') {
+    return request.note === undefined || isNullableString(request.note);
+  }
+
+  if (request.action === 'submit') {
+    return (
+      (request.note === undefined || isNullableString(request.note)) &&
+      isStringRecord(request.values)
+    );
+  }
+
+  return false;
 }
 
 function isMessageFeedbackRating(value: unknown): value is 'positive' | 'negative' | null {
@@ -684,6 +718,85 @@ export async function registerWorkspaceRoutes(
         pinned: result.data.pinned,
       },
     });
+
+    return response;
+  });
+
+  app.get('/workspace/conversations/:conversationId/pending-actions', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+
+    if (!conversationId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace pending action lookup requires a conversation id.'
+      );
+    }
+
+    const result = await workspaceService.listPendingActionsForUser(access.user, conversationId);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspacePendingActionsResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.post('/workspace/conversations/:conversationId/pending-actions/:stepId/respond', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+      stepId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+    const stepId = params.stepId?.trim();
+    const body = request.body ?? {};
+
+    if (!conversationId || !stepId || !isPendingActionRespondRequest(body)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace pending action responses require a conversation id, step id and a valid approve/reject/submit payload.'
+      );
+    }
+
+    const result = await workspaceService.respondToPendingActionForUser(access.user, {
+      conversationId,
+      stepId,
+      request: body,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspacePendingActionRespondResponse = {
+      ok: true,
+      data: result.data,
+    };
 
     return response;
   });

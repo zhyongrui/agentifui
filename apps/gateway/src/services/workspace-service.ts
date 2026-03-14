@@ -16,6 +16,8 @@ import type {
   WorkspaceConversationListItem,
   WorkspaceConversationShare,
   WorkspaceConversationMessage,
+  WorkspacePendingActionRespondRequest,
+  WorkspaceHitlStep,
   WorkspaceMessageFeedbackRating,
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
@@ -37,6 +39,10 @@ import {
   resolveSeededWorkspaceAppsForUser,
 } from './workspace-catalog-fixtures.js';
 import type { WorkspaceFileStorage } from './workspace-file-storage.js';
+import {
+  applyWorkspaceHitlStepResponse,
+  parseWorkspaceHitlSteps,
+} from './workspace-hitl.js';
 import {
   buildDefaultQuotaLimitRecords,
   buildQuotaUsagesByGroupId,
@@ -160,6 +166,42 @@ type WorkspaceConversationShareRevokeInput = {
   conversationId: string;
   shareId: string;
 };
+
+type WorkspacePendingActionsResult =
+  | {
+      ok: true;
+      data: {
+        conversationId: string;
+        runId: string;
+        items: WorkspaceHitlStep[];
+      };
+    }
+  | WorkspaceLookupFailure;
+
+type WorkspacePendingActionRespondInput = {
+  conversationId: string;
+  stepId: string;
+  request: WorkspacePendingActionRespondRequest;
+};
+
+type WorkspacePendingActionRespondResult =
+  | {
+      ok: true;
+      data: {
+        conversationId: string;
+        runId: string;
+        item: WorkspaceHitlStep;
+        items: WorkspaceHitlStep[];
+      };
+    }
+  | WorkspaceLookupFailure
+  | {
+      ok: false;
+      statusCode: 400 | 409;
+      code: 'WORKSPACE_INVALID_PAYLOAD' | 'WORKSPACE_ACTION_CONFLICT';
+      message: string;
+      details?: unknown;
+    };
 
 type WorkspaceSharedArtifactLookupInput = {
   artifactId: string;
@@ -308,6 +350,14 @@ type WorkspaceService = {
     user: AuthUser,
     artifactId: string
   ): WorkspaceArtifactResult | Promise<WorkspaceArtifactResult>;
+  listPendingActionsForUser(
+    user: AuthUser,
+    conversationId: string
+  ): WorkspacePendingActionsResult | Promise<WorkspacePendingActionsResult>;
+  respondToPendingActionForUser(
+    user: AuthUser,
+    input: WorkspacePendingActionRespondInput
+  ): WorkspacePendingActionRespondResult | Promise<WorkspacePendingActionRespondResult>;
   getSharedArtifactForUser(
     user: AuthUser,
     input: WorkspaceSharedArtifactLookupInput
@@ -461,6 +511,10 @@ function buildUsageFromOutputs(run: WorkspaceRunRecord): WorkspaceRun['usage'] {
     completionTokens: 0,
     totalTokens: run.totalTokens,
   };
+}
+
+function readPendingActionsFromOutputs(outputs: Record<string, unknown>): WorkspaceHitlStep[] {
+  return parseWorkspaceHitlSteps(outputs.pendingActions);
 }
 
 function isWorkspaceArtifactKind(value: unknown): value is WorkspaceArtifact['kind'] {
@@ -1511,6 +1565,118 @@ export function createWorkspaceService(options: {
         data: artifactData,
       };
     },
+    listPendingActionsForUser(user, conversationId) {
+      const conversation = conversationsById.get(conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const run = runsById.get(conversation.run.id);
+
+      if (!run || run.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace run could not be found.',
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          conversationId,
+          runId: run.id,
+          items: readPendingActionsFromOutputs(run.outputs),
+        },
+      };
+    },
+    respondToPendingActionForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const run = runsById.get(conversation.run.id);
+
+      if (!run || run.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace run could not be found.',
+        };
+      }
+
+      const pendingActions = readPendingActionsFromOutputs(run.outputs);
+      const pendingActionIndex = pendingActions.findIndex(
+        (item) => item.id === input.stepId
+      );
+
+      if (pendingActionIndex < 0) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The requested workspace pending action could not be found.',
+          details: {
+            stepId: input.stepId,
+          },
+        };
+      }
+
+      const respondedAt = new Date().toISOString();
+      const responseResult = applyWorkspaceHitlStepResponse({
+        step: pendingActions[pendingActionIndex]!,
+        request: input.request,
+        actorUserId: user.id,
+        actorDisplayName: user.displayName,
+        respondedAt,
+      });
+
+      if (!responseResult.ok) {
+        return {
+          ok: false,
+          statusCode:
+            responseResult.code === 'WORKSPACE_ACTION_CONFLICT' ? 409 : 400,
+          code: responseResult.code,
+          message: responseResult.message,
+          details: responseResult.details,
+        };
+      }
+
+      const items = pendingActions.map((item, index) =>
+        index === pendingActionIndex ? responseResult.item : item
+      );
+
+      run.outputs = {
+        ...run.outputs,
+        pendingActions: items,
+      };
+      conversation.updatedAt = respondedAt;
+
+      return {
+        ok: true,
+        data: {
+          conversationId: conversation.id,
+          runId: run.id,
+          item: responseResult.item,
+          items,
+        },
+      };
+    },
     getSharedArtifactForUser(user, input) {
       const share = sharesById.get(input.shareId);
 
@@ -1888,6 +2054,9 @@ export type {
   WorkspaceConversationMessageFeedbackUpdateInput,
   WorkspaceConversationListInput,
   WorkspaceConversationListResult,
+  WorkspacePendingActionsResult,
+  WorkspacePendingActionRespondInput,
+  WorkspacePendingActionRespondResult,
   WorkspaceConversationResult,
   WorkspaceConversationRunsResult,
   WorkspaceConversationUpdateInput,
