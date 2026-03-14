@@ -3154,6 +3154,16 @@ describe.sequential('persistent auth runtime', () => {
         expect(rootAdminLogin.statusCode).toBe(200);
         const rootAdminSessionToken = rootAdminLogin.json().data.sessionToken as string;
 
+        const rootWorkspace = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${rootAdminSessionToken}`,
+          },
+        });
+
+        expect(rootWorkspace.statusCode).toBe(200);
+
         const createTenantResponse = await app.inject({
           method: 'POST',
           url: '/admin/tenants',

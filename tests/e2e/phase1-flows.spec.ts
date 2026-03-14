@@ -332,7 +332,7 @@ async function seedWorkspaceConversation(
           ${title},
           ${status},
           ${pinned},
-          ${JSON.stringify({ messageHistory })}::jsonb,
+          ${{ messageHistory }}::jsonb,
           ${createdAt}::timestamptz,
           ${createdAt}::timestamptz
         )
@@ -368,13 +368,13 @@ async function seedWorkspaceConversation(
           'agent',
           'chat_completion',
           'succeeded',
-          ${JSON.stringify({
+          ${{
             messages: messageHistory.map(({ role, content }) => ({
               role,
               content,
             })),
-          })}::jsonb,
-          ${JSON.stringify({
+          }}::jsonb,
+          ${{
             assistant: {
               content: assistantContent,
               finishReason: "stop",
@@ -384,7 +384,7 @@ async function seedWorkspaceConversation(
               completionTokens: 12,
               totalTokens: 22,
             },
-          })}::jsonb,
+          }}::jsonb,
           250,
           22,
           1,
@@ -483,7 +483,7 @@ async function seedWorkspaceArtifactConversation(
     await database.begin(async (sql) => {
       await sql`
         update runs
-        set outputs = ${JSON.stringify({
+        set outputs = ${{
           assistant: {
             content: assistantContent,
             finishReason: "stop",
@@ -494,7 +494,7 @@ async function seedWorkspaceArtifactConversation(
             totalTokens: 22,
           },
           artifacts: [artifact],
-        })}::jsonb
+        }}::jsonb
         where id = ${seeded.runId}
       `;
 
@@ -531,9 +531,9 @@ async function seedWorkspaceArtifactConversation(
           ${artifact.summary},
           ${artifact.mimeType},
           ${artifact.sizeBytes},
-          ${JSON.stringify({
+          ${{
             content: artifact.content,
-          })}::jsonb,
+          }}::jsonb,
           ${artifact.createdAt}::timestamptz,
           ${artifact.updatedAt}::timestamptz
         )
@@ -546,6 +546,114 @@ async function seedWorkspaceArtifactConversation(
   return {
     ...seeded,
     artifactId,
+  };
+}
+
+async function seedWorkspacePendingActionConversation(email: string) {
+  const createdAt = new Date().toISOString();
+  const assistantContent = "Tenant Control is waiting for human input.";
+  const seeded = await seedWorkspaceConversation(email, {
+    appId: "app_tenant_control",
+    activeGroupId: "grp_product",
+    title: "Tenant Control",
+    assistantContent,
+    messageHistory: [
+      {
+        id: `msg_${randomUUID()}`,
+        role: "user",
+        content: "Please collect the rollout details for this tenant change.",
+        status: "completed",
+        createdAt,
+      },
+      {
+        id: `msg_${randomUUID()}`,
+        role: "assistant",
+        content: assistantContent,
+        status: "completed",
+        createdAt,
+      },
+    ],
+  });
+  const stepId = `hitl_${randomUUID()}`;
+  const step = {
+    id: stepId,
+    kind: "input_request",
+    status: "pending",
+    title: "Collect change request details",
+    description:
+      "Tenant Control needs explicit rollout details before it can continue with the requested change.",
+    conversationId: seeded.conversationId,
+    runId: seeded.runId,
+    createdAt,
+    updatedAt: createdAt,
+    expiresAt: new Date(
+      Date.parse(createdAt) + 24 * 60 * 60 * 1000,
+    ).toISOString(),
+    submitLabel: "Submit details",
+    fields: [
+      {
+        id: "justification",
+        label: "Business justification",
+        type: "textarea",
+        required: true,
+        placeholder: "Explain why this tenant change is needed.",
+        helpText: "This text is stored alongside the pending action response.",
+      },
+      {
+        id: "risk_level",
+        label: "Risk level",
+        type: "select",
+        required: true,
+        options: [
+          {
+            id: "low",
+            label: "Low",
+            value: "low",
+          },
+          {
+            id: "medium",
+            label: "Medium",
+            value: "medium",
+          },
+          {
+            id: "high",
+            label: "High",
+            value: "high",
+          },
+        ],
+        helpText: "Choose the risk level that best matches this change.",
+      },
+    ],
+  };
+  const database = postgres(DATABASE_URL, {
+    max: 1,
+    prepare: false,
+  });
+
+  try {
+    await database`
+      update runs
+      set outputs = ${{
+        assistant: {
+          content: assistantContent,
+          finishReason: "stop",
+        },
+        usage: {
+          promptTokens: 10,
+          completionTokens: 12,
+          totalTokens: 22,
+        },
+        pendingActions: [step],
+      }}::jsonb
+      where id = ${seeded.runId}
+    `;
+  } finally {
+    await database.end({ timeout: 5 });
+  }
+
+  return {
+    ...seeded,
+    stepId,
   };
 }
 
@@ -1336,6 +1444,68 @@ test("artifact links open a persisted preview from both transcript and run repla
   await expect(
     page.locator(".run-history-detail .artifact-link-card"),
   ).toHaveCount(1);
+});
+
+test("conversation detail renders and submits pending HITL actions", async ({
+  page,
+}) => {
+  const email = uniqueEmail("hitl-surface");
+
+  await register(page, {
+    email,
+    displayName: "HITL Browser User",
+  });
+  await login(page, {
+    email,
+  });
+  await expectAppsWorkspace(page);
+
+  const { conversationId } = await seedWorkspacePendingActionConversation(email);
+
+  await page.goto(`/chat/${conversationId}`);
+  await expectConversationSurface(page, "Tenant Control");
+
+  const conversationPanel = page.locator("section.chat-panel").filter({
+    has: page.getByRole("heading", { name: "Conversation" }),
+  });
+
+  await expect(
+    conversationPanel.getByText("Pending action", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    conversationPanel.getByText("Collect change request details"),
+  ).toBeVisible();
+  await conversationPanel
+    .getByLabel("Business justification")
+    .fill("Need emergency access for the current tenant incident.");
+  await conversationPanel.getByLabel("Risk level").selectOption("medium");
+
+  await Promise.all([
+    waitForGatewayPost(
+      page,
+      `/workspace/conversations/${conversationId}/pending-actions/`,
+    ),
+    conversationPanel.getByRole("button", { name: "Submit details" }).click(),
+  ]);
+
+  await expect(conversationPanel.getByText("submitted")).toBeVisible();
+  await expect(
+    conversationPanel.getByText(
+      "justification: Need emergency access for the current tenant incident.",
+    ),
+  ).toBeVisible();
+  await expect(
+    conversationPanel.getByText("risk_level: medium"),
+  ).toBeVisible();
+
+  await page.reload();
+  await expectConversationSurface(page, "Tenant Control");
+  await expect(
+    conversationPanel.getByText(
+      "justification: Need emergency access for the current tenant incident.",
+    ),
+  ).toBeVisible();
+  await expect(conversationPanel.getByText("risk_level: medium")).toBeVisible();
 });
 
 test("chat history and detail views manage persisted conversations", async ({

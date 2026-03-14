@@ -115,7 +115,8 @@ Execution status:
 | completed | `P2-C1` | approval / input-request / response payload 合同已冻结                |
 | completed | `P2-C2` | `/workspace/conversations/:conversationId/pending-actions` 已可读     |
 | completed | `P2-C3` | `respond` 路由、状态更新和响应持久化已打通                           |
-| active    | `P2-C4` | 下一项，把 current pending-action state 显示进 chat 页面并补浏览器验证 |
+| completed | `P2-C4` | `/chat/[conversationId]` 已显示 pending-action 卡片，提交与刷新都已验证 |
+| active    | `P2-C5` | 下一项，补 HITL 审计事件、超时/放弃状态和对应测试                    |
 
 ## 5. First Batch Definition
 
@@ -152,7 +153,8 @@ Current batch status:
 - `P2-C1` complete
 - `P2-C2` complete
 - `P2-C3` complete
-- the active follow-on item is `P2-C4`
+- `P2-C4` complete
+- the active follow-on item is `P2-C5`
 
 ## 6. Detailed Execution Notes
 
@@ -389,6 +391,26 @@ Current batch status:
   - on this host, very large `apply_patch` operations against `workspace.ts` and `/chat/[conversationId]/page.tsx` can time out and truncate the file
     - if that happens, restore from `git show HEAD:...` before reapplying smaller patches
   - `npm run type-check` is a good immediate sanity check after any restore on this host because the truncated-file failure mode is syntactically obvious
+
+### P2-C4 对话内 HITL 展示
+
+- web surface:
+  - `/chat/[conversationId]` now renders pending-action cards above the transcript
+  - `approval` steps expose approve/reject buttons
+  - `input_request` steps expose field-bound drafts, submit actions, and persisted response summaries
+- current semantics:
+  - the chat page reads `GET /workspace/conversations/:conversationId/pending-actions` on initial load
+  - successful responses update both the pending-action card state and the selected-run replay snapshot in place
+  - refresh must preserve the submitted/approved state through the persisted run boundary
+- browser/persistence guardrails:
+  - raw `postgres` template usage must pass objects directly as `::jsonb`
+    - `JSON.stringify(... )::jsonb` writes a JSON string scalar, not a JSON object
+    - this broke the initial Playwright seed helpers until they were switched to `${object}::jsonb`
+  - if a raw Playwright rerun is using `next start` / `node dist/main.js`, rebuild and restart the local stack after source changes
+    - otherwise new workspace routes can appear to be missing because the browser is hitting stale dist output
+  - `workspace_quota_limits` seed ids must remain tenant-scoped
+    - group ids such as `grp_product` are reused across tenants
+    - non-tenant-scoped ids cause cross-tenant `workspace/apps` reads to fail with primary-key collisions
 
 ### Operational Continuity
 

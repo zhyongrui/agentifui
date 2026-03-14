@@ -1478,7 +1478,7 @@ async function ensureWorkspaceQuotaLimits(
           base_used
         )
         values (
-          ${`quota_${seed.scope}_${seed.scopeId}`},
+          ${`quota_${user.tenantId}_${seed.scope}_${seed.scopeId}`},
           ${user.tenantId},
           ${seed.scope},
           ${seed.scopeId},
@@ -2199,9 +2199,12 @@ async function respondToPendingActionForUser(
 
     await sql`
       update runs
-      set outputs = runs.outputs || ${{
-        pendingActions: items,
-      }}::jsonb
+      set outputs = jsonb_set(
+        coalesce(outputs, '{}'::jsonb),
+        '{pendingActions}',
+        ${items}::jsonb,
+        true
+      )
       where id = ${run.id}
         and conversation_id = ${conversation.id}
     `;

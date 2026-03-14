@@ -11,6 +11,7 @@ import type {
   QuotaUsage,
   WorkspaceConversation,
   WorkspaceConversationAttachment,
+  WorkspaceHitlStep,
   WorkspaceConversationMessage,
   WorkspaceMessageFeedbackRating,
   WorkspaceRun,
@@ -38,8 +39,10 @@ import { WorkspaceArtifactLinkList } from "../../../../components/workspace-arti
 import {
   fetchWorkspaceCatalog,
   fetchWorkspaceConversation,
+  fetchWorkspacePendingActions,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceRun,
+  respondToWorkspacePendingAction,
   updateWorkspaceConversation,
   updateWorkspaceConversationMessageFeedback,
   uploadWorkspaceConversationFile,
@@ -241,6 +244,31 @@ function buildReplayAttachments(
   });
 }
 
+function buildPendingActionDraftValues(
+  items: WorkspaceHitlStep[],
+  currentDrafts: Record<string, Record<string, string>>,
+) {
+  const nextDrafts: Record<string, Record<string, string>> = {};
+
+  for (const item of items) {
+    if (item.kind !== "input_request") {
+      continue;
+    }
+
+    nextDrafts[item.id] = Object.fromEntries(
+      item.fields.map((field) => [
+        field.id,
+        item.response?.values?.[field.id] ??
+          currentDrafts[item.id]?.[field.id] ??
+          field.defaultValue ??
+          "",
+      ]),
+    );
+  }
+
+  return nextDrafts;
+}
+
 const RUN_TIMELINE_EVENT_LABELS: Record<
   WorkspaceRunTimelineEvent["type"],
   string
@@ -311,6 +339,16 @@ export default function ConversationPage() {
   >(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
+  const [pendingActions, setPendingActions] = useState<WorkspaceHitlStep[]>([]);
+  const [pendingActionError, setPendingActionError] = useState<string | null>(
+    null,
+  );
+  const [activePendingActionId, setActivePendingActionId] = useState<
+    string | null
+  >(null);
+  const [pendingActionDrafts, setPendingActionDrafts] = useState<
+    Record<string, Record<string, string>>
+  >({});
   const [titleDraft, setTitleDraft] = useState("");
   const [conversationActionError, setConversationActionError] = useState<
     string | null
@@ -365,6 +403,41 @@ export default function ConversationPage() {
     }
 
     await loadRunDetail(sessionToken, nextRunId);
+  }
+
+  async function loadPendingActions(sessionToken: string) {
+    const result = await fetchWorkspacePendingActions(
+      sessionToken,
+      conversationId,
+    );
+
+    if (!result.ok) {
+      setPendingActions([]);
+      setPendingActionDrafts({});
+
+      if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+        clearAuthSession(window.sessionStorage);
+        router.replace("/login");
+        return;
+      }
+
+      if (result.error.code === "WORKSPACE_FORBIDDEN") {
+        router.replace("/auth/pending");
+        return;
+      }
+
+      if (result.error.code !== "WORKSPACE_NOT_FOUND") {
+        setPendingActionError(result.error.message);
+      }
+
+      return;
+    }
+
+    setPendingActionError(null);
+    setPendingActions(result.data.items);
+    setPendingActionDrafts((currentDrafts) =>
+      buildPendingActionDraftValues(result.data.items, currentDrafts),
+    );
   }
 
   async function loadConversation(
@@ -437,6 +510,7 @@ export default function ConversationPage() {
         setMessages(result.data.messages);
       }
 
+      await loadPendingActions(sessionToken);
       await loadRunTracking(
         sessionToken,
         options.preferredRunId ?? result.data.run.id,
@@ -463,6 +537,10 @@ export default function ConversationPage() {
     setDraftAttachments([]);
     setComposerError(null);
     setLastTraceId(null);
+    setPendingActions([]);
+    setPendingActionError(null);
+    setActivePendingActionId(null);
+    setPendingActionDrafts({});
     setTitleDraft("");
     setConversationActionError(null);
     setActiveConversationAction(null);
@@ -923,6 +1001,95 @@ export default function ConversationPage() {
     await loadRunDetail(session.sessionToken, runId);
   }
 
+  function handlePendingActionFieldChange(
+    stepId: string,
+    fieldId: string,
+    value: string,
+  ) {
+    setPendingActionDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [stepId]: {
+        ...currentDrafts[stepId],
+        [fieldId]: value,
+      },
+    }));
+  }
+
+  async function handlePendingActionRespond(
+    step: WorkspaceHitlStep,
+    action: "approve" | "reject" | "submit",
+  ) {
+    if (!session || !conversation) {
+      return;
+    }
+
+    setPendingActionError(null);
+    setActivePendingActionId(step.id);
+
+    try {
+      const result = await respondToWorkspacePendingAction(
+        session.sessionToken,
+        conversation.id,
+        step.id,
+        action === "submit"
+          ? {
+              action,
+              values: pendingActionDrafts[step.id] ?? {},
+            }
+          : {
+              action,
+            },
+      );
+
+      if (!result.ok) {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+          clearAuthSession(window.sessionStorage);
+          router.replace("/login");
+          return;
+        }
+
+        if (result.error.code === "WORKSPACE_FORBIDDEN") {
+          router.replace("/auth/pending");
+          return;
+        }
+
+        if (result.error.code === "WORKSPACE_NOT_FOUND") {
+          setConversationError(
+            "This conversation is no longer available. Return to the apps workspace and relaunch it.",
+          );
+          return;
+        }
+
+        setPendingActionError(result.error.message);
+        return;
+      }
+
+      setPendingActions(result.data.items);
+      setPendingActionDrafts((currentDrafts) =>
+        buildPendingActionDraftValues(result.data.items, currentDrafts),
+      );
+      setSelectedRun((currentRun) =>
+        currentRun && currentRun.id === result.data.runId
+          ? {
+              ...currentRun,
+              outputs: {
+                ...currentRun.outputs,
+                pendingActions: result.data.items,
+              },
+            }
+          : currentRun,
+      );
+    } catch {
+      setPendingActionError(
+        "Saving the pending action response failed. Please retry.",
+      );
+    } finally {
+      setActivePendingActionId((currentStepId) =>
+        currentStepId === step.id ? null : currentStepId,
+      );
+    }
+  }
+
   async function handleCopyMessage(messageId: string, content: string) {
     if (!content.trim()) {
       return;
@@ -1169,11 +1336,11 @@ export default function ConversationPage() {
 
       <header className="chat-header">
         <div>
-          <span className="eyebrow">P2-A5</span>
+          <span className="eyebrow">P2-C4</span>
           <h1>{conversation.title}</h1>
           <p className="lead">
-            Rename, pin, archive, and delete conversation records without
-            breaking the persisted run and transcript boundary.
+            The conversation surface now shows current human-in-the-loop cards
+            alongside the persisted transcript and run boundary.
           </p>
         </div>
         <div className="workspace-badges">
@@ -1418,6 +1585,161 @@ export default function ConversationPage() {
 
         {composerError ? (
           <div className="notice error">{composerError}</div>
+        ) : null}
+
+        {pendingActionError ? (
+          <div className="notice error">{pendingActionError}</div>
+        ) : null}
+
+        {pendingActions.length > 0 ? (
+          <div className="chat-placeholder">
+            {pendingActions.map((step) => {
+              const isPending = step.status === "pending";
+              const isSubmitting = activePendingActionId === step.id;
+              const draftValues = pendingActionDrafts[step.id] ?? {};
+
+              return (
+                <article key={step.id} className="chat-bubble assistant">
+                  <div className="chat-bubble-meta">
+                    <span className="chat-bubble-label">Pending action</span>
+                    <span
+                      className={`chat-bubble-status status-${isPending ? "streaming" : "completed"}`}
+                    >
+                      {step.status}
+                    </span>
+                  </div>
+                  <p>
+                    <strong>{step.title}</strong>
+                  </p>
+                  {step.description ? <p>{step.description}</p> : null}
+                  <p>
+                    Run {step.runId} · expires{" "}
+                    {step.expiresAt
+                      ? new Date(step.expiresAt).toLocaleString()
+                      : "not set"}
+                  </p>
+
+                  {step.kind === "approval" ? (
+                    <div className="actions">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={isSubmitting || !isPending}
+                        onClick={() =>
+                          void handlePendingActionRespond(step, "approve")
+                        }
+                      >
+                        {isSubmitting ? "Saving..." : step.approveLabel}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={isSubmitting || !isPending}
+                        onClick={() =>
+                          void handlePendingActionRespond(step, "reject")
+                        }
+                      >
+                        {step.rejectLabel}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="stack">
+                      {step.fields.map((field) => (
+                        <label key={field.id} className="field">
+                          <span>{field.label}</span>
+                          {field.type === "textarea" ? (
+                            <textarea
+                              className="chat-composer-input"
+                              rows={3}
+                              placeholder={field.placeholder ?? ""}
+                              value={draftValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                handlePendingActionFieldChange(
+                                  step.id,
+                                  field.id,
+                                  event.target.value,
+                                )
+                              }
+                              disabled={isSubmitting || !isPending}
+                            />
+                          ) : field.type === "select" ? (
+                            <select
+                              className="chat-composer-input"
+                              value={draftValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                handlePendingActionFieldChange(
+                                  step.id,
+                                  field.id,
+                                  event.target.value,
+                                )
+                              }
+                              disabled={isSubmitting || !isPending}
+                            >
+                              <option value="">Select an option</option>
+                              {field.options?.map((option) => (
+                                <option key={option.id} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              className="chat-composer-input"
+                              type="text"
+                              placeholder={field.placeholder ?? ""}
+                              value={draftValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                handlePendingActionFieldChange(
+                                  step.id,
+                                  field.id,
+                                  event.target.value,
+                                )
+                              }
+                              disabled={isSubmitting || !isPending}
+                            />
+                          )}
+                          {field.helpText ? <small>{field.helpText}</small> : null}
+                        </label>
+                      ))}
+                      <div className="actions">
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={isSubmitting || !isPending}
+                          onClick={() =>
+                            void handlePendingActionRespond(step, "submit")
+                          }
+                        >
+                          {isSubmitting ? "Saving..." : step.submitLabel}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {step.response ? (
+                    <div className="chat-feedback-row">
+                      <span className="chat-feedback-note">
+                        {step.response.action} by{" "}
+                        {step.response.actorDisplayName ?? step.response.actorUserId} ·{" "}
+                        {new Date(step.response.respondedAt).toLocaleString()}
+                      </span>
+                    </div>
+                  ) : null}
+                  {step.response?.values ? (
+                    <ul className="chat-attachment-list">
+                      {Object.entries(step.response.values).map(
+                        ([fieldId, value]) => (
+                          <li key={`${step.id}-${fieldId}`}>
+                            {fieldId}: {value || "(empty)"}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
         ) : null}
 
         {messages.length === 0 ? (
