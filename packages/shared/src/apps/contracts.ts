@@ -361,6 +361,31 @@ export type WorkspaceRunTimelineEvent = {
   metadata: Record<string, unknown>;
 };
 
+export type WorkspaceRunFailureCode =
+  | "stream_interrupted"
+  | "provider_error"
+  | "persistence_error"
+  | "validation_error"
+  | "quota_exceeded"
+  | "runtime_unavailable"
+  | "unknown";
+
+export type WorkspaceRunFailureStage =
+  | "launch"
+  | "input_validation"
+  | "execution"
+  | "streaming"
+  | "persistence";
+
+export type WorkspaceRunFailure = {
+  code: WorkspaceRunFailureCode;
+  stage: WorkspaceRunFailureStage;
+  message: string;
+  retryable: boolean;
+  detail: string | null;
+  recordedAt: string;
+};
+
 export type WorkspaceRun = WorkspaceRunSummary & {
   conversationId: string;
   app: Pick<
@@ -369,6 +394,7 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   >;
   activeGroup: WorkspaceGroup;
   error: string | null;
+  failure: WorkspaceRunFailure | null;
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
   artifacts: WorkspaceArtifact[];

@@ -117,7 +117,8 @@ Execution status:
 | completed | `P2-C3` | `respond` 路由、状态更新和响应持久化已打通                           |
 | completed | `P2-C4` | `/chat/[conversationId]` 已显示 pending-action 卡片，提交与刷新都已验证 |
 | completed | `P2-C5` | HITL responded/cancelled/expired 已进入 audit，超时与放弃状态可持久化 |
-| active    | `P2-D1` | 下一项，run failure reason / metadata 结构化到 run detail 和 UI      |
+| completed | `P2-D1` | failed run 已带结构化 failure taxonomy，run detail 和 UI 已可读      |
+| active    | `P2-D2` | 下一项，把 citation/source block 接到 assistant 回复和 replay        |
 
 ## 5. First Batch Definition
 
@@ -156,7 +157,8 @@ Current batch status:
 - `P2-C3` complete
 - `P2-C4` complete
 - `P2-C5` complete
-- the active follow-on item is `P2-D1`
+- `P2-D1` complete
+- the active follow-on item is `P2-D2`
 
 ## 6. Detailed Execution Notes
 
@@ -435,6 +437,31 @@ Current batch status:
     - this avoids `jsonb_set(...): cannot set path in scalar` on older local test data
   - expired-item audit should only fire once per step
     - expire on read, persist immediately, and later reads will no longer return that step in `expiredItems`
+
+### P2-D1 Run Failure Taxonomy
+
+- shared/runtime contract:
+  - `WorkspaceRun.failure` now exposes a structured payload instead of only the legacy `error` string
+  - the current taxonomy includes:
+    - `code`
+    - `stage`
+    - `message`
+    - `retryable`
+    - `detail`
+    - `recordedAt`
+- current coverage:
+  - the first concrete structured failure path is the persisted stream fallback:
+    - `code = stream_interrupted`
+    - `stage = streaming`
+  - older rows that only have `runs.error` still surface a fallback failure object:
+    - `code = unknown`
+    - `stage = execution`
+- UI/runtime guardrails:
+  - `/chat/[conversationId]` run detail now surfaces a dedicated failure card when `selectedRun.failure` exists
+  - keep writing the legacy `runs.error` string for backward compatibility
+    - admin/export/read paths still rely on it in some places
+  - failure taxonomy currently describes persisted run failures only
+    - pre-run gateway validation errors (`invalid_messages`, `app_not_authorized`, etc.) still belong to the chat error response path, not workspace run detail
 
 ### Operational Continuity
 

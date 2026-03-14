@@ -28,6 +28,7 @@ import { Readable } from "node:stream";
 import type { AuditService } from "../services/audit-service.js";
 import type { AuthService } from "../services/auth-service.js";
 import { buildPlaceholderHitlSteps } from "../services/workspace-hitl.js";
+import { buildWorkspaceRunFailure } from "../services/workspace-run-failure.js";
 import { calculateCompletionQuotaCost } from "../services/workspace-quota.js";
 import type { WorkspaceService } from "../services/workspace-service.js";
 
@@ -1049,6 +1050,7 @@ async function* streamCompletionEvents(input: {
 
     if (!finalized) {
       const completionTokens = estimateTokens(assistantContent);
+      const finishedAt = new Date().toISOString();
       const artifacts = buildAssistantArtifacts({
         appName: input.conversation.app.name,
         assistantText: assistantContent,
@@ -1083,6 +1085,19 @@ async function* streamCompletionEvents(input: {
               completionTokens,
               totalTokens: input.promptTokens + completionTokens,
             },
+            ...(streamState?.stopRequested
+              ? {}
+              : {
+                  failure: buildWorkspaceRunFailure({
+                    code: "stream_interrupted",
+                    stage: "streaming",
+                    message: "The streaming response ended unexpectedly.",
+                    retryable: true,
+                    detail:
+                      "The stream closed before the final completion event was persisted.",
+                    recordedAt: finishedAt,
+                  }),
+                }),
           },
           error: streamState?.stopRequested
             ? undefined
@@ -1090,7 +1105,7 @@ async function* streamCompletionEvents(input: {
           elapsedTime: Date.now() - input.startedAt,
           totalTokens: input.promptTokens + estimateTokens(assistantContent),
           totalSteps: 1,
-          finishedAt: new Date().toISOString(),
+          finishedAt,
         });
 
       if (fallbackResult.ok) {

@@ -2082,6 +2082,18 @@ export default function ConversationPage() {
                     <strong>{selectedRun.elapsedTime} ms</strong>
                     <p>{selectedRun.finishedAt ?? "in progress"}</p>
                   </article>
+                  {selectedRun.failure ? (
+                    <article className="chat-meta-card">
+                      <span>Failure</span>
+                      <strong>{selectedRun.failure.code}</strong>
+                      <p>
+                        {selectedRun.failure.stage} ·{" "}
+                        {selectedRun.failure.retryable
+                          ? "retryable"
+                          : "manual follow-up"}
+                      </p>
+                    </article>
+                  ) : null}
                   <article className="chat-meta-card">
                     <span>Attached files</span>
                     <strong>{replayAttachments.length}</strong>
@@ -2109,6 +2121,31 @@ export default function ConversationPage() {
                 </div>
 
                 <div className="run-replay-stack">
+                  {selectedRun.failure ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Failure reason</span>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <p>
+                        <strong>{selectedRun.failure.code}</strong> ·{" "}
+                        {selectedRun.failure.stage}
+                      </p>
+                      <p>{selectedRun.failure.message}</p>
+                      {selectedRun.failure.detail ? (
+                        <p>{selectedRun.failure.detail}</p>
+                      ) : null}
+                      <p>
+                        {selectedRun.failure.retryable
+                          ? "This run can be retried."
+                          : "This run needs manual follow-up."}
+                      </p>
+                    </article>
+                  ) : null}
                   {selectedRun.timeline.length > 0 ? (
                     <article className="chat-bubble assistant">
                       <div className="chat-bubble-meta">

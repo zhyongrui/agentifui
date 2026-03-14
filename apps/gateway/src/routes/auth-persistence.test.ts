@@ -2420,6 +2420,134 @@ describe.sequential('persistent auth runtime', () => {
   );
 
   it(
+    'persists structured run failure details across app restarts',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer',
+          },
+        });
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+        };
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+        const runId = launchBody.data.runId;
+
+        if (!runId) {
+          throw new Error('expected launch payload to include a run id');
+        }
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          await runtimeDatabase`
+            update runs
+            set status = 'failed',
+                error = 'The streaming response ended unexpectedly.',
+                outputs = jsonb_set(
+                  coalesce(outputs, '{}'::jsonb),
+                  '{failure}',
+                  ${{
+                    code: 'stream_interrupted',
+                    stage: 'streaming',
+                    message: 'The streaming response ended unexpectedly.',
+                    retryable: true,
+                    detail:
+                      'The stream closed before the final completion event was persisted.',
+                    recordedAt: '2026-03-14T16:30:00.000Z',
+                  }}::jsonb,
+                  true
+                ),
+                finished_at = '2026-03-14T16:30:00.000Z'::timestamptz
+            where id = ${runId}
+          `;
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+        let restartedAppClosed = false;
+
+        try {
+          const run = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/runs/${runId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(run.statusCode).toBe(200);
+          expect((run.json() as WorkspaceRunResponse).data).toMatchObject({
+            id: runId,
+            status: 'failed',
+            error: 'The streaming response ended unexpectedly.',
+            failure: {
+              code: 'stream_interrupted',
+              stage: 'streaming',
+              message: 'The streaming response ended unexpectedly.',
+              retryable: true,
+              detail:
+                'The stream closed before the final completion event was persisted.',
+              recordedAt: '2026-03-14T16:30:00.000Z',
+            },
+          });
+        } finally {
+          if (!restartedAppClosed) {
+            await restartedApp.close();
+            restartedAppClosed = true;
+          }
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
     'persists conversation organization updates across restarts and hides deleted records',
     async () => {
       await resetPersistentTestDatabase();

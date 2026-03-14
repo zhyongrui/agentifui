@@ -22,6 +22,7 @@ import type {
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
   WorkspaceRun,
+  WorkspaceRunFailure,
   WorkspaceRunStatus,
   WorkspaceRunSummary,
   WorkspaceRunTimelineEvent,
@@ -39,6 +40,10 @@ import {
   resolveSeededWorkspaceAppsForUser,
 } from './workspace-catalog-fixtures.js';
 import type { WorkspaceFileStorage } from './workspace-file-storage.js';
+import {
+  buildWorkspaceRunFailure,
+  parseWorkspaceRunFailure,
+} from './workspace-run-failure.js';
 import {
   applyWorkspaceHitlStepResponse,
   expireWorkspaceHitlSteps,
@@ -844,6 +849,7 @@ function createRunRecord(input: {
     app: input.conversation.app,
     activeGroup: input.conversation.activeGroup,
     error: null,
+    failure: null,
     inputs: {},
     outputs: {},
     artifacts: [],
@@ -854,6 +860,17 @@ function createRunRecord(input: {
     },
     timeline: [],
   };
+}
+
+function buildRunFailureFromState(input: {
+  error: string | null;
+  outputs: Record<string, unknown>;
+  recordedAt?: string | null;
+}): WorkspaceRunFailure | null {
+  return parseWorkspaceRunFailure(input.outputs.failure, {
+    error: input.error,
+    recordedAt: input.recordedAt,
+  });
 }
 
 function shouldCountRunTowardsQuota(run: WorkspaceRunRecord) {
@@ -2059,6 +2076,22 @@ export function createWorkspaceService(options: {
       if (input.status === 'stopped') {
         appendTimelineEvent(run, 'run_stopped', {
           status: input.status,
+        });
+      }
+
+      if (input.status === 'failed') {
+        run.failure = buildRunFailureFromState({
+          error: run.error,
+          outputs: run.outputs,
+          recordedAt: run.finishedAt ?? new Date().toISOString(),
+        });
+      } else if (input.status === 'succeeded' || input.status === 'stopped') {
+        run.failure = null;
+      } else if (input.outputs || input.error !== undefined) {
+        run.failure = buildRunFailureFromState({
+          error: run.error,
+          outputs: run.outputs,
+          recordedAt: run.finishedAt,
         });
       }
 

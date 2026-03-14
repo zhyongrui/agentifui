@@ -65,6 +65,7 @@ import type {
   WorkspaceSharedConversationResult,
 } from "./workspace-service.js";
 import type { WorkspaceFileStorage } from "./workspace-file-storage.js";
+import { parseWorkspaceRunFailure } from "./workspace-run-failure.js";
 import {
   applyWorkspaceHitlStepResponse,
   expireWorkspaceHitlSteps,
@@ -1187,6 +1188,10 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
       description: row.active_group_description ?? "",
     },
     error: row.error,
+    failure: parseWorkspaceRunFailure(normalizeJsonRecord(row.outputs).failure, {
+      error: row.error,
+      recordedAt: toIso(row.finished_at) ?? toIso(row.created_at),
+    }),
     inputs: normalizeJsonRecord(row.inputs),
     outputs: normalizeJsonRecord(row.outputs),
     artifacts: toWorkspaceArtifacts(normalizeJsonRecord(row.outputs).artifacts),
