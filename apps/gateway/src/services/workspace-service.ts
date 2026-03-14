@@ -161,6 +161,11 @@ type WorkspaceConversationShareRevokeInput = {
   shareId: string;
 };
 
+type WorkspaceSharedArtifactLookupInput = {
+  artifactId: string;
+  shareId: string;
+};
+
 type WorkspaceRunTimelineEventAppendInput = {
   conversationId: string;
   runId: string;
@@ -211,7 +216,14 @@ type WorkspaceArtifactResult =
       ok: true;
       data: WorkspaceArtifact;
     }
-  | WorkspaceLookupFailure;
+  | WorkspaceLookupFailure
+  | {
+      ok: false;
+      statusCode: 403;
+      code: 'WORKSPACE_FORBIDDEN';
+      message: string;
+      details?: unknown;
+    };
 
 type WorkspaceConversationShareResult =
   | {
@@ -295,6 +307,10 @@ type WorkspaceService = {
   getArtifactForUser(
     user: AuthUser,
     artifactId: string
+  ): WorkspaceArtifactResult | Promise<WorkspaceArtifactResult>;
+  getSharedArtifactForUser(
+    user: AuthUser,
+    input: WorkspaceSharedArtifactLookupInput
   ): WorkspaceArtifactResult | Promise<WorkspaceArtifactResult>;
   listConversationSharesForUser(
     user: AuthUser,
@@ -1495,6 +1511,52 @@ export function createWorkspaceService(options: {
         data: artifactData,
       };
     },
+    getSharedArtifactForUser(user, input) {
+      const share = sharesById.get(input.shareId);
+
+      if (!share || share.status !== 'active') {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace share could not be found.',
+        };
+      }
+
+      const context = getContextForUser(user);
+
+      if (!context.memberGroupIds.includes(share.group.id)) {
+        return {
+          ok: false,
+          statusCode: 403,
+          code: 'WORKSPACE_FORBIDDEN',
+          message: 'The current user is not allowed to access this shared artifact.',
+        };
+      }
+
+      const artifact = artifactsById.get(input.artifactId);
+
+      if (!artifact || artifact.conversationId !== share.conversationId) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace artifact could not be found.',
+        };
+      }
+
+      const { conversationId, runId, sequence, userId, ...artifactData } = artifact;
+
+      void conversationId;
+      void runId;
+      void sequence;
+      void userId;
+
+      return {
+        ok: true,
+        data: artifactData,
+      };
+    },
     listConversationSharesForUser(user, conversationId) {
       const conversation = conversationsById.get(conversationId);
 
@@ -1840,6 +1902,7 @@ export type {
   WorkspaceRunResult,
   WorkspaceRunTimelineEventAppendInput,
   WorkspaceRunUpdateInput,
+  WorkspaceSharedArtifactLookupInput,
   WorkspaceSharedConversationResult,
   WorkspaceService,
 };

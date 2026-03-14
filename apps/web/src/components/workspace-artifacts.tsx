@@ -6,11 +6,12 @@ import { ChatMarkdown } from "./chat-markdown";
 type WorkspaceArtifactPreviewContext = {
   conversationId?: string | null;
   runId?: string | null;
+  shareId?: string | null;
 };
 
 function appendContextParam(
   params: URLSearchParams,
-  key: "conversationId" | "runId",
+  key: "conversationId" | "runId" | "shareId",
   value: string | null | undefined,
 ) {
   if (typeof value !== "string") {
@@ -32,6 +33,7 @@ export function buildWorkspaceArtifactPreviewHref(
 
   appendContextParam(params, "conversationId", context.conversationId);
   appendContextParam(params, "runId", context.runId);
+  appendContextParam(params, "shareId", context.shareId);
 
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
 
@@ -66,10 +68,12 @@ export function WorkspaceArtifactLinkList({
   artifacts,
   conversationId,
   runId,
+  shareId,
 }: {
   artifacts: WorkspaceArtifactSummary[];
   conversationId?: string | null;
   runId?: string | null;
+  shareId?: string | null;
 }) {
   return (
     <div className="artifact-link-list">
@@ -80,6 +84,7 @@ export function WorkspaceArtifactLinkList({
           href={buildWorkspaceArtifactPreviewHref(artifact.id, {
             conversationId,
             runId,
+            shareId,
           })}
         >
           <div className="artifact-link-card-header">

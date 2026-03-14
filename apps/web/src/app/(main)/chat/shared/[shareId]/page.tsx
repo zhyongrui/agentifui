@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { ChatMarkdown } from "../../../../../components/chat-markdown";
 import { MainSectionNav } from "../../../../../components/main-section-nav";
+import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-artifacts";
 import { fetchWorkspaceSharedConversation } from "../../../../../lib/apps-client";
 import { clearAuthSession } from "../../../../../lib/auth-session";
 import { useProtectedSession } from "../../../../../lib/use-protected-session";
@@ -103,8 +104,8 @@ export default function SharedConversationPage() {
           <h1>{conversation.title}</h1>
           <p className="lead">
             This is a read-only shared workspace conversation. You can inspect
-            the transcript and attached files, but you cannot send new messages
-            from this surface.
+            the transcript, attachments, and persisted artifacts, but you
+            cannot send new messages from this surface.
           </p>
         </div>
         <div className="workspace-badges">
@@ -168,6 +169,18 @@ export default function SharedConversationPage() {
                     </li>
                   ))}
                 </ul>
+              ) : null}
+              {message.artifacts && message.artifacts.length > 0 ? (
+                <div className="chat-artifact-section">
+                  <span className="chat-suggested-prompts-label">
+                    Shared artifacts
+                  </span>
+                  <WorkspaceArtifactLinkList
+                    artifacts={message.artifacts}
+                    conversationId={conversation.id}
+                    shareId={share.id}
+                  />
+                </div>
               ) : null}
             </article>
           ))}

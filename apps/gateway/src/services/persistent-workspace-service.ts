@@ -36,6 +36,7 @@ import {
   resolveDefaultRoleIds,
 } from "./workspace-catalog-fixtures.js";
 import type {
+  WorkspaceArtifactResult,
   WorkspaceConversationResult,
   WorkspaceConversationRunsResult,
   WorkspaceConversationAttachmentLookupInput,
@@ -55,6 +56,7 @@ import type {
   WorkspaceRunCreateInput,
   WorkspaceRunResult,
   WorkspaceRunTimelineEventAppendInput,
+  WorkspaceSharedArtifactLookupInput,
   WorkspaceSharedConversationResult,
   WorkspaceRunUpdateInput,
   WorkspaceService,
@@ -2076,6 +2078,87 @@ async function readArtifactForUser(
   return row ? toWorkspaceArtifactFromRow(row) : null;
 }
 
+async function readSharedArtifactForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceSharedArtifactLookupInput,
+): Promise<WorkspaceArtifactResult> {
+  const [shareRow] = await database<WorkspaceConversationShareRow[]>`
+    select
+      s.id,
+      s.conversation_id,
+      s.status,
+      s.created_at,
+      s.revoked_at,
+      g.id as group_id,
+      g.name as group_name,
+      g.description as group_description
+    from workspace_conversation_shares s
+    inner join groups g on g.id = s.shared_group_id
+    where s.id = ${input.shareId}
+    limit 1
+  `;
+
+  if (!shareRow || shareRow.status !== "active") {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace share could not be found.",
+    };
+  }
+
+  const context = await resolveWorkspaceContext(database, user);
+
+  if (!context.memberGroupIds.includes(shareRow.group_id)) {
+    return {
+      ok: false,
+      statusCode: 403,
+      code: "WORKSPACE_FORBIDDEN",
+      message: "The current user is not allowed to access this shared artifact.",
+    };
+  }
+
+  const [artifactRow] = await database<WorkspaceArtifactRow[]>`
+    select
+      id,
+      user_id,
+      conversation_id,
+      run_id,
+      sequence,
+      title,
+      kind,
+      source,
+      status,
+      summary,
+      mime_type,
+      size_bytes,
+      payload,
+      created_at,
+      updated_at
+    from workspace_artifacts
+    where id = ${input.artifactId}
+      and conversation_id = ${shareRow.conversation_id}
+    limit 1
+  `;
+
+  const artifact = artifactRow ? toWorkspaceArtifactFromRow(artifactRow) : null;
+
+  if (!artifact) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace artifact could not be found.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: artifact,
+  };
+}
+
 async function uploadConversationFileForUser(
   database: DatabaseClient,
   user: AuthUser,
@@ -3302,6 +3385,9 @@ export function createPersistentWorkspaceService(
         ok: true,
         data: artifact,
       };
+    },
+    async getSharedArtifactForUser(user, input) {
+      return readSharedArtifactForUser(database, user, input);
     },
     async listConversationSharesForUser(
       user,

@@ -12,6 +12,7 @@ import type {
   WorkspaceCatalogResponse,
   WorkspaceConversationListResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationShareResponse,
   WorkspaceConversationUploadResponse,
   WorkspacePreferencesResponse,
   WorkspaceRunResponse,
@@ -1190,6 +1191,33 @@ describe.sequential('persistent auth runtime', () => {
           };
         };
 
+        const readerRegister = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'shared-reader-persist@example.com',
+            password: 'Secure123',
+            displayName: 'Shared Reader',
+          },
+        });
+
+        expect(readerRegister.statusCode).toBe(201);
+
+        const readerLogin = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'shared-reader-persist@example.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(readerLogin.statusCode).toBe(200);
+
+        const readerLoginPayload = readerLogin.json().data as {
+          sessionToken: string;
+        };
+
         const launch = await app.inject({
           method: 'POST',
           url: '/workspace/apps/launch',
@@ -1447,6 +1475,59 @@ describe.sequential('persistent auth runtime', () => {
             ),
           }),
         } satisfies WorkspaceArtifactResponse);
+
+        const artifactDownload = await app.inject({
+          method: 'GET',
+          url: `/workspace/artifacts/${artifactId}/download`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(artifactDownload.statusCode).toBe(200);
+        expect(artifactDownload.headers['content-type']).toContain('text/markdown');
+        expect(artifactDownload.headers['x-agentifui-artifact-id']).toBe(artifactId);
+
+        const createShare = await app.inject({
+          method: 'POST',
+          url: `/workspace/conversations/${launchBody.data.conversationId}/shares`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            groupId: 'grp_research',
+          },
+        });
+
+        expect(createShare.statusCode).toBe(200);
+
+        const share = (createShare.json() as WorkspaceConversationShareResponse).data;
+
+        const sharedArtifact = await app.inject({
+          method: 'GET',
+          url: `/workspace/shares/${share.id}/artifacts/${artifactId}`,
+          headers: {
+            authorization: `Bearer ${readerLoginPayload.sessionToken}`,
+          },
+        });
+
+        expect(sharedArtifact.statusCode).toBe(200);
+        expect((sharedArtifact.json() as WorkspaceArtifactResponse).data).toMatchObject({
+          id: artifactId,
+          kind: 'markdown',
+        });
+
+        const sharedArtifactDownload = await app.inject({
+          method: 'GET',
+          url: `/workspace/shares/${share.id}/artifacts/${artifactId}/download`,
+          headers: {
+            authorization: `Bearer ${readerLoginPayload.sessionToken}`,
+          },
+        });
+
+        expect(sharedArtifactDownload.statusCode).toBe(200);
+        expect(sharedArtifactDownload.headers['content-type']).toContain('text/markdown');
+        expect(sharedArtifactDownload.headers['x-agentifui-artifact-id']).toBe(artifactId);
 
         const catalogAfterCompletion = await app.inject({
           method: 'GET',

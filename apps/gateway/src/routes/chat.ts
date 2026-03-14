@@ -156,6 +156,43 @@ async function recordQuotaUsageAudit(input: {
   });
 }
 
+async function recordArtifactGeneratedAudit(input: {
+  artifacts: WorkspaceArtifact[];
+  auditService: AuditService;
+  conversation: WorkspaceConversation;
+  ipAddress: string;
+  runId: string;
+  traceId: string;
+  user: AuthUser;
+}) {
+  for (const artifact of input.artifacts) {
+    await input.auditService.recordEvent({
+      tenantId: input.user.tenantId,
+      actorUserId: input.user.id,
+      action: "workspace.artifact.generated",
+      entityType: "artifact",
+      entityId: artifact.id,
+      ipAddress: input.ipAddress,
+      payload: {
+        artifactId: artifact.id,
+        title: artifact.title,
+        kind: artifact.kind,
+        source: artifact.source,
+        status: artifact.status,
+        mimeType: artifact.mimeType,
+        sizeBytes: artifact.sizeBytes,
+        conversationId: input.conversation.id,
+        runId: input.runId,
+        traceId: input.traceId,
+        appId: input.conversation.app.id,
+        appName: input.conversation.app.name,
+        activeGroupId: input.conversation.activeGroup.id,
+        activeGroupName: input.conversation.activeGroup.name,
+      },
+    });
+  }
+}
+
 function readBearerToken(value: string | undefined): string | null {
   if (!value) {
     return null;
@@ -970,6 +1007,16 @@ async function* streamCompletionEvents(input: {
       return;
     }
 
+    await recordArtifactGeneratedAudit({
+      artifacts,
+      auditService: input.auditService,
+      conversation: updateResult.data,
+      ipAddress: input.ipAddress,
+      runId: input.conversation.run.id,
+      traceId: input.conversation.run.traceId,
+      user: input.user,
+    });
+
     await recordQuotaUsageAudit({
       auditService: input.auditService,
       completionTokens,
@@ -1031,6 +1078,16 @@ async function* streamCompletionEvents(input: {
         });
 
       if (fallbackResult.ok) {
+        await recordArtifactGeneratedAudit({
+          artifacts,
+          auditService: input.auditService,
+          conversation: fallbackResult.data,
+          ipAddress: input.ipAddress,
+          runId: input.conversation.run.id,
+          traceId: input.conversation.run.traceId,
+          user: input.user,
+        });
+
         await recordQuotaUsageAudit({
           auditService: input.auditService,
           completionTokens,
@@ -1379,6 +1436,16 @@ export async function registerChatRoutes(
           "The conversation run could not be persisted after completion.",
       });
     }
+
+    await recordArtifactGeneratedAudit({
+      artifacts,
+      auditService,
+      conversation: updateResult.data,
+      ipAddress: request.ip,
+      runId: conversation.run.id,
+      traceId,
+      user: access.user,
+    });
 
     await recordQuotaUsageAudit({
       auditService,

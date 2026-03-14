@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  downloadWorkspaceArtifact,
   fetchWorkspaceConversation,
   fetchWorkspaceConversationList,
   fetchWorkspaceConversationRuns,
@@ -737,5 +738,95 @@ describe('apps client', () => {
         content: '# Dorm policy',
       },
     });
+  });
+
+  it('loads a shared workspace artifact through the share-scoped gateway route', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'artifact-456',
+            title: 'Dorm policy draft',
+            kind: 'markdown',
+            source: 'assistant_response',
+            status: 'draft',
+            createdAt: '2026-03-14T10:10:00.000Z',
+            updatedAt: '2026-03-14T10:10:00.000Z',
+            summary: 'Dorm policy draft summary',
+            mimeType: 'text/markdown',
+            sizeBytes: 120,
+            content: '# Dorm policy',
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceArtifact('session-123', 'artifact-456', {
+      shareId: 'share-123',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/gateway/workspace/shares/share-123/artifacts/artifact-456',
+      {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        body: undefined,
+        cache: 'no-store',
+      }
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        id: 'artifact-456',
+      },
+    });
+  });
+
+  it('downloads workspace artifacts through the same-origin gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('# Dorm policy\n', {
+          status: 200,
+          headers: {
+            'content-type': 'text/markdown; charset=utf-8',
+            'content-disposition': 'attachment; filename="Dorm-policy-draft.md"',
+            'x-agentifui-artifact-filename': 'Dorm-policy-draft.md',
+            'x-agentifui-artifact-kind': 'markdown',
+            'x-agentifui-artifact-id': 'artifact-456',
+          },
+        })
+      )
+    );
+
+    const result = await downloadWorkspaceArtifact('session-123', 'artifact-456');
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/gateway/workspace/artifacts/artifact-456/download',
+      {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        cache: 'no-store',
+      }
+    );
+
+    if (!('blob' in result)) {
+      throw new Error('expected a successful artifact download result');
+    }
+
+    expect(result.metadata).toEqual({
+      artifactId: 'artifact-456',
+      contentType: 'text/markdown; charset=utf-8',
+      filename: 'Dorm-policy-draft.md',
+      kind: 'markdown',
+      shareId: null,
+    });
+    await expect(result.blob.text()).resolves.toBe('# Dorm policy\n');
   });
 });

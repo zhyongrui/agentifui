@@ -3,6 +3,7 @@ import {
   WORKSPACE_ATTACHMENT_MAX_BYTES,
 } from '@agentifui/shared/apps';
 import type {
+  WorkspaceArtifact,
   WorkspaceArtifactResponse,
   WorkspaceAppLaunchRequest,
   WorkspaceAppLaunchResponse,
@@ -133,6 +134,123 @@ function decodeBase64Payload(value: string): Buffer | null {
   } catch {
     return null;
   }
+}
+
+function sanitizeArtifactFileName(value: string, fallback: string): string {
+  const normalized = value.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-');
+  const collapsed = normalized.replace(/^-+|-+$/g, '');
+
+  return collapsed.length > 0 ? collapsed : fallback;
+}
+
+function escapeCsvCell(value: string | number | boolean | null): string {
+  if (value === null) {
+    return '';
+  }
+
+  const cell = String(value);
+
+  if (/[",\n]/.test(cell)) {
+    return `"${cell.replace(/"/g, '""')}"`;
+  }
+
+  return cell;
+}
+
+function toCsvTableArtifact(artifact: Extract<WorkspaceArtifact, { kind: 'table' }>): string {
+  const lines = [
+    artifact.columns.map(column => escapeCsvCell(column)).join(','),
+    ...artifact.rows.map(row => row.map(cell => escapeCsvCell(cell)).join(',')),
+  ];
+
+  return `${lines.join('\n')}\n`;
+}
+
+function buildArtifactDownloadPayload(artifact: WorkspaceArtifact): {
+  body: string;
+  contentType: string;
+  fileName: string;
+} {
+  const baseName = sanitizeArtifactFileName(artifact.title, artifact.id);
+
+  if (artifact.kind === 'markdown') {
+    return {
+      body: artifact.content,
+      contentType: artifact.mimeType ?? 'text/markdown; charset=utf-8',
+      fileName: `${baseName}.md`,
+    };
+  }
+
+  if (artifact.kind === 'text') {
+    return {
+      body: artifact.content,
+      contentType: artifact.mimeType ?? 'text/plain; charset=utf-8',
+      fileName: `${baseName}.txt`,
+    };
+  }
+
+  if (artifact.kind === 'json') {
+    return {
+      body: `${JSON.stringify(artifact.content, null, 2)}\n`,
+      contentType: artifact.mimeType ?? 'application/json; charset=utf-8',
+      fileName: `${baseName}.json`,
+    };
+  }
+
+  if (artifact.kind === 'table') {
+    return {
+      body: toCsvTableArtifact(artifact),
+      contentType: 'text/csv; charset=utf-8',
+      fileName: `${baseName}.csv`,
+    };
+  }
+
+  if (artifact.kind === 'link') {
+    return {
+      body: `${artifact.label}\n${artifact.href}\n`,
+      contentType: 'text/plain; charset=utf-8',
+      fileName: `${baseName}.txt`,
+    };
+  }
+
+  return {
+    body: artifact.content,
+    contentType: artifact.mimeType ?? 'text/plain; charset=utf-8',
+    fileName: `${baseName}.txt`,
+  };
+}
+
+async function recordArtifactAccessAudit(input: {
+  accessScope: 'owner' | 'shared_read_only';
+  artifact: WorkspaceArtifact;
+  auditService: AuditService;
+  ipAddress: string;
+  shareId?: string;
+  user: AuthUser;
+  verb: 'downloaded' | 'viewed';
+}) {
+  await input.auditService.recordEvent({
+    tenantId: input.user.tenantId,
+    actorUserId: input.user.id,
+    action:
+      input.verb === 'downloaded'
+        ? 'workspace.artifact.downloaded'
+        : 'workspace.artifact.viewed',
+    entityType: 'artifact',
+    entityId: input.artifact.id,
+    ipAddress: input.ipAddress,
+    payload: {
+      accessScope: input.accessScope,
+      artifactId: input.artifact.id,
+      title: input.artifact.title,
+      kind: input.artifact.kind,
+      source: input.artifact.source,
+      status: input.artifact.status,
+      mimeType: input.artifact.mimeType,
+      sizeBytes: input.artifact.sizeBytes,
+      shareId: input.shareId ?? null,
+    },
+  });
 }
 
 async function requireActiveWorkspaceSession(
@@ -962,7 +1080,64 @@ export async function registerWorkspaceRoutes(
       data: result.data,
     };
 
+    await recordArtifactAccessAudit({
+      accessScope: 'owner',
+      artifact: result.data,
+      auditService,
+      ipAddress: request.ip,
+      user: access.user,
+      verb: 'viewed',
+    });
+
     return response;
+  });
+
+  app.get('/workspace/artifacts/:artifactId/download', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      artifactId?: string;
+    };
+    const artifactId = params.artifactId?.trim();
+
+    if (!artifactId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace artifact download requires an artifact id.'
+      );
+    }
+
+    const result = await workspaceService.getArtifactForUser(access.user, artifactId);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const download = buildArtifactDownloadPayload(result.data);
+
+    reply.header('content-type', download.contentType);
+    reply.header('content-disposition', `attachment; filename="${download.fileName}"`);
+    reply.header('x-agentifui-artifact-filename', download.fileName);
+    reply.header('x-agentifui-artifact-kind', result.data.kind);
+    reply.header('x-agentifui-artifact-id', result.data.id);
+
+    await recordArtifactAccessAudit({
+      accessScope: 'owner',
+      artifact: result.data,
+      auditService,
+      ipAddress: request.ip,
+      user: access.user,
+      verb: 'downloaded',
+    });
+
+    return reply.send(download.body);
   });
 
   app.get('/workspace/shares/:shareId', async (request, reply) => {
@@ -1014,5 +1189,110 @@ export async function registerWorkspaceRoutes(
     });
 
     return response;
+  });
+
+  app.get('/workspace/shares/:shareId/artifacts/:artifactId', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      shareId?: string;
+      artifactId?: string;
+    };
+    const shareId = params.shareId?.trim();
+    const artifactId = params.artifactId?.trim();
+
+    if (!shareId || !artifactId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace shared artifact lookup requires both a share id and artifact id.'
+      );
+    }
+
+    const result = await workspaceService.getSharedArtifactForUser(access.user, {
+      shareId,
+      artifactId,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceArtifactResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    await recordArtifactAccessAudit({
+      accessScope: 'shared_read_only',
+      artifact: result.data,
+      auditService,
+      ipAddress: request.ip,
+      shareId,
+      user: access.user,
+      verb: 'viewed',
+    });
+
+    return response;
+  });
+
+  app.get('/workspace/shares/:shareId/artifacts/:artifactId/download', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      shareId?: string;
+      artifactId?: string;
+    };
+    const shareId = params.shareId?.trim();
+    const artifactId = params.artifactId?.trim();
+
+    if (!shareId || !artifactId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace shared artifact download requires both a share id and artifact id.'
+      );
+    }
+
+    const result = await workspaceService.getSharedArtifactForUser(access.user, {
+      shareId,
+      artifactId,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const download = buildArtifactDownloadPayload(result.data);
+
+    reply.header('content-type', download.contentType);
+    reply.header('content-disposition', `attachment; filename="${download.fileName}"`);
+    reply.header('x-agentifui-artifact-filename', download.fileName);
+    reply.header('x-agentifui-artifact-kind', result.data.kind);
+    reply.header('x-agentifui-artifact-id', result.data.id);
+
+    await recordArtifactAccessAudit({
+      accessScope: 'shared_read_only',
+      artifact: result.data,
+      auditService,
+      ipAddress: request.ip,
+      shareId,
+      user: access.user,
+      verb: 'downloaded',
+    });
+
+    return reply.send(download.body);
   });
 }

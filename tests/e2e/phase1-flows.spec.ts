@@ -1203,6 +1203,17 @@ test("conversation shares allow another group member to open a read-only shared 
       hasText: "Share this transcript with my research team.",
     }),
   ).toBeVisible();
+  await expect(page.locator(".artifact-link-card")).toHaveCount(1);
+  await page.locator(".artifact-link-card").first().click();
+  await expect(page).toHaveURL(/\/chat\/artifacts\/artifact_.*shareId=share_/);
+  await expect(
+    page.getByRole("button", { name: "Download artifact" }),
+  ).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByText("Shared preview")).toBeVisible();
+  await page.getByRole("link", { name: "Back to shared conversation" }).click();
+  await expect(page).toHaveURL(/\/chat\/shared\/share_/);
   await expect(page.getByLabel("Message")).toHaveCount(0);
 });
 

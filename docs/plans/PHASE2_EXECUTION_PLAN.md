@@ -81,8 +81,9 @@ Default execution order after Phase 1 closeout:
 1. `P2-A6` 对话搜索增强
 2. `P2-B3` Artifact 预览页
 3. `P2-B4` Artifact 下载与分享边界
-4. `P2-C1` HITL step 合同
-5. `P2-C2` pending-action route
+4. `P2-B5` Artifact 审计
+5. `P2-C1` HITL step 合同
+6. `P2-C2` pending-action route
 
 Execution status:
 
@@ -97,7 +98,9 @@ Execution status:
 | completed | `P2-B1` | artifact DTO、来源和消息/run/chat 绑定已冻结                          |
 | completed | `P2-B2` | artifact 已写入独立表，并可通过 workspace route 回读                  |
 | completed | `P2-B3` | `/chat/artifacts/[artifactId]` 已上线，消息与 run 入口已接入          |
-| active    | `P2-B4` | 下一项，补 artifact 下载、共享访问边界和 route 鉴权语义               |
+| completed | `P2-B4` | owner/shared artifact preview + download 路由已补齐，shared transcript 已接入 |
+| completed | `P2-B5` | artifact generated / viewed / downloaded 已进入 audit                 |
+| active    | `P2-C1` | 下一项，统一 approval / input-request step 合同与持久化边界           |
 
 ## 5. First Batch Definition
 
@@ -129,7 +132,9 @@ Current batch status:
 - `P2-B1` complete
 - `P2-B2` complete
 - `P2-B3` complete
-- the active follow-on item is `P2-B4`
+- `P2-B4` complete
+- `P2-B5` complete
+- the active follow-on item is `P2-C1`
 
 ## 6. Detailed Execution Notes
 
@@ -265,8 +270,8 @@ Current batch status:
 - current route/client contract:
   - the preview page reads `GET /workspace/artifacts/:artifactId` through `fetchWorkspaceArtifact()`
   - preview deep links carry `conversationId` and optional `runId` as query params so the user can return to the thread context
-  - shared transcripts intentionally do not deep-link into artifact preview yet
-    - `P2-B4` owns the shared/download access model
+  - the preview page can now also carry `shareId`
+    - `P2-B4` reuses the same preview route for shared/read-only viewers instead of creating a second artifact page
 - browser-testing guardrails:
   - the artifact preview browser flow should seed a persisted conversation plus `workspace_artifacts` row directly in Postgres
     - launching through `/workspace/apps/launch` can exhaust quota before the preview assertions even start
@@ -276,6 +281,54 @@ Current batch status:
   - this host's Playwright runs are sensitive to system pressure
     - repeated failures can drift between `browser.newContext()` timeouts and slow post-login redirects on unrelated tests
     - rerun the wrapper before assuming a regression in artifact preview itself
+
+### P2-B4 Artifact 下载与分享边界
+
+- route surface:
+  - owner scope now exposes:
+    - `GET /workspace/artifacts/:artifactId`
+    - `GET /workspace/artifacts/:artifactId/download`
+  - shared/read-only scope now exposes:
+    - `GET /workspace/shares/:shareId/artifacts/:artifactId`
+    - `GET /workspace/shares/:shareId/artifacts/:artifactId/download`
+- current semantics:
+  - owner routes still require `artifact.user_id = current user`
+  - shared routes validate both:
+    - an active conversation share
+    - membership in the shared group
+  - read-only members cannot bypass the share boundary by calling owner artifact routes directly
+  - downloads serialize persisted payloads as:
+    - `markdown -> .md`
+    - `text -> .txt`
+    - `json -> .json`
+    - `table -> .csv`
+    - `link -> .txt`
+- current UI:
+  - `/chat/shared/[shareId]` now renders artifact cards on shared assistant messages
+  - shared artifact cards deep-link into `/chat/artifacts/[artifactId]?shareId=...`
+  - the preview page reuses the same renderer and exposes a session-backed `Download artifact` action
+- testing closeout:
+  - route tests prove owner/shared preview and download routes return the persisted artifact payload
+  - persistence coverage proves shared artifact access survives the DB-backed runtime path
+  - browser coverage proves a shared transcript can open the artifact preview in read-only mode
+
+### P2-B5 Artifact 审计
+
+- shared auth audit contract:
+  - `AuthAuditAction` now includes:
+    - `workspace.artifact.generated`
+    - `workspace.artifact.viewed`
+    - `workspace.artifact.downloaded`
+  - `AuthAuditEntityType` now includes `artifact`
+- current semantics:
+  - chat completion persistence records one `generated` event per persisted artifact
+  - artifact preview/download routes record `viewed` and `downloaded`
+  - route payloads carry:
+    - `accessScope = owner | shared_read_only`
+    - `shareId` when the artifact is opened through a conversation share
+- admin continuity:
+  - `/admin/audit` and export do not need artifact-specific endpoints
+  - filter by the new action names instead of adding a dedicated artifact admin surface
 
 ### Operational Continuity
 
@@ -291,6 +344,9 @@ Current batch status:
 - use `npm run test:e2e` instead of raw `npx playwright test` on this host
   - the wrapper brings the project up in the expected environment
   - direct Playwright launches can fail on this machine with missing browser runtime libs such as `libatk-1.0.so.0`
+- if persistence or targeted vitest runs seem hung with no output
+  - check for orphaned `node (vitest*)` workers with `pgrep -af vitest`
+  - stale workers can survive interrupted sessions on this host and block later persistence reruns until they are killed
 - if you need more visibility than the silent `npm test` wrapper gives during persistence
   - run `npm run test:unit` and `npm run test:persistence` sequentially
   - do not overlap persistence and Playwright on the shared Postgres DB

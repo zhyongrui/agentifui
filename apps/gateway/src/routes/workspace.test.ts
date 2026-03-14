@@ -1158,6 +1158,35 @@ describe("workspace routes", () => {
         throw new Error("expected launch payload to include a conversation id");
       }
 
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Create a shared artifact for my research group.",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const artifactId = (completion.json() as ChatCompletionResponse).choices[0]
+        ?.message.artifacts?.[0]?.id;
+
+      expect(artifactId).toEqual(expect.stringMatching(/^artifact_/));
+
+      if (!artifactId) {
+        throw new Error("expected completion payload to include an artifact id");
+      }
+
       const createShare = await app.inject({
         method: "POST",
         url: `/workspace/conversations/${conversationId}/shares`,
@@ -1227,6 +1256,46 @@ describe("workspace routes", () => {
         },
       });
 
+      const sharedArtifact = await app.inject({
+        method: "GET",
+        url: `/workspace/shares/${share.id}/artifacts/${artifactId}`,
+        headers: {
+          authorization: `Bearer ${readerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(sharedArtifact.statusCode).toBe(200);
+      expect((sharedArtifact.json() as WorkspaceArtifactResponse).data).toMatchObject({
+        id: artifactId,
+        kind: "markdown",
+      });
+
+      const sharedArtifactDownload = await app.inject({
+        method: "GET",
+        url: `/workspace/shares/${share.id}/artifacts/${artifactId}/download`,
+        headers: {
+          authorization: `Bearer ${readerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(sharedArtifactDownload.statusCode).toBe(200);
+      expect(sharedArtifactDownload.headers["content-type"]).toContain("text/markdown");
+      expect(sharedArtifactDownload.headers["content-disposition"]).toContain(".md");
+      expect(sharedArtifactDownload.headers["x-agentifui-artifact-id"]).toBe(artifactId);
+      expect(sharedArtifactDownload.body).toContain(
+        "Policy Watch is now reachable through the AgentifUI gateway."
+      );
+
+      const ownerArtifactFromReaderBoundary = await app.inject({
+        method: "GET",
+        url: `/workspace/artifacts/${artifactId}`,
+        headers: {
+          authorization: `Bearer ${readerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(ownerArtifactFromReaderBoundary.statusCode).toBe(404);
+
       const revokeShare = await app.inject({
         method: "DELETE",
         url: `/workspace/conversations/${conversationId}/shares/${share.id}`,
@@ -1268,6 +1337,24 @@ describe("workspace routes", () => {
             action: "workspace.conversation_share.accessed",
             entityType: "conversation_share",
             entityId: share.id,
+          }),
+          expect.objectContaining({
+            action: "workspace.artifact.viewed",
+            entityType: "artifact",
+            entityId: artifactId,
+            payload: expect.objectContaining({
+              accessScope: "shared_read_only",
+              shareId: share.id,
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.artifact.downloaded",
+            entityType: "artifact",
+            entityId: artifactId,
+            payload: expect.objectContaining({
+              accessScope: "shared_read_only",
+              shareId: share.id,
+            }),
           }),
           expect.objectContaining({
             action: "workspace.conversation_share.revoked",
@@ -1589,7 +1676,8 @@ describe("workspace routes", () => {
 
   it("returns persisted artifacts through the workspace artifact route", async () => {
     const authService = createTestAuthService();
-    const { app } = await createTestApp(authService);
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
 
     authService.register({
       email: "artifact-route@iflabx.com",
@@ -1675,6 +1763,56 @@ describe("workspace routes", () => {
           ),
         }),
       } satisfies WorkspaceArtifactResponse);
+
+      const artifactDownload = await app.inject({
+        method: "GET",
+        url: `/workspace/artifacts/${artifactId}/download`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(artifactDownload.statusCode).toBe(200);
+      expect(artifactDownload.headers["content-type"]).toContain("text/markdown");
+      expect(artifactDownload.headers["content-disposition"]).toContain(".md");
+      expect(artifactDownload.headers["x-agentifui-artifact-id"]).toBe(artifactId);
+      expect(artifactDownload.body).toContain(
+        "Policy Watch is now reachable through the AgentifUI gateway."
+      );
+
+      const auditEvents = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.artifact.generated",
+            entityType: "artifact",
+            entityId: artifactId,
+            payload: expect.objectContaining({
+              conversationId: launchBody.data.conversationId,
+              runId: expect.stringMatching(/^run_/),
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.artifact.viewed",
+            entityType: "artifact",
+            entityId: artifactId,
+            payload: expect.objectContaining({
+              accessScope: "owner",
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.artifact.downloaded",
+            entityType: "artifact",
+            entityId: artifactId,
+            payload: expect.objectContaining({
+              accessScope: "owner",
+            }),
+          }),
+        ])
+      );
     } finally {
       await app.close();
     }

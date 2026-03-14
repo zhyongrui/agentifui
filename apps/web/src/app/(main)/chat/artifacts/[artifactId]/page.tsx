@@ -9,7 +9,10 @@ import {
   WorkspaceArtifactPreview,
   formatWorkspaceArtifactSize,
 } from "../../../../../components/workspace-artifacts";
-import { fetchWorkspaceArtifact } from "../../../../../lib/apps-client";
+import {
+  downloadWorkspaceArtifact,
+  fetchWorkspaceArtifact,
+} from "../../../../../lib/apps-client";
 import { clearAuthSession } from "../../../../../lib/auth-session";
 import { useProtectedSession } from "../../../../../lib/use-protected-session";
 
@@ -32,10 +35,13 @@ export default function ArtifactPreviewPage() {
     ReturnType<typeof fetchWorkspaceArtifact>
   > | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
   const artifactId =
     typeof params?.artifactId === "string" ? params.artifactId.trim() : "";
   const conversationId = readSearchParam(searchParams.get("conversationId"));
   const runId = readSearchParam(searchParams.get("runId"));
+  const shareId = readSearchParam(searchParams.get("shareId"));
 
   useEffect(() => {
     if (!session || !artifactId) {
@@ -53,6 +59,9 @@ export default function ArtifactPreviewPage() {
         const result = await fetchWorkspaceArtifact(
           session.sessionToken,
           artifactId,
+          {
+            shareId,
+          }
         );
 
         if (cancelled) {
@@ -83,7 +92,46 @@ export default function ArtifactPreviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [artifactId, router, session]);
+  }, [artifactId, router, session, shareId]);
+
+  async function handleDownloadArtifact() {
+    if (!session || !artifactId || isDownloading) {
+      return;
+    }
+
+    setIsDownloading(true);
+    setDownloadError(null);
+
+    try {
+      const result = await downloadWorkspaceArtifact(session.sessionToken, artifactId, {
+        shareId,
+      });
+
+      if ("error" in result) {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+          clearAuthSession(window.sessionStorage);
+          router.replace("/login");
+          return;
+        }
+
+        setDownloadError(result.error.message);
+        return;
+      }
+
+      const objectUrl = window.URL.createObjectURL(result.blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = result.metadata.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch {
+      setDownloadError("The artifact download could not be completed. Please retry.");
+    } finally {
+      setIsDownloading(false);
+    }
+  }
 
   if (isLoading) {
     return <p className="lead">Checking your session...</p>;
@@ -123,15 +171,16 @@ export default function ArtifactPreviewPage() {
           <span className="eyebrow">P2-B3 Artifact Preview</span>
           <h1>{artifact.title}</h1>
           <p className="lead">
-            Artifact previews stay user-scoped at the workspace boundary. Shared
-            transcript deep links will be added separately once `P2-B4`
-            finalizes the access model.
+            {shareId
+              ? "This preview is being opened through a read-only shared conversation boundary."
+              : "This preview is being opened through the owner-scoped workspace artifact boundary."}
           </p>
         </div>
         <div className="workspace-badges">
           <span className="workspace-badge">{artifact.kind}</span>
           <span className="workspace-badge">{artifact.status}</span>
           <span className="workspace-badge">{artifact.source}</span>
+          {shareId ? <span className="workspace-badge">Shared preview</span> : null}
           {runId ? <span className="workspace-badge">Run {runId}</span> : null}
         </div>
       </header>
@@ -171,6 +220,18 @@ export default function ArtifactPreviewPage() {
           </article>
         </div>
 
+        <div className="actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void handleDownloadArtifact()}
+            disabled={isDownloading}
+          >
+            {isDownloading ? "Downloading..." : "Download artifact"}
+          </button>
+          {downloadError ? <span className="chat-composer-hint">{downloadError}</span> : null}
+        </div>
+
         <article className="chat-bubble assistant artifact-preview-surface">
           <div className="chat-bubble-meta">
             <span className="chat-bubble-label">Rendered artifact</span>
@@ -183,7 +244,12 @@ export default function ArtifactPreviewPage() {
       </section>
 
       <div className="actions">
-        {conversationId ? (
+        {shareId ? (
+          <Link className="secondary" href={`/chat/shared/${shareId}`}>
+            Back to shared conversation
+          </Link>
+        ) : null}
+        {!shareId && conversationId ? (
           <Link className="secondary" href={`/chat/${conversationId}`}>
             Back to conversation
           </Link>

@@ -2,6 +2,7 @@ import type {
   WorkspaceAppLaunchRequest,
   WorkspaceAppLaunchResponse,
   WorkspaceApp,
+  WorkspaceArtifact,
   WorkspaceCatalogResponse,
   WorkspaceConversationListAttachmentFilter,
   WorkspaceConversationListFeedbackFilter,
@@ -71,6 +72,38 @@ function normalizeWorkspaceCatalogPayload(payload: WorkspaceCatalogResponse): Wo
     },
   };
 }
+
+function buildWorkspaceArtifactPath(
+  artifactId: string,
+  input: {
+    shareId?: string | null;
+  } = {}
+) {
+  return input.shareId
+    ? `/workspace/shares/${input.shareId}/artifacts/${artifactId}`
+    : `/workspace/artifacts/${artifactId}`;
+}
+
+function readRequiredHeader(headers: Headers, headerName: string) {
+  const value = headers.get(headerName);
+
+  if (!value) {
+    throw new Error(`The gateway response did not include ${headerName}.`);
+  }
+
+  return value;
+}
+
+export type WorkspaceArtifactDownload = {
+  blob: Blob;
+  metadata: {
+    artifactId: string;
+    contentType: string;
+    filename: string;
+    kind: WorkspaceArtifact["kind"];
+    shareId: string | null;
+  };
+};
 
 async function fetchWorkspaceJson<TSuccess>(
   path: string,
@@ -329,10 +362,52 @@ export async function fetchWorkspaceRun(
 
 export async function fetchWorkspaceArtifact(
   sessionToken: string,
-  artifactId: string
+  artifactId: string,
+  input: {
+    shareId?: string | null;
+  } = {}
 ): Promise<WorkspaceArtifactResponse | WorkspaceErrorResponse> {
-  return fetchWorkspaceJson<WorkspaceArtifactResponse>(`/workspace/artifacts/${artifactId}`, {
+  return fetchWorkspaceJson<WorkspaceArtifactResponse>(buildWorkspaceArtifactPath(artifactId, input), {
     method: 'GET',
     sessionToken,
   });
+}
+
+export async function downloadWorkspaceArtifact(
+  sessionToken: string,
+  artifactId: string,
+  input: {
+    shareId?: string | null;
+  } = {}
+): Promise<WorkspaceArtifactDownload | WorkspaceErrorResponse> {
+  const path = `${buildWorkspaceArtifactPath(artifactId, input)}/download`;
+  const response = await fetch(`${getGatewayBaseUrl()}${path}`, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${sessionToken}`,
+    },
+    cache: 'no-store',
+  });
+  const contentType = response.headers.get('content-type') ?? '';
+
+  if (
+    contentType.includes('application/json') &&
+    !response.headers.get('x-agentifui-artifact-filename')
+  ) {
+    return (await response.json()) as WorkspaceErrorResponse;
+  }
+
+  return {
+    blob: await response.blob(),
+    metadata: {
+      artifactId: readRequiredHeader(response.headers, 'x-agentifui-artifact-id'),
+      contentType,
+      filename: readRequiredHeader(response.headers, 'x-agentifui-artifact-filename'),
+      kind: readRequiredHeader(
+        response.headers,
+        'x-agentifui-artifact-kind'
+      ) as WorkspaceArtifact["kind"],
+      shareId: input.shareId ?? null,
+    },
+  };
 }
