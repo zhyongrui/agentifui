@@ -1,4 +1,5 @@
 import type {
+  WorkspaceArtifactResponse,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationListResponse,
@@ -14,6 +15,7 @@ import type {
   WorkspaceRunResponse,
 } from "@agentifui/shared/apps";
 import { describe, expect, it } from "vitest";
+import type { ChatCompletionResponse } from "@agentifui/shared/chat";
 
 import { buildApp } from "../app.js";
 import { createAuditService } from "../services/audit-service.js";
@@ -1580,6 +1582,99 @@ describe("workspace routes", () => {
       expect(
         (filteredHistory.json() as WorkspaceConversationListResponse).data.items,
       ).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns persisted artifacts through the workspace artifact route", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "artifact-route@iflabx.com",
+      password: "Secure123",
+      displayName: "Artifact Route",
+    });
+
+    const login = authService.login({
+      email: "artifact-route@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected artifact route login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          conversation_id: launchBody.data.conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Create an artifact I can reload.",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const completionBody = completion.json() as ChatCompletionResponse;
+      const artifactId = completionBody.choices[0]?.message.artifacts?.[0]?.id;
+
+      expect(artifactId).toEqual(expect.stringMatching(/^artifact_/));
+
+      if (!artifactId) {
+        throw new Error("expected completion to include an artifact id");
+      }
+
+      const artifactResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/artifacts/${artifactId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(artifactResponse.statusCode).toBe(200);
+      expect(artifactResponse.json()).toEqual({
+        ok: true,
+        data: expect.objectContaining({
+          id: artifactId,
+          kind: "markdown",
+          source: "assistant_response",
+          status: "draft",
+          content: expect.stringContaining(
+            "Policy Watch is now reachable through the AgentifUI gateway.",
+          ),
+        }),
+      } satisfies WorkspaceArtifactResponse);
     } finally {
       await app.close();
     }

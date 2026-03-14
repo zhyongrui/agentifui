@@ -469,6 +469,11 @@ export type WorkspaceRunResponse = {
   data: WorkspaceRun;
 };
 
+export type WorkspaceArtifactResponse = {
+  ok: true;
+  data: WorkspaceArtifact;
+};
+
 export type WorkspaceErrorCode =
   | "WORKSPACE_UNAUTHORIZED"
   | "WORKSPACE_FORBIDDEN"

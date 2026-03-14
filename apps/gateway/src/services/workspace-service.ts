@@ -206,6 +206,13 @@ type WorkspaceConversationAttachmentLookupResult =
     }
   | WorkspaceLookupFailure;
 
+type WorkspaceArtifactResult =
+  | {
+      ok: true;
+      data: WorkspaceArtifact;
+    }
+  | WorkspaceLookupFailure;
+
 type WorkspaceConversationShareResult =
   | {
       ok: true;
@@ -285,6 +292,10 @@ type WorkspaceService = {
   ):
     | WorkspaceConversationAttachmentLookupResult
     | Promise<WorkspaceConversationAttachmentLookupResult>;
+  getArtifactForUser(
+    user: AuthUser,
+    artifactId: string
+  ): WorkspaceArtifactResult | Promise<WorkspaceArtifactResult>;
   listConversationSharesForUser(
     user: AuthUser,
     conversationId: string
@@ -328,6 +339,13 @@ type WorkspaceConversationAttachmentRecord = {
   attachment: WorkspaceConversationAttachment;
   conversationId: string;
   storageKey: string | null;
+  userId: string;
+};
+
+type WorkspaceArtifactRecord = WorkspaceArtifact & {
+  conversationId: string;
+  runId: string;
+  sequence: number;
   userId: string;
 };
 
@@ -551,6 +569,22 @@ function buildArtifactsFromOutputs(outputs: Record<string, unknown>): WorkspaceA
   });
 }
 
+function createWorkspaceArtifactRecord(input: {
+  artifact: WorkspaceArtifact;
+  conversationId: string;
+  runId: string;
+  sequence: number;
+  userId: string;
+}): WorkspaceArtifactRecord {
+  return {
+    ...input.artifact,
+    conversationId: input.conversationId,
+    runId: input.runId,
+    sequence: input.sequence,
+    userId: input.userId,
+  };
+}
+
 function createRunTimelineEvent(input: {
   createdAt?: string;
   metadata?: Record<string, unknown>;
@@ -764,6 +798,8 @@ export function createWorkspaceService(options: {
   const runIdsByConversationId = new Map<string, string[]>();
   const attachmentsByConversationId = new Map<string, string[]>();
   const attachmentsById = new Map<string, WorkspaceConversationAttachmentRecord>();
+  const artifactIdsByRunId = new Map<string, string[]>();
+  const artifactsById = new Map<string, WorkspaceArtifactRecord>();
   const sharesById = new Map<string, WorkspaceConversationShareRecord>();
   const shareIdsByConversationId = new Map<string, string[]>();
 
@@ -866,6 +902,27 @@ export function createWorkspaceService(options: {
       user: userUsage,
       groupsById,
     };
+  }
+
+  function syncRunArtifacts(run: WorkspaceRunRecord, userId: string) {
+    for (const artifactId of artifactIdsByRunId.get(run.id) ?? []) {
+      artifactsById.delete(artifactId);
+    }
+
+    const nextArtifactIds = run.artifacts.map((artifact, index) => {
+      const record = createWorkspaceArtifactRecord({
+        artifact,
+        conversationId: run.conversationId,
+        runId: run.id,
+        sequence: index,
+        userId,
+      });
+
+      artifactsById.set(record.id, record);
+      return record.id;
+    });
+
+    artifactIdsByRunId.set(run.id, nextArtifactIds);
   }
 
   function buildQuotaSnapshotForUser(
@@ -1414,6 +1471,30 @@ export function createWorkspaceService(options: {
         data: attachments,
       };
     },
+    getArtifactForUser(user, artifactId) {
+      const artifact = artifactsById.get(artifactId);
+
+      if (!artifact || artifact.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace artifact could not be found.',
+        };
+      }
+
+      const { conversationId, runId, sequence, userId, ...artifactData } = artifact;
+
+      void conversationId;
+      void runId;
+      void sequence;
+      void userId;
+
+      return {
+        ok: true,
+        data: artifactData,
+      };
+    },
     listConversationSharesForUser(user, conversationId) {
       const conversation = conversationsById.get(conversationId);
 
@@ -1631,6 +1712,7 @@ export function createWorkspaceService(options: {
       );
 
       runsById.set(run.id, run);
+      artifactIdsByRunId.set(run.id, []);
       runIdsByConversationId.set(conversation.id, [
         ...(runIdsByConversationId.get(conversation.id) ?? []),
         run.id,
@@ -1719,6 +1801,7 @@ export function createWorkspaceService(options: {
       }
 
       run.artifacts = buildArtifactsFromOutputs(run.outputs);
+      syncRunArtifacts(run, user.id);
       run.usage = buildUsageFromOutputs(run);
 
       if (input.messageHistory) {
@@ -1736,6 +1819,7 @@ export function createWorkspaceService(options: {
 }
 
 export type {
+  WorkspaceArtifactResult,
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
   WorkspaceConversationMessageFeedbackResult,

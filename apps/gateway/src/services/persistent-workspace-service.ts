@@ -178,6 +178,24 @@ type WorkspaceRunRow = {
   type: WorkspaceRunType;
 };
 
+type WorkspaceArtifactRow = {
+  conversation_id: string;
+  created_at: Date | string;
+  id: string;
+  kind: WorkspaceArtifact["kind"];
+  mime_type: string | null;
+  payload: Record<string, unknown> | string;
+  run_id: string;
+  sequence: number;
+  size_bytes: number | null;
+  source: WorkspaceArtifact["source"];
+  status: WorkspaceArtifact["status"];
+  summary: string | null;
+  title: string;
+  updated_at: Date | string;
+  user_id: string;
+};
+
 type WorkspaceRunTimelineEventRow = {
   created_at: Date | string;
   event_type: WorkspaceRunTimelineEventType;
@@ -855,6 +873,27 @@ function toWorkspaceArtifacts(value: unknown): WorkspaceArtifact[] {
   return value.flatMap((entry) => {
     const artifact = toWorkspaceArtifact(entry);
     return artifact ? [artifact] : [];
+  });
+}
+
+function toWorkspaceArtifactFromRow(row: WorkspaceArtifactRow): WorkspaceArtifact | null {
+  const payload = normalizeJsonRecord(row.payload);
+  const summary: WorkspaceArtifactSummary = {
+    id: row.id,
+    title: row.title,
+    kind: row.kind,
+    source: row.source,
+    status: row.status,
+    createdAt: toIso(row.created_at)!,
+    updatedAt: toIso(row.updated_at)!,
+    summary: row.summary,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+  };
+
+  return toWorkspaceArtifact({
+    ...summary,
+    ...payload,
   });
 }
 
@@ -1972,9 +2011,69 @@ async function readRunForUser(
   }
 
   const run = toWorkspaceRun(row);
+  const artifactRows = await database<WorkspaceArtifactRow[]>`
+    select
+      id,
+      user_id,
+      conversation_id,
+      run_id,
+      sequence,
+      title,
+      kind,
+      source,
+      status,
+      summary,
+      mime_type,
+      size_bytes,
+      payload,
+      created_at,
+      updated_at
+    from workspace_artifacts
+    where run_id = ${runId}
+      and user_id = ${user.id}
+    order by sequence asc, created_at asc
+  `;
+
+  if (artifactRows.length > 0) {
+    run.artifacts = artifactRows.flatMap((artifactRow) => {
+      const artifact = toWorkspaceArtifactFromRow(artifactRow);
+      return artifact ? [artifact] : [];
+    });
+  }
   run.timeline = await readRunTimelineForUser(database, user, runId);
 
   return run;
+}
+
+async function readArtifactForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  artifactId: string,
+): Promise<WorkspaceArtifact | null> {
+  const [row] = await database<WorkspaceArtifactRow[]>`
+    select
+      id,
+      user_id,
+      conversation_id,
+      run_id,
+      sequence,
+      title,
+      kind,
+      source,
+      status,
+      summary,
+      mime_type,
+      size_bytes,
+      payload,
+      created_at,
+      updated_at
+    from workspace_artifacts
+    where id = ${artifactId}
+      and user_id = ${user.id}
+    limit 1
+  `;
+
+  return row ? toWorkspaceArtifactFromRow(row) : null;
 }
 
 async function uploadConversationFileForUser(
@@ -2443,6 +2542,78 @@ async function createConversationRunForUser(
   return readConversationForUser(database, user, conversation.id);
 }
 
+async function syncRunArtifacts(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: {
+    artifacts: WorkspaceArtifact[];
+    conversationId: string;
+    runId: string;
+  },
+) {
+  await database`
+    delete from workspace_artifacts
+    where run_id = ${input.runId}
+      and user_id = ${user.id}
+  `;
+
+  for (const [index, artifact] of input.artifacts.entries()) {
+    const payload =
+      artifact.kind === "link"
+        ? {
+            href: artifact.href,
+            label: artifact.label,
+          }
+        : artifact.kind === "table"
+          ? {
+              columns: artifact.columns,
+              rows: artifact.rows,
+            }
+          : {
+              content: artifact.content,
+            };
+
+    await database`
+      insert into workspace_artifacts (
+        id,
+        tenant_id,
+        user_id,
+        conversation_id,
+        run_id,
+        sequence,
+        title,
+        kind,
+        source,
+        status,
+        summary,
+        mime_type,
+        size_bytes,
+        payload,
+        created_at,
+        updated_at
+      )
+      values (
+        ${artifact.id},
+        ${user.tenantId},
+        ${user.id},
+        ${input.conversationId},
+        ${input.runId},
+        ${index},
+        ${artifact.title},
+        ${artifact.kind},
+        ${artifact.source},
+        ${artifact.status},
+        ${artifact.summary},
+        ${artifact.mimeType},
+        ${artifact.sizeBytes},
+        ${payload}::jsonb,
+        ${artifact.createdAt}::timestamptz,
+        ${artifact.updatedAt}::timestamptz
+      )
+    `;
+  }
+}
+
 async function updateConversationRunForUser(
   database: DatabaseClient,
   user: AuthUser,
@@ -2461,6 +2632,12 @@ async function updateConversationRunForUser(
   const errorMessage = input.error ?? null;
   const nextMessageHistory = input.messageHistory ?? [];
   const shouldUpdateMessageHistory = input.messageHistory !== undefined;
+  const shouldSyncArtifacts =
+    input.outputs !== undefined &&
+    Object.prototype.hasOwnProperty.call(input.outputs, "artifacts");
+  const nextArtifacts = shouldSyncArtifacts
+    ? toWorkspaceArtifacts((input.outputs as Record<string, unknown>).artifacts)
+    : [];
 
   const updated = await database.begin(async (transaction) => {
     const sql = transaction as unknown as DatabaseClient;
@@ -2524,6 +2701,14 @@ async function updateConversationRunForUser(
         metadata: {
           keys: Object.keys(input.inputs),
         },
+      });
+    }
+
+    if (shouldSyncArtifacts) {
+      await syncRunArtifacts(sql, user, {
+        artifacts: nextArtifacts,
+        conversationId: input.conversationId,
+        runId: input.runId,
       });
     }
 
@@ -3100,6 +3285,23 @@ export function createPersistentWorkspaceService(
       input,
     ): Promise<WorkspaceConversationAttachmentLookupResult> {
       return listConversationAttachmentsForUser(database, user, input);
+    },
+    async getArtifactForUser(user, artifactId) {
+      const artifact = await readArtifactForUser(database, user, artifactId);
+
+      if (!artifact) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "WORKSPACE_NOT_FOUND",
+          message: "The target workspace artifact could not be found.",
+        };
+      }
+
+      return {
+        ok: true,
+        data: artifact,
+      };
     },
     async listConversationSharesForUser(
       user,

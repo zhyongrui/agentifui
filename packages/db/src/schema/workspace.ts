@@ -53,6 +53,22 @@ export const runTimelineEventTypeEnum = pgEnum('run_timeline_event_type', [
   'run_failed',
   'run_stopped',
 ]);
+export const workspaceArtifactKindEnum = pgEnum('workspace_artifact_kind', [
+  'text',
+  'markdown',
+  'json',
+  'table',
+  'link',
+]);
+export const workspaceArtifactSourceEnum = pgEnum('workspace_artifact_source', [
+  'assistant_response',
+  'tool_output',
+  'user_upload',
+]);
+export const workspaceArtifactStatusEnum = pgEnum('workspace_artifact_status', [
+  'draft',
+  'stable',
+]);
 
 export const workspaceApps = pgTable(
   'workspace_apps',
@@ -300,6 +316,47 @@ export const workspaceUploadedFiles = pgTable(
     workspaceUploadedFilesStorageKeyUnique: uniqueIndex(
       'workspace_uploaded_files_storage_key_unique'
     ).on(table.storageKey),
+  })
+);
+
+export const workspaceArtifacts = pgTable(
+  'workspace_artifacts',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    conversationId: varchar('conversation_id', { length: 120 })
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    runId: varchar('run_id', { length: 120 })
+      .notNull()
+      .references(() => runs.id, { onDelete: 'cascade' }),
+    sequence: integer('sequence').notNull().default(0),
+    title: varchar('title', { length: 255 }).notNull(),
+    kind: workspaceArtifactKindEnum('kind').notNull(),
+    source: workspaceArtifactSourceEnum('source').notNull(),
+    status: workspaceArtifactStatusEnum('status').notNull().default('draft'),
+    summary: text('summary'),
+    mimeType: varchar('mime_type', { length: 255 }),
+    sizeBytes: integer('size_bytes'),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workspaceArtifactsTenantIndex: index('workspace_artifacts_tenant_idx').on(table.tenantId),
+    workspaceArtifactsUserIndex: index('workspace_artifacts_user_idx').on(table.userId),
+    workspaceArtifactsConversationIndex: index('workspace_artifacts_conversation_idx').on(
+      table.conversationId
+    ),
+    workspaceArtifactsRunIndex: index('workspace_artifacts_run_idx').on(
+      table.runId,
+      table.sequence
+    ),
   })
 );
 

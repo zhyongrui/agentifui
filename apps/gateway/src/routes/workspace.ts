@@ -3,6 +3,7 @@ import {
   WORKSPACE_ATTACHMENT_MAX_BYTES,
 } from '@agentifui/shared/apps';
 import type {
+  WorkspaceArtifactResponse,
   WorkspaceAppLaunchRequest,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
@@ -921,6 +922,42 @@ export async function registerWorkspaceRoutes(
     }
 
     const response: WorkspaceRunResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.get('/workspace/artifacts/:artifactId', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      artifactId?: string;
+    };
+    const artifactId = params.artifactId?.trim();
+
+    if (!artifactId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace artifact lookup requires an artifact id.'
+      );
+    }
+
+    const result = await workspaceService.getArtifactForUser(access.user, artifactId);
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceArtifactResponse = {
       ok: true,
       data: result.data,
     };

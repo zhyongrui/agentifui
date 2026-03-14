@@ -7,6 +7,7 @@ import type {
   AdminUsersResponse,
 } from '@agentifui/shared/admin';
 import type {
+  WorkspaceArtifactResponse,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
   WorkspaceConversationListResponse,
@@ -1254,6 +1255,7 @@ describe.sequential('persistent auth runtime', () => {
         expect(completion.headers['x-trace-id']).toBe(launchBody.data.traceId);
 
         const completionBody = completion.json() as ChatCompletionResponse;
+        const artifactId = completionBody.choices[0]?.message.artifacts?.[0]?.id ?? null;
 
         expect(completionBody).toMatchObject({
           id: launchBody.data.runId,
@@ -1309,6 +1311,30 @@ describe.sequential('persistent auth runtime', () => {
                 status: 'draft',
               }),
             ],
+          });
+          expect(artifactId).toEqual(expect.stringMatching(/^artifact_/));
+
+          if (!artifactId) {
+            throw new Error('expected completion to include an artifact id');
+          }
+
+          const [artifactRow] = await runtimeDatabase<{
+            kind: string;
+            run_id: string;
+            source: string;
+            status: string;
+          }[]>`
+            select run_id, kind, source, status
+            from workspace_artifacts
+            where id = ${artifactId}
+            limit 1
+          `;
+
+          expect(artifactRow).toEqual({
+            run_id: launchBody.data.runId,
+            kind: 'markdown',
+            source: 'assistant_response',
+            status: 'draft',
           });
         } finally {
           await runtimeDatabase.end({ timeout: 5 });
@@ -1399,6 +1425,28 @@ describe.sequential('persistent auth runtime', () => {
             expect.objectContaining({ type: 'run_succeeded' }),
           ])
         );
+
+        const artifact = await app.inject({
+          method: 'GET',
+          url: `/workspace/artifacts/${artifactId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(artifact.statusCode).toBe(200);
+        expect(artifact.json()).toEqual({
+          ok: true,
+          data: expect.objectContaining({
+            id: artifactId,
+            kind: 'markdown',
+            source: 'assistant_response',
+            status: 'draft',
+            content: expect.stringContaining(
+              'Policy Watch is now reachable through the AgentifUI gateway.'
+            ),
+          }),
+        } satisfies WorkspaceArtifactResponse);
 
         const catalogAfterCompletion = await app.inject({
           method: 'GET',

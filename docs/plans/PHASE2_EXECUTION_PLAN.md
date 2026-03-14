@@ -79,8 +79,8 @@ Useful continuity constraints:
 Default execution order after Phase 1 closeout:
 
 1. `P2-A6` 对话搜索增强
-2. `P2-B1` Artifact 合同
-3. `P2-B2` Artifact 持久化
+2. `P2-B3` Artifact 预览页
+3. `P2-B4` Artifact 下载与分享边界
 4. `P2-C1` HITL step 合同
 5. `P2-C2` pending-action route
 
@@ -95,7 +95,8 @@ Execution status:
 | completed | `P2-A5` | 会话支持 rename / pin / archive / delete，history 与 detail 已同步     |
 | completed | `P2-A6` | `/chat` 已支持按 tag / attachment / feedback / status 检索历史        |
 | completed | `P2-B1` | artifact DTO、来源和消息/run/chat 绑定已冻结                          |
-| active    | `P2-B2` | 下一项，把 artifact 从 JSON 边界推进到独立持久化记录                  |
+| completed | `P2-B2` | artifact 已写入独立表，并可通过 workspace route 回读                  |
+| active    | `P2-B3` | 下一项，做 artifact 基础预览页和 run/message 入口                     |
 
 ## 5. First Batch Definition
 
@@ -125,7 +126,8 @@ Current batch status:
 - `P2-A5` complete
 - `P2-A6` complete
 - `P2-B1` complete
-- the active follow-on item is `P2-B2`
+- `P2-B2` complete
+- the active follow-on item is `P2-B3`
 
 ## 6. Detailed Execution Notes
 
@@ -236,6 +238,22 @@ Current batch status:
   - streaming responses should expose `artifacts` on the final SSE chunk
   - persistence tests should prove artifact summaries survive restart on the conversation view and full artifacts survive restart on the run view
 
+### P2-B2 Artifact 持久化
+
+- schema:
+  - `workspace_artifacts` now stores artifact metadata plus a kind-specific `payload` JSON blob
+  - rows are keyed by `id` and linked to `tenant_id`, `user_id`, `conversation_id`, and `run_id`
+- current service semantics:
+  - any run update carrying `outputs.artifacts` fully resyncs the run's artifact rows
+  - transcript messages still read summaries from `messageHistory`
+  - run detail now prefers `workspace_artifacts` rows and only falls back to `runs.outputs.artifacts` for pre-table data
+- current route surface:
+  - `GET /workspace/artifacts/:artifactId`
+  - ownership is user-scoped at the workspace boundary
+- testing closeout:
+  - route tests should resolve the artifact id from a completion and round-trip it through `/workspace/artifacts/:artifactId`
+  - persistence tests should assert both the `workspace_artifacts` row and the route response after restart
+
 ### Operational Continuity
 
 - browser tests that assert root-admin navigation should wait for `/api/gateway/admin/context`
@@ -256,6 +274,9 @@ Current batch status:
 - do not add a dedicated artifact DB table during `P2-B1`
   - the contract is now frozen, but storage normalization belongs to `P2-B2`
   - until then, artifact summaries come from `messageHistory` and full payloads come from `runs.outputs`
+- `P2-B2` now owns the dedicated artifact table
+  - keep `runs.outputs.artifacts` populated for backward compatibility and graceful fallback
+  - the new table is the preferred source for route reads and future preview/download flows
 
 ## 7. References
 
