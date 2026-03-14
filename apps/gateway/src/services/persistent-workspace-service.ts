@@ -67,6 +67,7 @@ import type {
 import type { WorkspaceFileStorage } from "./workspace-file-storage.js";
 import {
   applyWorkspaceHitlStepResponse,
+  expireWorkspaceHitlSteps,
   parseWorkspaceHitlSteps,
 } from "./workspace-hitl.js";
 import {
@@ -2112,12 +2113,46 @@ async function listPendingActionsForUser(
     };
   }
 
+  const now = new Date().toISOString();
+  const expirationResult = expireWorkspaceHitlSteps({
+    items: parseWorkspaceHitlSteps(run.outputs.pendingActions),
+    now,
+  });
+
+  if (expirationResult.expiredItems.length > 0) {
+    await database.begin(async (transaction) => {
+      const sql = transaction as unknown as DatabaseClient;
+
+      await sql`
+        update runs
+        set outputs = case
+          when outputs is null then jsonb_set('{}'::jsonb, '{pendingActions}', ${expirationResult.items}::jsonb, true)
+          when jsonb_typeof(outputs) = 'string' then jsonb_set((outputs #>> '{}')::jsonb, '{pendingActions}', ${expirationResult.items}::jsonb, true)
+          else jsonb_set(outputs, '{pendingActions}', ${expirationResult.items}::jsonb, true)
+        end
+        where id = ${run.id}
+          and conversation_id = ${conversation.id}
+      `;
+
+      await sql`
+        update conversations
+        set updated_at = ${now}::timestamptz
+        where id = ${conversation.id}
+          and user_id = ${user.id}
+      `;
+    });
+  }
+
   return {
     ok: true,
     data: {
       conversationId,
       runId: run.id,
-      items: parseWorkspaceHitlSteps(run.outputs.pendingActions),
+      items: expirationResult.items,
+      expiredItems:
+        expirationResult.expiredItems.length > 0
+          ? expirationResult.expiredItems
+          : undefined,
     },
   };
 }
@@ -2153,7 +2188,37 @@ async function respondToPendingActionForUser(
     };
   }
 
-  const pendingActions = parseWorkspaceHitlSteps(run.outputs.pendingActions);
+  const now = new Date().toISOString();
+  const expirationResult = expireWorkspaceHitlSteps({
+    items: parseWorkspaceHitlSteps(run.outputs.pendingActions),
+    now,
+  });
+  const pendingActions = expirationResult.items;
+
+  if (expirationResult.expiredItems.length > 0) {
+    await database.begin(async (transaction) => {
+      const sql = transaction as unknown as DatabaseClient;
+
+      await sql`
+        update runs
+        set outputs = case
+          when outputs is null then jsonb_set('{}'::jsonb, '{pendingActions}', ${pendingActions}::jsonb, true)
+          when jsonb_typeof(outputs) = 'string' then jsonb_set((outputs #>> '{}')::jsonb, '{pendingActions}', ${pendingActions}::jsonb, true)
+          else jsonb_set(outputs, '{pendingActions}', ${pendingActions}::jsonb, true)
+        end
+        where id = ${run.id}
+          and conversation_id = ${conversation.id}
+      `;
+
+      await sql`
+        update conversations
+        set updated_at = ${now}::timestamptz
+        where id = ${conversation.id}
+          and user_id = ${user.id}
+      `;
+    });
+  }
+
   const pendingActionIndex = pendingActions.findIndex(
     (item) => item.id === input.stepId,
   );
@@ -2199,12 +2264,11 @@ async function respondToPendingActionForUser(
 
     await sql`
       update runs
-      set outputs = jsonb_set(
-        coalesce(outputs, '{}'::jsonb),
-        '{pendingActions}',
-        ${items}::jsonb,
-        true
-      )
+      set outputs = case
+        when outputs is null then jsonb_set('{}'::jsonb, '{pendingActions}', ${items}::jsonb, true)
+        when jsonb_typeof(outputs) = 'string' then jsonb_set((outputs #>> '{}')::jsonb, '{pendingActions}', ${items}::jsonb, true)
+        else jsonb_set(outputs, '{pendingActions}', ${items}::jsonb, true)
+      end
       where id = ${run.id}
         and conversation_id = ${conversation.id}
     `;

@@ -272,7 +272,11 @@ export type WorkspaceHitlStepStatus =
 
 export type WorkspaceHitlFieldType = "text" | "textarea" | "select";
 
-export type WorkspaceHitlStepResponseAction = "approve" | "reject" | "submit";
+export type WorkspaceHitlStepResponseAction =
+  | "approve"
+  | "reject"
+  | "submit"
+  | "cancel";
 
 export type WorkspaceHitlOption = {
   id: string;
@@ -562,6 +566,10 @@ export type WorkspacePendingActionRespondRequest =
       action: "submit";
       note?: string | null;
       values: Record<string, string>;
+    }
+  | {
+      action: "cancel";
+      note?: string | null;
     };
 
 export type WorkspacePendingActionRespondResponse = {

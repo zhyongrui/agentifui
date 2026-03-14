@@ -94,7 +94,11 @@ function isPendingActionRespondRequest(
 
   const request = value as Record<string, unknown>;
 
-  if (request.action === 'approve' || request.action === 'reject') {
+  if (
+    request.action === 'approve' ||
+    request.action === 'reject' ||
+    request.action === 'cancel'
+  ) {
     return request.note === undefined || isNullableString(request.note);
   }
 
@@ -755,6 +759,25 @@ export async function registerWorkspaceRoutes(
       data: result.data,
     };
 
+    for (const item of result.data.expiredItems ?? []) {
+      await auditService.recordEvent({
+        tenantId: access.user.tenantId,
+        action: 'workspace.pending_action.expired',
+        entityType: 'pending_action',
+        entityId: item.id,
+        ipAddress: request.ip,
+        payload: {
+          conversationId,
+          runId: result.data.runId,
+          stepId: item.id,
+          kind: item.kind,
+          status: item.status,
+          expiresAt: item.expiresAt,
+          observedByUserId: access.user.id,
+        },
+      });
+    }
+
     return response;
   });
 
@@ -778,7 +801,7 @@ export async function registerWorkspaceRoutes(
       reply.code(400);
       return buildErrorResponse(
         'WORKSPACE_INVALID_PAYLOAD',
-        'Workspace pending action responses require a conversation id, step id and a valid approve/reject/submit payload.'
+        'Workspace pending action responses require a conversation id, step id and a valid approve/reject/submit/cancel payload.'
       );
     }
 
@@ -797,6 +820,28 @@ export async function registerWorkspaceRoutes(
       ok: true,
       data: result.data,
     };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action:
+        body.action === 'cancel'
+          ? 'workspace.pending_action.cancelled'
+          : 'workspace.pending_action.responded',
+      entityType: 'pending_action',
+      entityId: stepId,
+      ipAddress: request.ip,
+      payload: {
+        conversationId,
+        runId: result.data.runId,
+        stepId,
+        kind: result.data.item.kind,
+        action: body.action,
+        status: result.data.item.status,
+        note: body.note ?? null,
+        values: body.action === 'submit' ? body.values : null,
+      },
+    });
 
     return response;
   });

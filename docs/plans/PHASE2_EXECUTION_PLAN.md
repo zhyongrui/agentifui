@@ -116,7 +116,8 @@ Execution status:
 | completed | `P2-C2` | `/workspace/conversations/:conversationId/pending-actions` 已可读     |
 | completed | `P2-C3` | `respond` 路由、状态更新和响应持久化已打通                           |
 | completed | `P2-C4` | `/chat/[conversationId]` 已显示 pending-action 卡片，提交与刷新都已验证 |
-| active    | `P2-C5` | 下一项，补 HITL 审计事件、超时/放弃状态和对应测试                    |
+| completed | `P2-C5` | HITL responded/cancelled/expired 已进入 audit，超时与放弃状态可持久化 |
+| active    | `P2-D1` | 下一项，run failure reason / metadata 结构化到 run detail 和 UI      |
 
 ## 5. First Batch Definition
 
@@ -154,7 +155,8 @@ Current batch status:
 - `P2-C2` complete
 - `P2-C3` complete
 - `P2-C4` complete
-- the active follow-on item is `P2-C5`
+- `P2-C5` complete
+- the active follow-on item is `P2-D1`
 
 ## 6. Detailed Execution Notes
 
@@ -411,6 +413,28 @@ Current batch status:
   - `workspace_quota_limits` seed ids must remain tenant-scoped
     - group ids such as `grp_product` are reused across tenants
     - non-tenant-scoped ids cause cross-tenant `workspace/apps` reads to fail with primary-key collisions
+
+### P2-C5 审计与超时
+
+- backend/audit surface:
+  - `POST /workspace/conversations/:conversationId/pending-actions/:stepId/respond` now accepts `cancel`
+  - audit actions now include:
+    - `workspace.pending_action.responded`
+    - `workspace.pending_action.cancelled`
+    - `workspace.pending_action.expired`
+  - audit entity type now includes `pending_action`
+- timeout semantics:
+  - pending steps are expired on the workspace read boundary when `expiresAt <= now`
+  - the expired status is written back into `runs.outputs.pendingActions`
+  - `conversations.updated_at` is bumped so the timeout is visible after refresh/restart
+- implementation guardrails:
+  - do not add a second HITL mutation route for abandon
+    - `cancel` deliberately reuses the existing `respond` route so audit, auth, and client wiring stay single-path
+  - persistent HITL writes must tolerate older JSONB rows that were accidentally stored as JSON strings
+    - the current DB mutation path normalizes `outputs` when `jsonb_typeof(outputs) = 'string'`
+    - this avoids `jsonb_set(...): cannot set path in scalar` on older local test data
+  - expired-item audit should only fire once per step
+    - expire on read, persist immediately, and later reads will no longer return that step in `expiredItems`
 
 ### Operational Continuity
 

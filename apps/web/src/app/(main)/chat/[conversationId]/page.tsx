@@ -1017,7 +1017,7 @@ export default function ConversationPage() {
 
   async function handlePendingActionRespond(
     step: WorkspaceHitlStep,
-    action: "approve" | "reject" | "submit",
+    action: "approve" | "reject" | "submit" | "cancel",
   ) {
     if (!session || !conversation) {
       return;
@@ -1641,6 +1641,16 @@ export default function ConversationPage() {
                       >
                         {step.rejectLabel}
                       </button>
+                      <button
+                        type="button"
+                        className="secondary danger"
+                        disabled={isSubmitting || !isPending}
+                        onClick={() =>
+                          void handlePendingActionRespond(step, "cancel")
+                        }
+                      >
+                        Abandon
+                      </button>
                     </div>
                   ) : (
                     <div className="stack">
@@ -1711,6 +1721,16 @@ export default function ConversationPage() {
                           }
                         >
                           {isSubmitting ? "Saving..." : step.submitLabel}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary danger"
+                          disabled={isSubmitting || !isPending}
+                          onClick={() =>
+                            void handlePendingActionRespond(step, "cancel")
+                          }
+                        >
+                          Abandon
                         </button>
                       </div>
                     </div>

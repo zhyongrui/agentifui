@@ -22,6 +22,7 @@ import type { ChatCompletionResponse } from "@agentifui/shared/chat";
 import { buildApp } from "../app.js";
 import { createAuditService } from "../services/audit-service.js";
 import { createAuthService } from "../services/auth-service.js";
+import { createWorkspaceService } from "../services/workspace-service.js";
 
 const testEnv: {
   nodeEnv: "test";
@@ -2062,6 +2063,213 @@ describe("workspace routes", () => {
           code: "WORKSPACE_ACTION_CONFLICT",
         },
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("records audit events when a pending action is cancelled", async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+
+    const login = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected owner login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_tenant_control",
+          activeGroupId: "grp_product",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include a conversation id");
+      }
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_tenant_control",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Approve this tenant access change.",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const pendingActions = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/pending-actions`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      const pendingActionId = (
+        pendingActions.json() as WorkspacePendingActionsResponse
+      ).data.items[0]?.id;
+
+      if (!pendingActionId) {
+        throw new Error("expected a pending action id");
+      }
+
+      const cancel = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/pending-actions/${pendingActionId}/respond`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          action: "cancel",
+          note: "No longer needed.",
+        },
+      });
+
+      expect(cancel.statusCode).toBe(200);
+      expect((cancel.json() as WorkspacePendingActionRespondResponse).data.item).toMatchObject({
+        id: pendingActionId,
+        status: "cancelled",
+        response: {
+          action: "cancel",
+          note: "No longer needed.",
+        },
+      });
+
+      expect(await auditService.listEvents({ actorUserId: login.data.user.id })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.pending_action.cancelled",
+            entityType: "pending_action",
+            entityId: pendingActionId,
+            payload: expect.objectContaining({
+              conversationId,
+              action: "cancel",
+              status: "cancelled",
+            }),
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("records audit events when expired pending actions are observed", async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const workspaceService = createWorkspaceService();
+    const expiredStep = {
+      id: "hitl_expired",
+      kind: "approval" as const,
+      status: "expired" as const,
+      title: "Approve tenant access change",
+      description: "The deadline has passed.",
+      conversationId: "conv_expired",
+      runId: "run_expired",
+      createdAt: "2026-03-14T10:00:00.000Z",
+      updatedAt: "2026-03-14T12:00:00.000Z",
+      expiresAt: "2026-03-14T11:00:00.000Z",
+      approveLabel: "Approve",
+      rejectLabel: "Reject",
+    };
+
+    workspaceService.listPendingActionsForUser = async () => ({
+      ok: true,
+      data: {
+        conversationId: "conv_expired",
+        runId: "run_expired",
+        items: [expiredStep],
+        expiredItems: [expiredStep],
+      },
+    });
+
+    const { app } = await createTestApp(authService, {}, {
+      auditService,
+      workspaceService,
+    });
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+
+    const login = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected owner login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/workspace/conversations/conv_expired/pending-actions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as WorkspacePendingActionsResponse).data.items).toEqual([
+        expect.objectContaining({
+          id: "hitl_expired",
+          status: "expired",
+        }),
+      ]);
+
+      expect(await auditService.listEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.pending_action.expired",
+            entityType: "pending_action",
+            entityId: "hitl_expired",
+            payload: expect.objectContaining({
+              conversationId: "conv_expired",
+              runId: "run_expired",
+              observedByUserId: login.data.user.id,
+            }),
+          }),
+        ]),
+      );
     } finally {
       await app.close();
     }

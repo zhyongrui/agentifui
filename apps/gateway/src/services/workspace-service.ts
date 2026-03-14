@@ -41,6 +41,7 @@ import {
 import type { WorkspaceFileStorage } from './workspace-file-storage.js';
 import {
   applyWorkspaceHitlStepResponse,
+  expireWorkspaceHitlSteps,
   parseWorkspaceHitlSteps,
 } from './workspace-hitl.js';
 import {
@@ -174,6 +175,7 @@ type WorkspacePendingActionsResult =
         conversationId: string;
         runId: string;
         items: WorkspaceHitlStep[];
+        expiredItems?: WorkspaceHitlStep[];
       };
     }
   | WorkspaceLookupFailure;
@@ -1588,12 +1590,30 @@ export function createWorkspaceService(options: {
         };
       }
 
+      const now = new Date().toISOString();
+      const expirationResult = expireWorkspaceHitlSteps({
+        items: readPendingActionsFromOutputs(run.outputs),
+        now,
+      });
+
+      if (expirationResult.expiredItems.length > 0) {
+        run.outputs = {
+          ...run.outputs,
+          pendingActions: expirationResult.items,
+        };
+        conversation.updatedAt = now;
+      }
+
       return {
         ok: true,
         data: {
           conversationId,
           runId: run.id,
-          items: readPendingActionsFromOutputs(run.outputs),
+          items: expirationResult.items,
+          expiredItems:
+            expirationResult.expiredItems.length > 0
+              ? expirationResult.expiredItems
+              : undefined,
         },
       };
     },
@@ -1620,7 +1640,21 @@ export function createWorkspaceService(options: {
         };
       }
 
-      const pendingActions = readPendingActionsFromOutputs(run.outputs);
+      const now = new Date().toISOString();
+      const expirationResult = expireWorkspaceHitlSteps({
+        items: readPendingActionsFromOutputs(run.outputs),
+        now,
+      });
+      const pendingActions = expirationResult.items;
+
+      if (expirationResult.expiredItems.length > 0) {
+        run.outputs = {
+          ...run.outputs,
+          pendingActions,
+        };
+        conversation.updatedAt = now;
+      }
+
       const pendingActionIndex = pendingActions.findIndex(
         (item) => item.id === input.stepId
       );

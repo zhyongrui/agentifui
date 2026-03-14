@@ -36,7 +36,12 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 function isHitlStepResponseAction(
   value: unknown,
 ): value is WorkspaceHitlStepResponse["action"] {
-  return value === "approve" || value === "reject" || value === "submit";
+  return (
+    value === "approve" ||
+    value === "reject" ||
+    value === "submit" ||
+    value === "cancel"
+  );
 }
 
 function isWorkspaceHitlResponse(
@@ -145,6 +150,50 @@ export function parseWorkspaceHitlSteps(value: unknown): WorkspaceHitlStep[] {
   }
 
   return value.flatMap((entry) => (isWorkspaceHitlStep(entry) ? [entry] : []));
+}
+
+export function expireWorkspaceHitlSteps(input: {
+  items: WorkspaceHitlStep[];
+  now: string;
+}): {
+  items: WorkspaceHitlStep[];
+  expiredItems: WorkspaceHitlStep[];
+} {
+  const nowMs = Date.parse(input.now);
+
+  if (!Number.isFinite(nowMs)) {
+    return {
+      items: input.items,
+      expiredItems: [],
+    };
+  }
+
+  const expiredItems: WorkspaceHitlStep[] = [];
+  const items = input.items.map((item) => {
+    if (item.status !== "pending" || !item.expiresAt) {
+      return item;
+    }
+
+    const expiresAtMs = Date.parse(item.expiresAt);
+
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs > nowMs) {
+      return item;
+    }
+
+    const expiredItem: WorkspaceHitlStep = {
+      ...item,
+      status: "expired",
+      updatedAt: input.now,
+    };
+
+    expiredItems.push(expiredItem);
+    return expiredItem;
+  });
+
+  return {
+    items,
+    expiredItems,
+  };
 }
 
 export function buildPlaceholderHitlSteps(input: {
@@ -279,6 +328,18 @@ export function applyWorkspaceHitlStepResponse(input: {
     actorDisplayName: input.actorDisplayName,
     note: normalizeNote(input.request.note),
   } satisfies Omit<WorkspaceHitlStepResponse, "values">;
+
+  if (input.request.action === "cancel") {
+    return {
+      ok: true,
+      item: {
+        ...input.step,
+        status: "cancelled",
+        updatedAt: input.respondedAt,
+        response: responseBase,
+      },
+    };
+  }
 
   if (input.step.kind === "approval") {
     if (input.request.action !== "approve" && input.request.action !== "reject") {

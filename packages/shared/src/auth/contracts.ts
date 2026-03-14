@@ -74,6 +74,9 @@ export type AuthAuditAction =
   | 'workspace.conversation_share.revoked'
   | 'workspace.conversation_share.accessed'
   | 'workspace.message.feedback.updated'
+  | 'workspace.pending_action.responded'
+  | 'workspace.pending_action.cancelled'
+  | 'workspace.pending_action.expired'
   | 'workspace.quota.launch_blocked'
   | 'workspace.quota.usage_recorded'
   | 'workspace.run.stop_requested'
@@ -94,6 +97,7 @@ export type AuthAuditEntityType =
   | 'conversation'
   | 'conversation_message'
   | 'conversation_share'
+  | 'pending_action'
   | 'run';
 
 export type AuthAuditEvent = {
