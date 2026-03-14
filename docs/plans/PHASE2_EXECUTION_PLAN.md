@@ -490,7 +490,274 @@ Current batch status:
   - keep `runs.outputs.artifacts` populated for backward compatibility and graceful fallback
   - the new table is the preferred source for route reads and future preview/download flows
 
-## 7. References
+## 7. Detailed Long-Range Checkbox Board
+
+Use this section as the canonical long-range execution board. Every line item should stay as a checkbox so future sessions can continue from the same backlog without reconstructing context from chat history.
+
+Legend:
+
+- `[x]` completed
+- `[ ]` not started or still open
+
+### 7.1 Completed Baseline Checklist
+
+- [x] `P2-A1` Persist assistant feedback and expose `Helpful / Needs work`
+- [x] `P2-A1` Record feedback updates in audit and survive reload/restart
+- [x] `P2-A2` Add transcript message actions for copy / quote / retry / regenerate
+- [x] `P2-A2` Limit regenerate to the latest completed assistant reply
+- [x] `P2-A3` Introduce shared markdown renderer for transcript, replay, and shared transcript
+- [x] `P2-A3` Support fenced code, tables, inline math, and block math rendering
+- [x] `P2-A4` Add suggested prompt payloads to blocking and streaming chat responses
+- [x] `P2-A4` Render follow-up prompt chips in chat and shared transcript
+- [x] `P2-A5` Support rename / pin / archive / restore / delete for conversations
+- [x] `P2-A5` Keep archived conversations readable while disabling write actions
+- [x] `P2-A6` Add structured `/chat` filters for tag / attachment / feedback / status
+- [x] `P2-A6` Enrich history list items with attachment count and feedback summary
+- [x] `P2-B1` Freeze the shared artifact DTO family across chat/run/workspace surfaces
+- [x] `P2-B1` Emit draft artifacts from assistant completions in blocking and streaming paths
+- [x] `P2-B2` Persist artifacts in `workspace_artifacts` and keep JSON fallback compatibility
+- [x] `P2-B2` Add owner-scoped `GET /workspace/artifacts/:artifactId`
+- [x] `P2-B3` Add artifact cards to transcript and run replay surfaces
+- [x] `P2-B3` Ship `/chat/artifacts/[artifactId]` with markdown/text/json/table/link preview
+- [x] `P2-B4` Add owner/shared preview + download routes for artifacts
+- [x] `P2-B4` Reuse artifact preview route for shared read-only viewers
+- [x] `P2-B5` Record artifact generated / viewed / downloaded audit events
+- [x] `P2-C1` Freeze HITL step contract for approval and input-request flows
+- [x] `P2-C2` Add `GET /workspace/conversations/:conversationId/pending-actions`
+- [x] `P2-C3` Add `respond` route with approval, reject, submit, and validation handling
+- [x] `P2-C3` Persist HITL responses into the run boundary across restarts
+- [x] `P2-C4` Render pending-action cards in `/chat/[conversationId]`
+- [x] `P2-C4` Keep pending-action and selected-run detail in sync after response submission
+- [x] `P2-C5` Add cancel / expired state handling and audit coverage for HITL lifecycle
+- [x] `P2-C5` Expire pending actions on read and persist the new state immediately
+- [x] `P2-D1` Add structured failure taxonomy on persisted runs
+- [x] `P2-D1` Show failure stage / code / retryable / detail on conversation run detail
+
+### 7.2 Active Delivery Queue: `P2-D2` Citation And Source Blocks
+
+- [ ] `P2-D2-01` Define `WorkspaceCitation`, `WorkspaceSourceBlock`, and related shared DTOs
+- [ ] `P2-D2-02` Extend blocking chat responses to include citations and grouped source blocks
+- [ ] `P2-D2-03` Extend terminal SSE chunks to expose citations for streaming UIs
+- [ ] `P2-D2-04` Persist citation summaries on assistant transcript messages
+- [ ] `P2-D2-05` Persist full source blocks on run outputs for replay fidelity
+- [ ] `P2-D2-06` Backfill in-memory workspace service so tests and local fallback match persistence semantics
+- [ ] `P2-D2-07` Render inline citation chips in the conversation transcript
+- [ ] `P2-D2-08` Render expandable source cards in selected run replay
+- [ ] `P2-D2-09` Render read-only citations on shared transcript pages
+- [ ] `P2-D2-10` Add copy/open affordances for sources where the payload includes URLs
+- [ ] `P2-D2-11` Cover citation persistence across restart in route and persistence tests
+- [ ] `P2-D2-12` Add browser coverage for citation rendering, refresh, and shared transcript replay
+- [ ] `P2-D2-13` Record any browser-selector gotchas in the dev log after landing the feature
+
+### 7.3 Safety Queue: `P2-D3` Prompt Injection And Safety Signals
+
+- [ ] `P2-D3-01` Define a shared `WorkspaceSafetySignal` contract with severity, category, and summary
+- [ ] `P2-D3-02` Introduce run-level `safety` metadata on chat responses and persisted runs
+- [ ] `P2-D3-03` Distinguish prompt-injection, data-exfiltration, and policy-violation categories
+- [ ] `P2-D3-04` Add adapter hooks so a runtime can attach safety findings without breaking current placeholder responses
+- [ ] `P2-D3-05` Persist safety findings into run outputs and selected conversation snapshots
+- [ ] `P2-D3-06` Render a warning banner on the conversation page when the latest run is flagged
+- [ ] `P2-D3-07` Render a structured safety panel in run replay with severity and recommended action
+- [ ] `P2-D3-08` Add read-only safety signals to shared transcripts without exposing privileged internal detail
+- [ ] `P2-D3-09` Add audit events for severe blocked or flagged runs
+- [ ] `P2-D3-10` Add admin audit filtering for safety-related actions
+- [ ] `P2-D3-11` Add unit coverage for safety contract parsing and fallback behavior on older rows
+- [ ] `P2-D3-12` Add persistence coverage proving safety metadata survives restart and replay
+- [ ] `P2-D3-13` Add browser verification for flagged-run banners and replay panels
+- [ ] `P2-D3-14` Document how safety metadata should be masked in exports and public QA captures
+
+### 7.4 Runtime Queue: `P2-D4` App Runtime Abstraction
+
+- [ ] `P2-D4-01` Extract a formal runtime adapter interface from the current placeholder protocol path
+- [ ] `P2-D4-02` Keep the existing placeholder adapter as the default compatibility backend
+- [ ] `P2-D4-03` Define adapter capabilities for streaming, citations, artifacts, safety, and HITL emission
+- [ ] `P2-D4-04` Normalize blocking and streaming completion entrypoints through the same adapter boundary
+- [ ] `P2-D4-05` Thread `conversationId`, `runId`, and `traceId` through every adapter invocation
+- [ ] `P2-D4-06` Normalize adapter failure shapes into the structured run failure taxonomy
+- [ ] `P2-D4-07` Add app-level runtime selection config so different apps can choose different adapters
+- [ ] `P2-D4-08` Add runtime health/readiness probes surfaced to the gateway service layer
+- [ ] `P2-D4-09` Add adapter test doubles for unit and route coverage
+- [ ] `P2-D4-10` Add persistence coverage proving runtime-specific metadata survives restarts
+- [ ] `P2-D4-11` Add browser smoke coverage that exercises the non-placeholder adapter path once available
+- [ ] `P2-D4-12` Write a developer guide for adding a new runtime adapter safely
+
+### 7.5 Resilience Queue: `P2-D5` Degraded Fallback
+
+- [ ] `P2-D5-01` Detect runtime-unavailable states at the gateway boundary
+- [ ] `P2-D5-02` Keep conversation history, run replay, and artifact preview readable in degraded mode
+- [ ] `P2-D5-03` Disable send/regenerate/upload controls while degraded mode is active
+- [ ] `P2-D5-04` Show a clear degraded banner with recovery guidance on `/chat` and `/chat/[conversationId]`
+- [ ] `P2-D5-05` Preserve pending HITL cards as read-only while runtime execution is unavailable
+- [ ] `P2-D5-06` Expose degraded status to admin health surfaces
+- [ ] `P2-D5-07` Add route coverage for degraded reads vs blocked writes
+- [ ] `P2-D5-08` Add persistence coverage for degraded-mode recovery after restart
+- [ ] `P2-D5-09` Add browser verification covering banner display and disabled composer behavior
+- [ ] `P2-D5-10` Document degraded-mode QA expectations and recovery procedures
+
+### 7.6 Operations Queue: `P2-E1` Session And Archive Cleanup
+
+- [ ] `P2-E1-01` Define retention policy for archived conversations, runs, shares, and artifacts
+- [ ] `P2-E1-02` Add a scheduled cleanup job entrypoint under the DB/scripts or gateway worker surface
+- [ ] `P2-E1-03` Add dry-run reporting for cleanup candidates before destructive actions
+- [ ] `P2-E1-04` Prune expired share links and record cleanup audit entries
+- [ ] `P2-E1-05` Prune orphaned artifacts whose parent run/conversation is no longer accessible
+- [ ] `P2-E1-06` Collapse or archive cold run timeline rows beyond the active replay window
+- [ ] `P2-E1-07` Add admin visibility into upcoming cleanup counts and last cleanup execution
+- [ ] `P2-E1-08` Add unit coverage for cleanup selection logic and retention windows
+- [ ] `P2-E1-09` Add persistence coverage for cleanup effects across archived conversation history
+- [ ] `P2-E1-10` Write an operations runbook for cleanup scheduling, dry runs, and rollback expectations
+
+### 7.7 Operations Queue: `P2-E2` Load And Performance Smoke
+
+- [ ] `P2-E2-01` Define representative load scenarios for auth, workspace launch, chat, admin, and share reads
+- [ ] `P2-E2-02` Add deterministic seed scripts for performance test data
+- [ ] `P2-E2-03` Add a CLI or `npm` entrypoint for lightweight load smoke execution
+- [ ] `P2-E2-04` Capture p50/p95 latency and basic failure-rate budgets for the main endpoints
+- [ ] `P2-E2-05` Measure chat completion latency with and without persisted artifacts
+- [ ] `P2-E2-06` Measure history and replay latency on long conversations
+- [ ] `P2-E2-07` Measure admin audit export performance on realistic event volume
+- [ ] `P2-E2-08` Add perf summary artifact output so CI or manual runs can retain results
+- [ ] `P2-E2-09` Fix the slowest clear regression found by the first smoke run
+- [ ] `P2-E2-10` Document host-specific caveats for shared Postgres and local browser runtime limits
+- [ ] `P2-E2-11` Add a lightweight regression gate to release or pre-release verification docs
+
+### 7.8 Operations Queue: `P2-E3` Tenant Usage Analytics
+
+- [ ] `P2-E3-01` Define tenant usage metrics for launches, runs, messages, artifacts, and storage footprint
+- [ ] `P2-E3-02` Add persistent aggregation queries or materialized read models for analytics
+- [ ] `P2-E3-03` Expose tenant usage summary routes on the admin boundary
+- [ ] `P2-E3-04` Render tenant usage cards and trend summaries on admin pages
+- [ ] `P2-E3-05` Add per-app usage breakdown within each tenant
+- [ ] `P2-E3-06` Add quota-vs-actual comparisons so overuse is visible in admin surfaces
+- [ ] `P2-E3-07` Add export support for tenant usage summaries
+- [ ] `P2-E3-08` Add tests for aggregation correctness across multiple tenants and groups
+- [ ] `P2-E3-09` Add browser coverage for admin analytics filters and table rendering
+- [ ] `P2-E3-10` Document data freshness, aggregation cadence, and known caveats
+
+### 7.9 Operations Queue: `P2-E4` Backup And Export Drill
+
+- [ ] `P2-E4-01` Define the minimum backup set for auth, workspace, artifacts, shares, and admin audit data
+- [ ] `P2-E4-02` Add an export script or documented command set for the critical data surfaces
+- [ ] `P2-E4-03` Add import/restore drill steps for a clean local environment
+- [ ] `P2-E4-04` Verify that restored conversations preserve run replay and artifact links
+- [ ] `P2-E4-05` Verify that restored audit rows remain queryable through admin surfaces
+- [ ] `P2-E4-06` Verify that restored quota and usage data remain consistent
+- [ ] `P2-E4-07` Add a documented checksum or sanity-check step after export and restore
+- [ ] `P2-E4-08` Record public-access/browser QA implications for restored preview links
+- [ ] `P2-E4-09` Add a smoke checklist for periodic backup/restore rehearsals
+- [ ] `P2-E4-10` Publish a concise disaster-recovery runbook for future sessions
+
+### 7.10 Future Delivery Queue: `P3-A` Retrieval, Search, And Knowledge Context
+
+- [ ] `P3-A-01` Define a document/source ingestion contract at the shared boundary
+- [ ] `P3-A-02` Add ingestion status tracking for queued, processing, succeeded, and failed states
+- [ ] `P3-A-03` Choose and implement a chunking strategy for text-heavy sources
+- [ ] `P3-A-04` Add metadata normalization for title, URL, owner, labels, and updated timestamp
+- [ ] `P3-A-05` Add a retrieval query abstraction usable by runtime adapters
+- [ ] `P3-A-06` Connect retrieval results to the citation/source block model
+- [ ] `P3-A-07` Add admin visibility into indexing progress and failure reasons
+- [ ] `P3-A-08` Add tenant/group access controls for indexed knowledge sources
+- [ ] `P3-A-09` Add unit and persistence coverage for ingestion state transitions
+- [ ] `P3-A-10` Add browser coverage for source management and retrieval-backed chat results
+- [ ] `P3-A-11` Add retention/cleanup rules for stale indexed documents
+- [ ] `P3-A-12` Document the ingestion pipeline and local development setup
+
+### 7.11 Future Delivery Queue: `P3-B` Tool Invocation And Structured Actions
+
+- [ ] `P3-B-01` Define a shared tool descriptor contract including auth scope and input schema
+- [ ] `P3-B-02` Build a registry surface for enabled tools per app and tenant
+- [ ] `P3-B-03` Add runtime support for tool call requests and tool result messages
+- [ ] `P3-B-04` Persist tool call attempts, results, and latency into the run boundary
+- [ ] `P3-B-05` Add approval-required tool execution paths that reuse HITL contracts where needed
+- [ ] `P3-B-06` Add audit coverage for tool execution and operator approval decisions
+- [ ] `P3-B-07` Add timeout, retry, and idempotency handling for tool calls
+- [ ] `P3-B-08` Add tool policy controls on admin surfaces
+- [ ] `P3-B-09` Render tool-call summaries in transcript and replay panels
+- [ ] `P3-B-10` Add failure taxonomy extensions for tool-stage errors
+- [ ] `P3-B-11` Add tests for successful, failed, cancelled, and approval-gated tool runs
+- [ ] `P3-B-12` Document how to add a new tool safely and how to test it end to end
+
+### 7.12 Future Delivery Queue: `P3-C` Collaboration, Presence, And Shared Work
+
+- [ ] `P3-C-01` Define a presence/session model for multiple viewers on the same conversation
+- [ ] `P3-C-02` Add live refresh or polling for new messages and run status changes
+- [ ] `P3-C-03` Add collaborator identity chips or cursors on shared conversation surfaces
+- [ ] `P3-C-04` Add comment or note threads attached to runs, artifacts, or messages
+- [ ] `P3-C-05` Add mention/notification primitives for shared work review
+- [ ] `P3-C-06` Add fine-grained permission modes for commenter vs editor vs owner
+- [ ] `P3-C-07` Add conflict handling for concurrent conversation metadata edits
+- [ ] `P3-C-08` Add audit coverage for collaborative edits and comment actions
+- [ ] `P3-C-09` Add browser coverage for multi-user collaboration behavior
+- [ ] `P3-C-10` Document collaboration semantics, consistency model, and known limits
+
+### 7.13 Future Delivery Queue: `P3-D` Evaluation, Replay QA, And Release Quality
+
+- [ ] `P3-D-01` Define golden transcript fixtures for core apps and core workflows
+- [ ] `P3-D-02` Build a replay harness that can re-run deterministic placeholder/runtime sessions
+- [ ] `P3-D-03` Add snapshot comparison for transcript body, artifacts, citations, and safety signals
+- [ ] `P3-D-04` Version prompt/runtime config used by each replayable run
+- [ ] `P3-D-05` Add a model/runtime comparison report surface for release candidates
+- [ ] `P3-D-06` Add release gates for critical regressions in auth/chat/admin smoke paths
+- [ ] `P3-D-07` Add incident replay tooling for failed production-like traces
+- [ ] `P3-D-08` Add developer commands to run focused evals for a single app or workstream
+- [ ] `P3-D-09` Add CI integration for a minimal regression pack
+- [ ] `P3-D-10` Document how eval outputs should be stored, reviewed, and promoted
+
+### 7.14 Future Delivery Queue: `P3-E` Governance, Enterprise Controls, And Identity
+
+- [ ] `P3-E-01` Add domain-claim review workflow for enterprise SSO detection and activation
+- [ ] `P3-E-02` Add admin review queues for pending SSO and tenant-access requests
+- [ ] `P3-E-03` Add richer MFA administration and recovery controls
+- [ ] `P3-E-04` Add break-glass session review and emergency access audit drill
+- [ ] `P3-E-05` Add SCIM or bulk provisioning planning hooks even if implementation lands later
+- [ ] `P3-E-06` Add legal-hold or retention override controls for selected tenants
+- [ ] `P3-E-07` Add audit export filtering by tenant, actor, entity, severity, and date range presets
+- [ ] `P3-E-08` Add policy-pack surfaces for runtime, sharing, and artifact download constraints
+- [ ] `P3-E-09` Add tests for identity edge cases across SSO, MFA, pending review, and tenant transfer
+- [ ] `P3-E-10` Document enterprise onboarding, approval flow, and emergency recovery procedures
+
+### 7.15 Future Delivery Queue: `P3-F` Deployment, Ingress, And Operational Hardening
+
+- [ ] `P3-F-01` Replace ad hoc public QA access with a documented stable `80/443` reverse-proxy setup
+- [ ] `P3-F-02` Keep the temporary `cloudflared` public-access workflow documented for emergency browser QA
+- [ ] `P3-F-03` Add production-grade `nginx` or equivalent config for same-origin web + gateway routing
+- [ ] `P3-F-04` Add HTTPS/TLS issuance and renewal runbooks for the chosen public domain entrypoint
+- [ ] `P3-F-05` Add systemd/service supervision or container orchestration baselines for web and gateway
+- [ ] `P3-F-06` Add secrets management and rotation procedures for auth, DB, and runtime credentials
+- [ ] `P3-F-07` Add structured metrics dashboards for auth, chat, admin, and cleanup jobs
+- [ ] `P3-F-08` Add alerting thresholds for gateway errors, degraded mode, and queue backlogs
+- [ ] `P3-F-09` Add deployment smoke scripts that verify auth, workspace launch, chat, and admin health
+- [ ] `P3-F-10` Add migration rollback and forward-only safety guidelines
+- [ ] `P3-F-11` Add blue/green or canary deployment strategy notes for public releases
+- [ ] `P3-F-12` Document host-specific browser runtime and Playwright caveats for this server class
+
+### 7.16 Future Delivery Queue: `P3-G` UX Polish, Accessibility, And Device Coverage
+
+- [ ] `P3-G-01` Audit chat, admin, and auth surfaces for keyboard accessibility gaps
+- [ ] `P3-G-02` Add screen-reader labels and semantics for transcript actions, artifacts, and HITL cards
+- [ ] `P3-G-03` Improve mobile/tablet layout for `/chat`, `/chat/[conversationId]`, and admin tables
+- [ ] `P3-G-04` Add loading/skeleton states for artifact preview, run replay, and admin analytics
+- [ ] `P3-G-05` Add empty-state guidance for first-run conversations, no-artifact runs, and no-audit tenants
+- [ ] `P3-G-06` Improve long-message rendering, wrapping, and code/table overflow behavior
+- [ ] `P3-G-07` Add upload progress and cancellation UX once richer file workflows exist
+- [ ] `P3-G-08` Add localization planning hooks for Chinese/English UI copy
+- [ ] `P3-G-09` Add browser/device coverage for narrow viewports and tablet landscape layouts
+- [ ] `P3-G-10` Document UX conventions so future sessions preserve visual and behavioral consistency
+
+### 7.17 Future Delivery Queue: `P3-H` Data Lifecycle, Migrations, And Disaster Recovery
+
+- [ ] `P3-H-01` Audit every persisted JSON field for long-term normalization candidates
+- [ ] `P3-H-02` Add migration design notes for high-risk large-table changes
+- [ ] `P3-H-03` Add fixture/seed versioning so browser and persistence tests can evolve safely
+- [ ] `P3-H-04` Add explicit downgrade/rollback expectations for non-reversible migrations
+- [ ] `P3-H-05` Add data integrity checks for cross-table links between conversations, runs, artifacts, and audits
+- [ ] `P3-H-06` Add periodic verification that share links and artifact routes still resolve after backup restore
+- [ ] `P3-H-07` Add storage-growth reporting for conversation history, artifacts, and audit payloads
+- [ ] `P3-H-08` Add a formal recovery checklist for corrupted JSON rows or partially applied migrations
+- [ ] `P3-H-09` Add tests or scripted drills for replaying production-like data into a staging environment
+- [ ] `P3-H-10` Document what operational context must always be copied into the dev log for new sessions
+
+## 8. References
 
 - [PHASE1_DEVELOPMENT_PLAN](./PHASE1_DEVELOPMENT_PLAN.md)
 - [/home/bistu/zyr/pros/agentifui-docs/roadmap/ROADMAP_V1_0.md](/home/bistu/zyr/pros/agentifui-docs/roadmap/ROADMAP_V1_0.md)
