@@ -93,8 +93,8 @@ Execution status:
 | completed | `P2-A3` | markdown/code/math 渲染已落到 transcript、replay 和 shared transcript |
 | completed | `P2-A4` | assistant suggested prompts 已进入 contract、stream 尾块和 chat UI    |
 | completed | `P2-A5` | 会话支持 rename / pin / archive / delete，history 与 detail 已同步     |
-| active    | `P2-A6` | 下一项，补 tag / attachment / feedback / status 过滤历史              |
-| queued    | `P2-B1` | transcript 元数据稳定后冻结 artifact 合同                             |
+| completed | `P2-A6` | `/chat` 已支持按 tag / attachment / feedback / status 检索历史        |
+| active    | `P2-B1` | artifact 合同现在是下一个活动项                                       |
 | queued    | `P2-B2` | 依赖 artifact 合同和 run 输出边界                                     |
 
 ## 5. First Batch Definition
@@ -123,7 +123,8 @@ Current batch status:
 - `P2-A3` complete
 - `P2-A4` complete
 - `P2-A5` complete
-- the active follow-on item is `P2-A6`
+- `P2-A6` complete
+- the active follow-on item is `P2-B1`
 
 ## 6. Detailed Execution Notes
 
@@ -195,6 +196,26 @@ Current batch status:
   - the history-card heading is mutable after rename
     - avoid locators permanently filtered by the original title once the test renames the conversation
 
+### P2-A6 对话搜索增强
+
+- backend contract:
+  - `WorkspaceConversationListResponse.data.filters` now preserves `tag`, `attachment`, `feedback`, and `status`
+  - `WorkspaceConversationListItem` now exposes `attachmentCount` and `feedbackSummary`
+- current semantics:
+  - `tag` filters by app tag, not free-form conversation metadata
+  - `attachment=with_attachments` matches any persisted message attachment on the thread
+  - `feedback=any|positive|negative` is derived from persisted assistant message feedback state
+  - `status` only accepts user-visible history states (`active`, `archived`)
+- persistence/read-path guardrail:
+  - persistent history now applies `tag`, `attachment`, `feedback`, and text query after the DB read
+  - SQL still prefilters by `user_id`, `appId`, `groupId`, and `status`
+  - final `limit` is applied after structured filtering so the returned page is dense with matches
+- browser-testing guardrails:
+  - the `/chat` filter test should seed an `app_policy_watch` conversation when asserting `Tag = policy`
+    - tag options come from the catalog app list, not from conversation payloads
+  - assert both the filter chip summary (`4 active filters`) and the card metadata (`1 attachments`, `Feedback +1 / -0`)
+    - this proves the UI is bound to the enriched list-item payload, not only the URL state
+
 ### Operational Continuity
 
 - browser tests that assert root-admin navigation should wait for `/api/gateway/admin/context`
@@ -209,6 +230,9 @@ Current batch status:
 - use `npm run test:e2e` instead of raw `npx playwright test` on this host
   - the wrapper brings the project up in the expected environment
   - direct Playwright launches can fail on this machine with missing browser runtime libs such as `libatk-1.0.so.0`
+- if you need more visibility than the silent `npm test` wrapper gives during persistence
+  - run `npm run test:unit` and `npm run test:persistence` sequentially
+  - do not overlap persistence and Playwright on the shared Postgres DB
 
 ## 7. References
 

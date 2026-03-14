@@ -11,6 +11,7 @@ import type {
   WorkspaceCatalogResponse,
   WorkspaceConversationListResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationUploadResponse,
   WorkspacePreferencesResponse,
   WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
@@ -1605,6 +1606,226 @@ describe.sequential('persistent auth runtime', () => {
           expect(
             (historyAfterDelete.json() as WorkspaceConversationListResponse).data.items,
           ).toEqual([]);
+        } finally {
+          if (!restartedAppClosed) {
+            await restartedApp.close();
+            restartedAppClosed = true;
+          }
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'persists structured conversation history filters across restarts',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'history-filters@iflabx.com',
+            password: 'Secure123',
+            displayName: 'History Filters',
+          },
+        });
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'history-filters@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+        };
+
+        const policyLaunch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(policyLaunch.statusCode).toBe(200);
+
+        const policyConversationId = (policyLaunch.json() as WorkspaceAppLaunchResponse).data
+          .conversationId;
+
+        if (!policyConversationId) {
+          throw new Error('expected policy launch payload to include a conversation id');
+        }
+
+        const uploadResponse = await app.inject({
+          method: 'POST',
+          url: `/workspace/conversations/${policyConversationId}/uploads`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            fileName: 'policy-brief.txt',
+            contentType: 'text/plain',
+            base64Data: Buffer.from('Policy archive evidence').toString('base64'),
+          },
+        });
+
+        expect(uploadResponse.statusCode).toBe(200);
+
+        const uploadBody = uploadResponse.json() as WorkspaceConversationUploadResponse;
+
+        const completion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            model: 'app_policy_watch',
+            app_id: 'app_policy_watch',
+            stream: false,
+            conversation_id: policyConversationId,
+            messages: [
+              {
+                role: 'user',
+                content: 'Create a filterable archived policy thread.',
+              },
+            ],
+            files: [
+              {
+                type: 'local',
+                file_id: uploadBody.data.id,
+                transfer_method: 'local_file',
+              },
+            ],
+          },
+        });
+
+        expect(completion.statusCode).toBe(200);
+
+        const policyConversation = await app.inject({
+          method: 'GET',
+          url: `/workspace/conversations/${policyConversationId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(policyConversation.statusCode).toBe(200);
+
+        const assistantMessage = (
+          policyConversation.json() as WorkspaceConversationResponse
+        ).data.messages.find(message => message.role === 'assistant');
+
+        if (!assistantMessage) {
+          throw new Error('expected assistant message to exist');
+        }
+
+        const feedback = await app.inject({
+          method: 'PUT',
+          url: `/workspace/conversations/${policyConversationId}/messages/${assistantMessage.id}/feedback`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            rating: 'positive',
+          },
+        });
+
+        expect(feedback.statusCode).toBe(200);
+
+        const archive = await app.inject({
+          method: 'PUT',
+          url: `/workspace/conversations/${policyConversationId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            status: 'archived',
+          },
+        });
+
+        expect(archive.statusCode).toBe(200);
+
+        const marketLaunch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_market_brief',
+            activeGroupId: 'grp_product',
+          },
+        });
+
+        expect(marketLaunch.statusCode).toBe(200);
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+        let restartedAppClosed = false;
+
+        try {
+          const filteredHistory = await restartedApp.inject({
+            method: 'GET',
+            url: '/workspace/conversations?tag=policy&attachment=with_attachments&feedback=positive&status=archived',
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(filteredHistory.statusCode).toBe(200);
+          expect((filteredHistory.json() as WorkspaceConversationListResponse).data).toMatchObject({
+            filters: {
+              appId: null,
+              attachment: 'with_attachments',
+              feedback: 'positive',
+              groupId: null,
+              query: null,
+              status: 'archived',
+              tag: 'policy',
+              limit: 12,
+            },
+            items: [
+              expect.objectContaining({
+                id: policyConversationId,
+                status: 'archived',
+                attachmentCount: 1,
+                feedbackSummary: {
+                  positiveCount: 1,
+                  negativeCount: 0,
+                },
+                app: expect.objectContaining({
+                  id: 'app_policy_watch',
+                }),
+              }),
+            ],
+          });
+          expect(
+            (filteredHistory.json() as WorkspaceConversationListResponse).data.items,
+          ).toHaveLength(1);
         } finally {
           if (!restartedAppClosed) {
             await restartedApp.close();

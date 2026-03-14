@@ -1395,4 +1395,193 @@ describe("workspace routes", () => {
       await app.close();
     }
   });
+
+  it("filters recent conversations by tag, attachment, feedback, and status", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "history-filters@iflabx.com",
+      password: "Secure123",
+      displayName: "History Filters",
+    });
+
+    const login = authService.login({
+      email: "history-filters@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected history filter login to succeed");
+    }
+
+    try {
+      const policyLaunch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+      const policyConversationId = (
+        policyLaunch.json() as WorkspaceAppLaunchResponse
+      ).data.conversationId;
+
+      if (!policyConversationId) {
+        throw new Error("expected policy launch payload to include a conversation id");
+      }
+
+      const uploadResponse = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${policyConversationId}/uploads`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          fileName: "policy-brief.txt",
+          contentType: "text/plain",
+          base64Data: Buffer.from("Policy archive evidence").toString("base64"),
+        },
+      });
+
+      expect(uploadResponse.statusCode).toBe(200);
+
+      const uploadBody =
+        uploadResponse.json() as WorkspaceConversationUploadResponse;
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          model: "app_policy_watch",
+          app_id: "app_policy_watch",
+          stream: false,
+          conversation_id: policyConversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Create a filterable archived policy thread.",
+            },
+          ],
+          files: [
+            {
+              type: "local",
+              file_id: uploadBody.data.id,
+              transfer_method: "local_file",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const policyConversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${policyConversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      const assistantMessage = (
+        policyConversation.json() as WorkspaceConversationResponse
+      ).data.messages.find((message) => message.role === "assistant");
+
+      if (!assistantMessage) {
+        throw new Error("expected assistant message to exist");
+      }
+
+      const feedback = await app.inject({
+        method: "PUT",
+        url: `/workspace/conversations/${policyConversationId}/messages/${assistantMessage.id}/feedback`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          rating: "positive",
+        },
+      });
+
+      expect(feedback.statusCode).toBe(200);
+
+      const archive = await app.inject({
+        method: "PUT",
+        url: `/workspace/conversations/${policyConversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          status: "archived",
+        },
+      });
+
+      expect(archive.statusCode).toBe(200);
+
+      const marketLaunch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_market_brief",
+          activeGroupId: "grp_product",
+        },
+      });
+
+      expect(marketLaunch.statusCode).toBe(200);
+
+      const filteredHistory = await app.inject({
+        method: "GET",
+        url: "/workspace/conversations?tag=policy&attachment=with_attachments&feedback=positive&status=archived",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(filteredHistory.statusCode).toBe(200);
+      expect(
+        (filteredHistory.json() as WorkspaceConversationListResponse).data,
+      ).toMatchObject({
+        filters: {
+          appId: null,
+          attachment: "with_attachments",
+          feedback: "positive",
+          groupId: null,
+          query: null,
+          status: "archived",
+          tag: "policy",
+          limit: 12,
+        },
+        items: [
+          expect.objectContaining({
+            id: policyConversationId,
+            status: "archived",
+            attachmentCount: 1,
+            feedbackSummary: {
+              positiveCount: 1,
+              negativeCount: 0,
+            },
+            app: expect.objectContaining({
+              id: "app_policy_watch",
+            }),
+          }),
+        ],
+      });
+      expect(
+        (filteredHistory.json() as WorkspaceConversationListResponse).data.items,
+      ).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
 });

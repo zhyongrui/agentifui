@@ -2,7 +2,10 @@
 
 import type {
   WorkspaceApp,
+  WorkspaceConversationListAttachmentFilter,
+  WorkspaceConversationListFeedbackFilter,
   WorkspaceConversationListItem,
+  WorkspaceConversationListStatusFilter,
   WorkspaceGroup,
 } from '@agentifui/shared/apps';
 import Link from 'next/link';
@@ -22,10 +25,24 @@ function formatConversationTimestamp(value: string) {
   return new Date(value).toLocaleString();
 }
 
+function formatFeedbackSummary(item: WorkspaceConversationListItem) {
+  const { positiveCount, negativeCount } = item.feedbackSummary;
+
+  if (positiveCount === 0 && negativeCount === 0) {
+    return 'No feedback';
+  }
+
+  return `Feedback +${positiveCount} / -${negativeCount}`;
+}
+
 type HistoryFilters = {
+  attachment: '' | WorkspaceConversationListAttachmentFilter;
   appId: string;
+  feedback: '' | WorkspaceConversationListFeedbackFilter;
   groupId: string;
   query: string;
+  status: '' | WorkspaceConversationListStatusFilter;
+  tag: string;
 };
 
 type ConversationAction =
@@ -43,9 +60,13 @@ export default function ChatHistoryPage() {
   const [groups, setGroups] = useState<WorkspaceGroup[]>([]);
   const [items, setItems] = useState<WorkspaceConversationListItem[]>([]);
   const [filters, setFilters] = useState<HistoryFilters>({
+    attachment: '',
     appId: '',
+    feedback: '',
     groupId: '',
     query: '',
+    status: '',
+    tag: '',
   });
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -73,10 +94,14 @@ export default function ChatHistoryPage() {
           const [catalogResult, listResult] = await Promise.all([
             fetchWorkspaceCatalog(session.sessionToken),
             fetchWorkspaceConversationList(session.sessionToken, {
+              attachment: filters.attachment || null,
               appId: filters.appId || null,
+              feedback: filters.feedback || null,
               groupId: filters.groupId || null,
               query: filters.query.trim() || null,
               limit: 20,
+              status: filters.status || null,
+              tag: filters.tag || null,
             }),
           ]);
 
@@ -124,7 +149,18 @@ export default function ChatHistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [filters.appId, filters.groupId, filters.query, refreshKey, router, session]);
+  }, [
+    filters.appId,
+    filters.attachment,
+    filters.feedback,
+    filters.groupId,
+    filters.query,
+    filters.status,
+    filters.tag,
+    refreshKey,
+    router,
+    session,
+  ]);
 
   async function handleConversationUpdate(
     conversationId: string,
@@ -198,17 +234,31 @@ export default function ChatHistoryPage() {
     return <p className="lead">Checking your session...</p>;
   }
 
+  const tagOptions = [...new Set(apps.flatMap(app => app.tags))].sort((left, right) =>
+    left.localeCompare(right)
+  );
+  const appTagsByAppId = new Map(apps.map(app => [app.id, app.tags]));
+  const activeFilterCount = [
+    filters.query,
+    filters.appId,
+    filters.groupId,
+    filters.status,
+    filters.tag,
+    filters.attachment,
+    filters.feedback,
+  ].filter(Boolean).length;
+
   return (
     <div className="stack">
       <MainSectionNav showSecurity />
 
       <header className="hero compact">
         <div>
-          <span className="eyebrow">P2-A5</span>
+          <span className="eyebrow">P2-A6</span>
           <h1>Conversation history</h1>
           <p className="lead">
-            Reopen prior workspace conversations, pin important threads, archive dormant work, and
-            rename or delete conversation records without leaving the workspace boundary.
+            Search persisted conversation history with structured filters for app tags, attachment
+            usage, message feedback, and conversation status.
           </p>
         </div>
       </header>
@@ -217,7 +267,7 @@ export default function ChatHistoryPage() {
         <div className="chat-panel-header">
           <div>
             <h2>Recent conversations</h2>
-            <p>History is user-scoped, pinned conversations stay at the top, and deleted items disappear from normal reads.</p>
+            <p>History is user-scoped, pinned conversations stay at the top, and structured filters narrow transcript search without leaving the workspace boundary.</p>
           </div>
           <span className="workspace-badge">{isRefreshing ? 'Refreshing' : `${items.length} items`}</span>
         </div>
@@ -280,6 +330,89 @@ export default function ChatHistoryPage() {
               </option>
             ))}
           </select>
+
+          <label className="field" htmlFor="history-status">
+            Status
+          </label>
+          <select
+            id="history-status"
+            value={filters.status}
+            onChange={event =>
+              setFilters(current => ({
+                ...current,
+                status: event.target.value as HistoryFilters['status'],
+              }))
+            }
+          >
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="archived">Archived</option>
+          </select>
+
+          <label className="field" htmlFor="history-tag">
+            Tag
+          </label>
+          <select
+            id="history-tag"
+            value={filters.tag}
+            onChange={event =>
+              setFilters(current => ({
+                ...current,
+                tag: event.target.value,
+              }))
+            }
+          >
+            <option value="">All tags</option>
+            {tagOptions.map(tag => (
+              <option key={tag} value={tag}>
+                {tag}
+              </option>
+            ))}
+          </select>
+
+          <label className="field" htmlFor="history-attachments">
+            Attachments
+          </label>
+          <select
+            id="history-attachments"
+            value={filters.attachment}
+            onChange={event =>
+              setFilters(current => ({
+                ...current,
+                attachment: event.target.value as HistoryFilters['attachment'],
+              }))
+            }
+          >
+            <option value="">All conversations</option>
+            <option value="with_attachments">With attachments</option>
+          </select>
+
+          <label className="field" htmlFor="history-feedback">
+            Feedback
+          </label>
+          <select
+            id="history-feedback"
+            value={filters.feedback}
+            onChange={event =>
+              setFilters(current => ({
+                ...current,
+                feedback: event.target.value as HistoryFilters['feedback'],
+              }))
+            }
+          >
+            <option value="">All feedback states</option>
+            <option value="any">Any feedback</option>
+            <option value="positive">Helpful</option>
+            <option value="negative">Needs work</option>
+          </select>
+        </div>
+
+        <div className="tag-row">
+          <span className="tag tag-muted">{activeFilterCount} active filters</span>
+          {filters.tag ? <span className="tag">Tag {filters.tag}</span> : null}
+          {filters.status ? <span className="tag">Status {filters.status}</span> : null}
+          {filters.attachment ? <span className="tag">With attachments</span> : null}
+          {filters.feedback ? <span className="tag">Feedback {filters.feedback}</span> : null}
         </div>
 
         {error ? <div className="notice error">{error}</div> : null}
@@ -306,8 +439,15 @@ export default function ChatHistoryPage() {
                 <div className="tag-row">
                   {item.pinned ? <span className="tag">Pinned</span> : null}
                   {item.status === 'archived' ? <span className="tag tag-muted">Archived</span> : null}
+                  {(appTagsByAppId.get(item.app.id) ?? []).map(tag => (
+                    <span key={`${item.id}-${tag}`} className="tag tag-muted">
+                      {tag}
+                    </span>
+                  ))}
                   <span className="tag">{item.run.triggeredFrom}</span>
                   <span className="tag tag-muted">{item.messageCount} messages</span>
+                  <span className="tag tag-muted">{item.attachmentCount} attachments</span>
+                  <span className="tag tag-muted">{formatFeedbackSummary(item)}</span>
                   <span className="tag tag-muted">{item.run.totalTokens} tokens</span>
                 </div>
 

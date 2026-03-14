@@ -234,29 +234,52 @@ async function seedInvitation(email: string) {
   return token;
 }
 
-async function seedWorkspaceConversation(email: string) {
+type SeedWorkspaceConversationInput = {
+  activeGroupId?: string;
+  appId?: string;
+  assistantContent?: string;
+  messageHistory?: Array<Record<string, unknown>>;
+  pinned?: boolean;
+  status?: "active" | "archived";
+  title?: string;
+};
+
+async function seedWorkspaceConversation(
+  email: string,
+  input: SeedWorkspaceConversationInput = {},
+) {
   const conversationId = `conv_${randomUUID()}`;
   const runId = `run_${randomUUID()}`;
   const traceId = randomUUID().replace(/-/g, "");
   const createdAt = new Date().toISOString();
-  const userMessageId = `msg_${randomUUID()}`;
-  const assistantMessageId = `msg_${randomUUID()}`;
-  const messageHistory = [
-    {
-      id: userMessageId,
-      role: "user",
-      content: "Create a conversation I can organize.",
-      status: "completed",
-      createdAt,
-    },
-    {
-      id: assistantMessageId,
-      role: "assistant",
-      content: "Policy Watch is now reachable through the AgentifUI gateway.",
-      status: "completed",
-      createdAt,
-    },
-  ];
+  const messageHistory =
+    input.messageHistory ??
+    [
+      {
+        id: `msg_${randomUUID()}`,
+        role: "user",
+        content: "Create a conversation I can organize.",
+        status: "completed",
+        createdAt,
+      },
+      {
+        id: `msg_${randomUUID()}`,
+        role: "assistant",
+        content:
+          input.assistantContent ??
+          "Policy Watch is now reachable through the AgentifUI gateway.",
+        status: "completed",
+        createdAt,
+      },
+    ];
+  const appId = input.appId ?? "app_policy_watch";
+  const activeGroupId = input.activeGroupId ?? "grp_research";
+  const title = input.title ?? "Policy Watch";
+  const status = input.status ?? "active";
+  const pinned = input.pinned ?? false;
+  const assistantContent =
+    input.assistantContent ??
+    "Policy Watch is now reachable through the AgentifUI gateway.";
   const database = postgres(DATABASE_URL, {
     max: 1,
     prepare: false,
@@ -296,11 +319,11 @@ async function seedWorkspaceConversation(email: string) {
           ${conversationId},
           ${user.tenant_id},
           ${user.id},
-          'app_policy_watch',
-          'grp_research',
-          'Policy Watch',
-          'active',
-          false,
+          ${appId},
+          ${activeGroupId},
+          ${title},
+          ${status},
+          ${pinned},
           ${JSON.stringify({ messageHistory })}::jsonb,
           ${createdAt}::timestamptz,
           ${createdAt}::timestamptz
@@ -331,9 +354,9 @@ async function seedWorkspaceConversation(email: string) {
           ${runId},
           ${user.tenant_id},
           ${conversationId},
-          'app_policy_watch',
+          ${appId},
           ${user.id},
-          'grp_research',
+          ${activeGroupId},
           'agent',
           'chat_completion',
           'succeeded',
@@ -345,7 +368,7 @@ async function seedWorkspaceConversation(email: string) {
           })}::jsonb,
           ${JSON.stringify({
             assistant: {
-              content: "Policy Watch is now reachable through the AgentifUI gateway.",
+              content: assistantContent,
               finishReason: "stop",
             },
             usage: {
@@ -1161,6 +1184,98 @@ test("chat history and detail views manage persisted conversations", async ({
   await expect(
     page.locator(".conversation-history-card").filter({
       has: page.getByRole("heading", { name: "Policy follow-up" }),
+    }),
+  ).toHaveCount(0);
+});
+
+test("chat history filters by tag, attachment, feedback, and status", async ({
+  page,
+}) => {
+  const email = uniqueEmail("history-filters");
+  const createdAt = new Date().toISOString();
+
+  await register(page, {
+    email,
+    displayName: "History Filters",
+  });
+  await login(page, {
+    email,
+  });
+  await expectAppsWorkspace(page);
+  await seedWorkspaceConversation(email, {
+    appId: "app_policy_watch",
+    status: "archived",
+    title: "Policy archive target",
+    messageHistory: [
+      {
+        id: `msg_${randomUUID()}`,
+        role: "user",
+        content: "Track the archived policy thread.",
+        status: "completed",
+        createdAt,
+      },
+      {
+        id: `msg_${randomUUID()}`,
+        role: "assistant",
+        content: "Archived policy summary with uploaded evidence.",
+        status: "completed",
+        createdAt,
+        attachments: [
+          {
+            id: `file_${randomUUID()}`,
+            fileName: "policy-brief.pdf",
+            contentType: "application/pdf",
+            sizeBytes: 1024,
+            uploadedAt: createdAt,
+          },
+        ],
+        feedback: {
+          rating: "positive",
+          updatedAt: createdAt,
+        },
+      },
+    ],
+  });
+  await seedWorkspaceConversation(email, {
+    appId: "app_market_brief",
+    activeGroupId: "grp_product",
+    title: "Market daily note",
+    messageHistory: [
+      {
+        id: `msg_${randomUUID()}`,
+        role: "user",
+        content: "Keep this active market note visible in history.",
+        status: "completed",
+        createdAt,
+      },
+      {
+        id: `msg_${randomUUID()}`,
+        role: "assistant",
+        content: "Market Brief is still active without feedback.",
+        status: "completed",
+        createdAt,
+      },
+    ],
+  });
+
+  await page.goto("/chat");
+  await expect(page.getByRole("heading", { name: "Conversation history" })).toBeVisible();
+
+  await page.getByLabel("Tag").selectOption("policy");
+  await page.getByLabel("Status").selectOption("archived");
+  await page.getByLabel("Attachments").selectOption("with_attachments");
+  await page.getByLabel("Feedback").selectOption("positive");
+
+  const filteredCard = page.locator(".conversation-history-card").first();
+  await expect(
+    filteredCard.getByRole("heading", { name: "Policy archive target" }),
+  ).toBeVisible();
+  await expect(filteredCard).toContainText("1 attachments");
+  await expect(filteredCard).toContainText("Feedback +1 / -0");
+  await expect(page.getByText("4 active filters")).toBeVisible();
+  await expect(
+    page.locator(".conversation-history-card").filter({
+      has: page.getByRole("heading", { name: "Market daily note" }),
     }),
   ).toHaveCount(0);
 });

@@ -103,6 +103,22 @@ export type WorkspaceAppLaunchRequest = {
 export type WorkspaceAppLaunchStatus = "handoff_ready" | "conversation_ready";
 
 export type WorkspaceConversationStatus = "active" | "archived" | "deleted";
+
+export type WorkspaceConversationListStatusFilter = Exclude<
+  WorkspaceConversationStatus,
+  "deleted"
+>;
+
+export type WorkspaceConversationListAttachmentFilter = "with_attachments";
+
+export type WorkspaceConversationListFeedbackFilter =
+  | "any"
+  | WorkspaceMessageFeedbackRating;
+
+export type WorkspaceConversationFeedbackSummary = {
+  positiveCount: number;
+  negativeCount: number;
+};
 export type WorkspaceConversationShareStatus = "active" | "revoked";
 export type WorkspaceConversationShareAccess = "read_only";
 
@@ -268,6 +284,8 @@ export type WorkspaceConversationListItem = {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  attachmentCount: number;
+  feedbackSummary: WorkspaceConversationFeedbackSummary;
   lastMessagePreview: string | null;
   app: Pick<
     WorkspaceApp,
@@ -311,8 +329,12 @@ export type WorkspaceConversationListResponse = {
     items: WorkspaceConversationListItem[];
     filters: {
       appId: string | null;
+      attachment: WorkspaceConversationListAttachmentFilter | null;
+      feedback: WorkspaceConversationListFeedbackFilter | null;
       groupId: string | null;
       query: string | null;
+      status: WorkspaceConversationListStatusFilter | null;
+      tag: string | null;
       limit: number;
     };
   };

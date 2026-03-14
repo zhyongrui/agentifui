@@ -127,6 +127,7 @@ type ConversationRow = {
   app_slug: string;
   app_status: WorkspaceApp["status"];
   app_summary: string;
+  app_tags: string[] | string;
   conversation_inputs: Record<string, unknown> | string;
   created_at: Date | string;
   id: string;
@@ -1001,13 +1002,36 @@ function toWorkspaceRunTimelineEvent(
   };
 }
 
-function buildConversationPreview(
+function buildConversationHistoryMetadata(
   messages: WorkspaceConversationMessage[],
-): Pick<WorkspaceConversationListItem, "lastMessagePreview" | "messageCount"> {
+): Pick<
+  WorkspaceConversationListItem,
+  "attachmentCount" | "feedbackSummary" | "lastMessagePreview" | "messageCount"
+> {
   const lastMessage = messages[messages.length - 1];
+  let attachmentCount = 0;
+  let positiveCount = 0;
+  let negativeCount = 0;
+
+  for (const message of messages) {
+    attachmentCount += message.attachments?.length ?? 0;
+
+    if (message.feedback?.rating === "positive") {
+      positiveCount += 1;
+    }
+
+    if (message.feedback?.rating === "negative") {
+      negativeCount += 1;
+    }
+  }
 
   if (!lastMessage) {
     return {
+      attachmentCount,
+      feedbackSummary: {
+        positiveCount,
+        negativeCount,
+      },
       lastMessagePreview: null,
       messageCount: 0,
     };
@@ -1016,17 +1040,89 @@ function buildConversationPreview(
   const normalized = lastMessage.content.replace(/\s+/g, " ").trim();
 
   return {
+    attachmentCount,
+    feedbackSummary: {
+      positiveCount,
+      negativeCount,
+    },
     lastMessagePreview:
       normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized,
     messageCount: messages.length,
   };
 }
 
+function conversationMatchesListFilters(input: {
+  appTags: string[];
+  conversation: WorkspaceConversation;
+  filters: WorkspaceConversationListInput;
+}) {
+  const { appTags, conversation, filters } = input;
+  const normalizedTag = filters.tag?.trim().toLowerCase() || null;
+  const normalizedQuery = filters.query?.trim().toLowerCase() || null;
+
+  if (filters.status && conversation.status !== filters.status) {
+    return false;
+  }
+
+  if (
+    normalizedTag &&
+    !appTags.some((tag) => tag.toLowerCase() === normalizedTag)
+  ) {
+    return false;
+  }
+
+  const history = buildConversationHistoryMetadata(conversation.messages);
+
+  if (
+    filters.attachment === "with_attachments" &&
+    history.attachmentCount === 0
+  ) {
+    return false;
+  }
+
+  if (filters.feedback === "any") {
+    if (
+      history.feedbackSummary.positiveCount +
+        history.feedbackSummary.negativeCount ===
+      0
+    ) {
+      return false;
+    }
+  } else if (
+    filters.feedback === "positive" &&
+    history.feedbackSummary.positiveCount === 0
+  ) {
+    return false;
+  } else if (
+    filters.feedback === "negative" &&
+    history.feedbackSummary.negativeCount === 0
+  ) {
+    return false;
+  }
+
+  if (normalizedQuery) {
+    const haystack = [
+      conversation.title,
+      conversation.app.name,
+      ...appTags,
+      ...conversation.messages.map((message) => message.content),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    if (!haystack.includes(normalizedQuery)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function toWorkspaceConversationListItem(
   row: ConversationRow,
 ): WorkspaceConversationListItem {
   const conversation = toWorkspaceConversation(row);
-  const preview = buildConversationPreview(conversation.messages);
+  const preview = buildConversationHistoryMetadata(conversation.messages);
 
   return {
     id: conversation.id,
@@ -1035,6 +1131,8 @@ function toWorkspaceConversationListItem(
     pinned: conversation.pinned,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    attachmentCount: preview.attachmentCount,
+    feedbackSummary: preview.feedbackSummary,
     messageCount: preview.messageCount,
     lastMessagePreview: preview.lastMessagePreview,
     app: conversation.app,
@@ -1503,9 +1601,7 @@ async function readRecentConversationsForUser(
   user: AuthUser,
   input: WorkspaceConversationListInput,
 ): Promise<WorkspaceConversationListItem[]> {
-  const normalizedQuery = input.query?.trim() || null;
   const limit = Math.min(Math.max(input.limit ?? 12, 1), 50);
-  const searchTerm = normalizedQuery ? `%${normalizedQuery}%` : null;
 
   const rows = await database<ConversationRow[]>`
     select
@@ -1524,6 +1620,7 @@ async function readRecentConversationsForUser(
       a.kind as app_kind,
       a.status as app_status,
       a.short_code as app_short_code,
+      a.tags as app_tags,
       g.id as active_group_id,
       g.name as active_group_name,
       g.description as active_group_description,
@@ -1562,16 +1659,28 @@ async function readRecentConversationsForUser(
       and c.status <> 'deleted'
       and (${input.appId ?? null}::varchar is null or c.app_id = ${input.appId ?? null})
       and (${input.groupId ?? null}::varchar is null or c.active_group_id = ${input.groupId ?? null})
-      and (
-        ${searchTerm}::text is null
-        or c.title ilike ${searchTerm}
-        or cast(c.inputs as text) ilike ${searchTerm}
-      )
+      and (${input.status ?? null}::conversation_status is null or c.status = ${input.status ?? null})
     order by c.pinned desc, c.updated_at desc
-    limit ${limit}
   `;
 
-  return rows.map(toWorkspaceConversationListItem);
+  return rows
+    .flatMap((row) => {
+      const conversation = toWorkspaceConversation(row);
+      const appTags = normalizeStringArray(row.app_tags);
+
+      if (
+        !conversationMatchesListFilters({
+          appTags,
+          conversation,
+          filters: input,
+        })
+      ) {
+        return [];
+      }
+
+      return [toWorkspaceConversationListItem(row)];
+    })
+    .slice(0, limit);
 }
 
 async function updateConversationForUser(
@@ -2677,8 +2786,12 @@ export function createPersistentWorkspaceService(
           items: await readRecentConversationsForUser(database, user, input),
           filters: {
             appId: input.appId ?? null,
+            attachment: input.attachment ?? null,
+            feedback: input.feedback ?? null,
             groupId: input.groupId ?? null,
             query: input.query?.trim() || null,
+            status: input.status ?? null,
+            tag: input.tag?.trim() || null,
             limit: Math.min(Math.max(input.limit ?? 12, 1), 50),
           },
         },

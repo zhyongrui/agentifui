@@ -465,6 +465,11 @@ describe('apps client', () => {
                 pinned: false,
                 createdAt: '2026-03-12T10:05:00.000Z',
                 updatedAt: '2026-03-12T10:10:00.000Z',
+                attachmentCount: 1,
+                feedbackSummary: {
+                  positiveCount: 1,
+                  negativeCount: 0,
+                },
                 messageCount: 2,
                 lastMessagePreview: 'Policy Watch is now reachable...',
                 app: {
@@ -496,9 +501,13 @@ describe('apps client', () => {
               },
             ],
             filters: {
+              attachment: 'with_attachments',
               appId: 'app_policy_watch',
+              feedback: 'positive',
               groupId: 'grp_research',
               query: 'policy',
+              status: 'archived',
+              tag: 'policy',
               limit: 20,
             },
           },
@@ -507,14 +516,18 @@ describe('apps client', () => {
     );
 
     const result = await fetchWorkspaceConversationList('session-123', {
+      attachment: 'with_attachments',
       appId: 'app_policy_watch',
+      feedback: 'positive',
       groupId: 'grp_research',
       limit: 20,
       query: 'policy',
+      status: 'archived',
+      tag: 'policy',
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      '/api/gateway/workspace/conversations?appId=app_policy_watch&groupId=grp_research&q=policy&limit=20',
+      '/api/gateway/workspace/conversations?attachment=with_attachments&appId=app_policy_watch&feedback=positive&groupId=grp_research&q=policy&status=archived&tag=policy&limit=20',
       {
         method: 'GET',
         headers: {

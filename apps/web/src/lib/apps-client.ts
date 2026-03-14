@@ -3,7 +3,10 @@ import type {
   WorkspaceAppLaunchResponse,
   WorkspaceApp,
   WorkspaceCatalogResponse,
+  WorkspaceConversationListAttachmentFilter,
+  WorkspaceConversationListFeedbackFilter,
   WorkspaceConversationListResponse,
+  WorkspaceConversationListStatusFilter,
   WorkspaceConversationMessageFeedbackRequest,
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
@@ -173,16 +176,28 @@ export async function updateWorkspaceConversation(
 export async function fetchWorkspaceConversationList(
   sessionToken: string,
   input: {
+    attachment?: WorkspaceConversationListAttachmentFilter | null;
     appId?: string | null;
+    feedback?: WorkspaceConversationListFeedbackFilter | null;
     groupId?: string | null;
     limit?: number;
     query?: string | null;
+    status?: WorkspaceConversationListStatusFilter | null;
+    tag?: string | null;
   } = {}
 ): Promise<WorkspaceConversationListResponse | WorkspaceErrorResponse> {
   const params = new URLSearchParams();
 
+  if (input.attachment) {
+    params.set('attachment', input.attachment);
+  }
+
   if (input.appId) {
     params.set('appId', input.appId);
+  }
+
+  if (input.feedback) {
+    params.set('feedback', input.feedback);
   }
 
   if (input.groupId) {
@@ -191,6 +206,14 @@ export async function fetchWorkspaceConversationList(
 
   if (input.query) {
     params.set('q', input.query);
+  }
+
+  if (input.status) {
+    params.set('status', input.status);
+  }
+
+  if (input.tag) {
+    params.set('tag', input.tag);
   }
 
   if (typeof input.limit === 'number' && Number.isFinite(input.limit)) {

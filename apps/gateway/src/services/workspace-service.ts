@@ -5,6 +5,9 @@ import type {
   WorkspaceCatalog,
   WorkspaceConversationAttachment,
   WorkspaceConversation,
+  WorkspaceConversationListAttachmentFilter,
+  WorkspaceConversationListFeedbackFilter,
+  WorkspaceConversationListStatusFilter,
   WorkspaceConversationStatus,
   WorkspaceConversationMessageFeedback,
   WorkspaceConversationListItem,
@@ -87,9 +90,13 @@ type WorkspaceRunResult =
 
 type WorkspaceConversationListInput = {
   appId?: string | null;
+  attachment?: WorkspaceConversationListAttachmentFilter | null;
+  feedback?: WorkspaceConversationListFeedbackFilter | null;
   groupId?: string | null;
   limit?: number;
   query?: string | null;
+  status?: WorkspaceConversationListStatusFilter | null;
+  tag?: string | null;
 };
 
 type WorkspaceConversationUpdateInput = {
@@ -106,8 +113,12 @@ type WorkspaceConversationListResult =
         items: WorkspaceConversationListItem[];
         filters: {
           appId: string | null;
+          attachment: WorkspaceConversationListAttachmentFilter | null;
+          feedback: WorkspaceConversationListFeedbackFilter | null;
           groupId: string | null;
           query: string | null;
+          status: WorkspaceConversationListStatusFilter | null;
+          tag: string | null;
           limit: number;
         };
       };
@@ -437,11 +448,31 @@ function appendTimelineEvent(
   run.timeline = [...run.timeline, createRunTimelineEvent({ type, metadata, createdAt })];
 }
 
-function buildConversationPreview(messages: WorkspaceConversationMessage[]) {
+function buildConversationHistoryMetadata(messages: WorkspaceConversationMessage[]) {
   const lastMessage = messages[messages.length - 1];
+  let attachmentCount = 0;
+  let positiveCount = 0;
+  let negativeCount = 0;
+
+  for (const message of messages) {
+    attachmentCount += message.attachments?.length ?? 0;
+
+    if (message.feedback?.rating === 'positive') {
+      positiveCount += 1;
+    }
+
+    if (message.feedback?.rating === 'negative') {
+      negativeCount += 1;
+    }
+  }
 
   if (!lastMessage) {
     return {
+      attachmentCount,
+      feedbackSummary: {
+        positiveCount,
+        negativeCount,
+      },
       lastMessagePreview: null,
       messageCount: 0,
     };
@@ -450,9 +481,76 @@ function buildConversationPreview(messages: WorkspaceConversationMessage[]) {
   const normalized = lastMessage.content.replace(/\s+/g, ' ').trim();
 
   return {
+    attachmentCount,
+    feedbackSummary: {
+      positiveCount,
+      negativeCount,
+    },
     lastMessagePreview: normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized,
     messageCount: messages.length,
   };
+}
+
+function conversationMatchesListFilters(input: {
+  appTags: string[];
+  conversation: WorkspaceConversationRecord;
+  filters: WorkspaceConversationListInput;
+}) {
+  const { appTags, conversation, filters } = input;
+  const normalizedTag = filters.tag?.trim().toLowerCase() || null;
+  const normalizedQuery = filters.query?.trim().toLowerCase() || null;
+
+  if (filters.appId && conversation.app.id !== filters.appId) {
+    return false;
+  }
+
+  if (filters.groupId && conversation.activeGroup.id !== filters.groupId) {
+    return false;
+  }
+
+  if (filters.status && conversation.status !== filters.status) {
+    return false;
+  }
+
+  if (
+    normalizedTag &&
+    !appTags.some(tag => tag.toLowerCase() === normalizedTag)
+  ) {
+    return false;
+  }
+
+  const history = buildConversationHistoryMetadata(conversation.messages);
+
+  if (filters.attachment === 'with_attachments' && history.attachmentCount === 0) {
+    return false;
+  }
+
+  if (filters.feedback === 'any') {
+    if (history.feedbackSummary.positiveCount + history.feedbackSummary.negativeCount === 0) {
+      return false;
+    }
+  } else if (filters.feedback === 'positive' && history.feedbackSummary.positiveCount === 0) {
+    return false;
+  } else if (filters.feedback === 'negative' && history.feedbackSummary.negativeCount === 0) {
+    return false;
+  }
+
+  if (normalizedQuery) {
+    const haystack = [
+      conversation.title,
+      conversation.app.name,
+      ...appTags,
+      ...conversation.messages.map(message => message.content),
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    if (!haystack.includes(normalizedQuery)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function buildMessageFeedback(
@@ -472,7 +570,7 @@ function toWorkspaceConversationListItem(
   conversation: WorkspaceConversationRecord,
   latestRun: WorkspaceRunRecord
 ): WorkspaceConversationListItem {
-  const preview = buildConversationPreview(conversation.messages);
+  const preview = buildConversationHistoryMetadata(conversation.messages);
 
   return {
     id: conversation.id,
@@ -481,6 +579,8 @@ function toWorkspaceConversationListItem(
     pinned: conversation.pinned,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    attachmentCount: preview.attachmentCount,
+    feedbackSummary: preview.feedbackSummary,
     messageCount: preview.messageCount,
     lastMessagePreview: preview.lastMessagePreview,
     app: conversation.app,
@@ -917,7 +1017,8 @@ export function createWorkspaceService(options: {
     },
     listConversationsForUser(user, input) {
       const limit = Math.min(Math.max(input.limit ?? 12, 1), 50);
-      const normalizedQuery = input.query?.trim().toLowerCase() || null;
+      const context = getContextForUser(user);
+      const appTagsByAppId = new Map(context.apps.map(app => [app.id, app.tags]));
       const items = [...conversationsById.values()]
         .filter(
           conversation =>
@@ -930,26 +1031,14 @@ export function createWorkspaceService(options: {
             return [];
           }
 
-          if (input.appId && conversation.app.id !== input.appId) {
+          if (
+            !conversationMatchesListFilters({
+              appTags: appTagsByAppId.get(conversation.app.id) ?? [],
+              conversation,
+              filters: input,
+            })
+          ) {
             return [];
-          }
-
-          if (input.groupId && conversation.activeGroup.id !== input.groupId) {
-            return [];
-          }
-
-          if (normalizedQuery) {
-            const haystack = [
-              conversation.title,
-              conversation.app.name,
-              ...conversation.messages.map(message => message.content),
-            ]
-              .join(' ')
-              .toLowerCase();
-
-            if (!haystack.includes(normalizedQuery)) {
-              return [];
-            }
           }
 
           return [toWorkspaceConversationListItem(conversation, latestRun)];
@@ -969,8 +1058,12 @@ export function createWorkspaceService(options: {
           items,
           filters: {
             appId: input.appId ?? null,
+            attachment: input.attachment ?? null,
+            feedback: input.feedback ?? null,
             groupId: input.groupId ?? null,
-            query: normalizedQuery,
+            query: input.query?.trim() || null,
+            status: input.status ?? null,
+            tag: input.tag?.trim() || null,
             limit,
           },
         },

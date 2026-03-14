@@ -6,7 +6,10 @@ import type {
   WorkspaceAppLaunchRequest,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceConversationListAttachmentFilter,
+  WorkspaceConversationListFeedbackFilter,
   WorkspaceConversationListResponse,
+  WorkspaceConversationListStatusFilter,
   WorkspaceConversationMessageFeedbackRequest,
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
@@ -75,6 +78,24 @@ function isMessageFeedbackRating(value: unknown): value is 'positive' | 'negativ
 
 function isConversationStatus(value: unknown): value is WorkspaceConversationStatus {
   return value === 'active' || value === 'archived' || value === 'deleted';
+}
+
+function isConversationListStatusFilter(
+  value: unknown,
+): value is WorkspaceConversationListStatusFilter {
+  return value === 'active' || value === 'archived';
+}
+
+function isConversationListAttachmentFilter(
+  value: unknown,
+): value is WorkspaceConversationListAttachmentFilter {
+  return value === 'with_attachments';
+}
+
+function isConversationListFeedbackFilter(
+  value: unknown,
+): value is WorkspaceConversationListFeedbackFilter {
+  return value === 'any' || value === 'positive' || value === 'negative';
 }
 
 function readSingleQueryValue(value: unknown): string | null {
@@ -349,32 +370,67 @@ export async function registerWorkspaceRoutes(
     }
 
     const query = (request.query ?? {}) as {
+      attachment?: unknown;
       appId?: unknown;
+      feedback?: unknown;
       groupId?: unknown;
       limit?: unknown;
       q?: unknown;
+      status?: unknown;
+      tag?: unknown;
     };
+    const attachmentValue = readSingleQueryValue(query.attachment);
     const appId = readSingleQueryValue(query.appId);
+    const feedbackValue = readSingleQueryValue(query.feedback);
     const groupId = readSingleQueryValue(query.groupId);
     const limitValue = readSingleQueryValue(query.limit);
     const searchQuery = readSingleQueryValue(query.q);
+    const statusValue = readSingleQueryValue(query.status);
+    const tag = readSingleQueryValue(query.tag);
     const limit = limitValue
       ? Number.parseInt(limitValue, 10)
       : undefined;
+    const attachment =
+      attachmentValue === null
+        ? null
+        : isConversationListAttachmentFilter(attachmentValue)
+          ? attachmentValue
+          : undefined;
+    const feedback =
+      feedbackValue === null
+        ? null
+        : isConversationListFeedbackFilter(feedbackValue)
+          ? feedbackValue
+          : undefined;
+    const status =
+      statusValue === null
+        ? null
+        : isConversationListStatusFilter(statusValue)
+          ? statusValue
+          : undefined;
 
-    if (limitValue && (!Number.isFinite(limit) || (limit ?? 0) <= 0)) {
+    if (
+      (limitValue && (!Number.isFinite(limit) || (limit ?? 0) <= 0)) ||
+      (attachmentValue !== null && attachment === undefined) ||
+      (feedbackValue !== null && feedback === undefined) ||
+      (statusValue !== null && status === undefined)
+    ) {
       reply.code(400);
       return buildErrorResponse(
         'WORKSPACE_INVALID_PAYLOAD',
-        'Workspace conversation history requires a positive numeric limit when provided.'
+        'Workspace conversation history requires valid attachment, feedback, status, and numeric limit filters when provided.'
       );
     }
 
     const result = await workspaceService.listConversationsForUser(access.user, {
+      attachment,
       appId,
+      feedback,
       groupId,
       limit,
       query: searchQuery,
+      status,
+      tag,
     });
 
     if (!result.ok) {
