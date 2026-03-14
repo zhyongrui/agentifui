@@ -34,6 +34,7 @@ import {
 import { MainSectionNav } from "../../../../components/main-section-nav";
 import { ChatMarkdown } from "../../../../components/chat-markdown";
 import { ConversationSharePanel } from "../../../../components/conversation-share-panel";
+import { WorkspaceArtifactLinkList } from "../../../../components/workspace-artifacts";
 import {
   fetchWorkspaceCatalog,
   fetchWorkspaceConversation,
@@ -1575,6 +1576,17 @@ export default function ConversationPage() {
                     </div>
                   </div>
                 ) : null}
+                {message.artifacts && message.artifacts.length > 0 ? (
+                  <div className="chat-artifact-section">
+                    <span className="chat-suggested-prompts-label">
+                      Artifacts
+                    </span>
+                    <WorkspaceArtifactLinkList
+                      artifacts={message.artifacts}
+                      conversationId={conversation.id}
+                    />
+                  </div>
+                ) : null}
               </article>
             ))}
           </div>
@@ -1737,6 +1749,14 @@ export default function ConversationPage() {
                     </p>
                   </article>
                   <article className="chat-meta-card">
+                    <span>Artifacts</span>
+                    <strong>{selectedRun.artifacts.length}</strong>
+                    <p>
+                      Structured outputs stay separately queryable from the
+                      transcript summary boundary.
+                    </p>
+                  </article>
+                  <article className="chat-meta-card">
                     <span>Timeline events</span>
                     <strong>{selectedRun.timeline.length}</strong>
                     <p>
@@ -1801,6 +1821,23 @@ export default function ConversationPage() {
                         </span>
                       </div>
                       <p>{attachmentsToText(replayAttachments).join("\n")}</p>
+                    </article>
+                  ) : null}
+                  {selectedRun.artifacts.length > 0 ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Artifacts</span>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <WorkspaceArtifactLinkList
+                        artifacts={selectedRun.artifacts}
+                        conversationId={conversation.id}
+                        runId={selectedRun.id}
+                      />
                     </article>
                   ) : null}
                   <article className="chat-bubble assistant">

@@ -21,6 +21,7 @@ import type {
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceArtifactResponse,
   WorkspaceSharedConversationResponse,
   WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
@@ -321,6 +322,16 @@ export async function fetchWorkspaceRun(
   runId: string
 ): Promise<WorkspaceRunResponse | WorkspaceErrorResponse> {
   return fetchWorkspaceJson<WorkspaceRunResponse>(`/workspace/runs/${runId}`, {
+    method: 'GET',
+    sessionToken,
+  });
+}
+
+export async function fetchWorkspaceArtifact(
+  sessionToken: string,
+  artifactId: string
+): Promise<WorkspaceArtifactResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceArtifactResponse>(`/workspace/artifacts/${artifactId}`, {
     method: 'GET',
     sessionToken,
   });

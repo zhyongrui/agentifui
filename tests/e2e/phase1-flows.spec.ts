@@ -176,7 +176,9 @@ async function logout(page: Page) {
 }
 
 async function expectAppsWorkspace(page: Page) {
-  await expect(page).toHaveURL(/\/apps$/);
+  await expect(page).toHaveURL(/\/apps$/, {
+    timeout: 60_000,
+  });
   await expect(
     page.getByRole("heading", { name: "Apps workspace" }),
   ).toBeVisible({
@@ -242,6 +244,12 @@ type SeedWorkspaceConversationInput = {
   pinned?: boolean;
   status?: "active" | "archived";
   title?: string;
+};
+
+type SeedWorkspaceArtifactInput = {
+  artifactContent?: string;
+  artifactTitle: string;
+  prompt: string;
 };
 
 async function seedWorkspaceConversation(
@@ -394,6 +402,150 @@ async function seedWorkspaceConversation(
     conversationId,
     runId,
     traceId,
+  };
+}
+
+async function seedWorkspaceArtifactConversation(
+  email: string,
+  input: SeedWorkspaceArtifactInput,
+) {
+  const createdAt = new Date().toISOString();
+  const artifactId = `artifact_${randomUUID()}`;
+  const assistantContent =
+    input.artifactContent ??
+    "Policy Watch is now reachable through the AgentifUI gateway.";
+  const artifact = {
+    id: artifactId,
+    title: input.artifactTitle,
+    kind: "markdown",
+    source: "assistant_response",
+    status: "draft",
+    createdAt,
+    updatedAt: createdAt,
+    summary: "Draft artifact generated from the seeded assistant response.",
+    mimeType: "text/markdown",
+    sizeBytes: Buffer.byteLength(assistantContent, "utf8"),
+    content: assistantContent,
+  } as const;
+  const seeded = await seedWorkspaceConversation(email, {
+    assistantContent,
+    messageHistory: [
+      {
+        id: `msg_${randomUUID()}`,
+        role: "user",
+        content: input.prompt,
+        status: "completed",
+        createdAt,
+      },
+      {
+        id: `msg_${randomUUID()}`,
+        role: "assistant",
+        content: assistantContent,
+        status: "completed",
+        createdAt,
+        artifacts: [
+          {
+            id: artifact.id,
+            title: artifact.title,
+            kind: artifact.kind,
+            source: artifact.source,
+            status: artifact.status,
+            createdAt: artifact.createdAt,
+            updatedAt: artifact.updatedAt,
+            summary: artifact.summary,
+            mimeType: artifact.mimeType,
+            sizeBytes: artifact.sizeBytes,
+          },
+        ],
+      },
+    ],
+  });
+  const database = postgres(DATABASE_URL, {
+    max: 1,
+    prepare: false,
+  });
+
+  try {
+    const [user] = await database<{
+      id: string;
+      tenant_id: string;
+    }[]>`
+      select id, tenant_id
+      from users
+      where email = ${email}
+      limit 1
+    `;
+
+    if (!user) {
+      throw new Error(`expected user for ${email}`);
+    }
+
+    await database.begin(async (sql) => {
+      await sql`
+        update runs
+        set outputs = ${JSON.stringify({
+          assistant: {
+            content: assistantContent,
+            finishReason: "stop",
+          },
+          usage: {
+            promptTokens: 10,
+            completionTokens: 12,
+            totalTokens: 22,
+          },
+          artifacts: [artifact],
+        })}::jsonb
+        where id = ${seeded.runId}
+      `;
+
+      await sql`
+        insert into workspace_artifacts (
+          id,
+          tenant_id,
+          user_id,
+          conversation_id,
+          run_id,
+          sequence,
+          title,
+          kind,
+          source,
+          status,
+          summary,
+          mime_type,
+          size_bytes,
+          payload,
+          created_at,
+          updated_at
+        )
+        values (
+          ${artifact.id},
+          ${user.tenant_id},
+          ${user.id},
+          ${seeded.conversationId},
+          ${seeded.runId},
+          0,
+          ${artifact.title},
+          'markdown',
+          'assistant_response',
+          'draft',
+          ${artifact.summary},
+          ${artifact.mimeType},
+          ${artifact.sizeBytes},
+          ${JSON.stringify({
+            content: artifact.content,
+          })}::jsonb,
+          ${artifact.createdAt}::timestamptz,
+          ${artifact.updatedAt}::timestamptz
+        )
+      `;
+    });
+  } finally {
+    await database.end({ timeout: 5 });
+  }
+
+  return {
+    ...seeded,
+    artifactId,
   };
 }
 
@@ -1110,6 +1262,69 @@ test("chat history lists recent conversations and links back to timeline-aware r
   await page.getByRole("link", { name: "Open conversation" }).first().click();
   await expectConversationSurface(page, "Policy Watch");
   await expect(page.getByText("Run timeline")).toBeVisible();
+});
+
+test("artifact links open a persisted preview from both transcript and run replay", async ({
+  page,
+}) => {
+  const email = uniqueEmail("artifact-preview");
+  const prompt = "Artifact preview dorm policy note";
+
+  await register(page, {
+    email,
+    displayName: "Artifact Preview User",
+  });
+  await login(page, {
+    email,
+  });
+  await expectAppsWorkspace(page);
+
+  const { conversationId } = await seedWorkspaceArtifactConversation(email, {
+    artifactTitle: prompt,
+    prompt,
+  });
+
+  await page.goto(`/chat/${conversationId}`);
+  await expectConversationSurface(page, "Policy Watch");
+
+  const conversationPanel = page.locator("section.chat-panel").filter({
+    has: page.getByRole("heading", { name: "Conversation" }),
+  });
+  const runHistoryPanel = page.locator("section.chat-panel").filter({
+    has: page.getByRole("heading", { name: "Run history" }),
+  });
+
+  await expect(conversationPanel.locator(".artifact-link-card")).toHaveCount(1);
+  await expect(runHistoryPanel.locator(".artifact-link-card")).toHaveCount(1);
+
+  await conversationPanel.locator(".artifact-link-card").first().click();
+  await expect(page).toHaveURL(/\/chat\/artifacts\/artifact_/);
+  await expect(page.getByRole("heading", { name: prompt })).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(
+    page.getByRole("heading", { name: "Artifact preview", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".workspace-badges").getByText("markdown"),
+  ).toBeVisible();
+  await expect(
+    page.locator(".workspace-badges").getByText("draft"),
+  ).toBeVisible();
+  await expect(
+    page.locator(".workspace-badges").getByText("assistant_response"),
+  ).toBeVisible();
+  await expect(
+    page.locator(".artifact-preview-surface").getByText(
+      "Policy Watch is now reachable through the AgentifUI gateway.",
+    ),
+  ).toBeVisible();
+
+  await page.getByRole("link", { name: "Back to conversation" }).click();
+  await expectConversationSurface(page, "Policy Watch");
+  await expect(
+    page.locator(".run-history-detail .artifact-link-card"),
+  ).toHaveCount(1);
 });
 
 test("chat history and detail views manage persisted conversations", async ({

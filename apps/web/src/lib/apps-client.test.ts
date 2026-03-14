@@ -4,6 +4,7 @@ import {
   fetchWorkspaceConversation,
   fetchWorkspaceConversationList,
   fetchWorkspaceConversationRuns,
+  fetchWorkspaceArtifact,
   fetchWorkspaceCatalog,
   fetchWorkspaceRun,
   launchWorkspaceApp,
@@ -691,6 +692,49 @@ describe('apps client', () => {
             type: 'run_created',
           },
         ],
+      },
+    });
+  });
+
+  it('loads a single workspace artifact from the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'artifact-456',
+            title: 'Dorm policy draft',
+            kind: 'markdown',
+            source: 'assistant_response',
+            status: 'draft',
+            createdAt: '2026-03-14T10:10:00.000Z',
+            updatedAt: '2026-03-14T10:10:00.000Z',
+            summary: 'Dorm policy draft summary',
+            mimeType: 'text/markdown',
+            sizeBytes: 120,
+            content: '# Dorm policy',
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceArtifact('session-123', 'artifact-456');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/artifacts/artifact-456', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      body: undefined,
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        id: 'artifact-456',
+        kind: 'markdown',
+        content: '# Dorm policy',
       },
     });
   });

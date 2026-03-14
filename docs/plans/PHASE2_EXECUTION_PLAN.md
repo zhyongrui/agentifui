@@ -96,7 +96,8 @@ Execution status:
 | completed | `P2-A6` | `/chat` 已支持按 tag / attachment / feedback / status 检索历史        |
 | completed | `P2-B1` | artifact DTO、来源和消息/run/chat 绑定已冻结                          |
 | completed | `P2-B2` | artifact 已写入独立表，并可通过 workspace route 回读                  |
-| active    | `P2-B3` | 下一项，做 artifact 基础预览页和 run/message 入口                     |
+| completed | `P2-B3` | `/chat/artifacts/[artifactId]` 已上线，消息与 run 入口已接入          |
+| active    | `P2-B4` | 下一项，补 artifact 下载、共享访问边界和 route 鉴权语义               |
 
 ## 5. First Batch Definition
 
@@ -127,7 +128,8 @@ Current batch status:
 - `P2-A6` complete
 - `P2-B1` complete
 - `P2-B2` complete
-- the active follow-on item is `P2-B3`
+- `P2-B3` complete
+- the active follow-on item is `P2-B4`
 
 ## 6. Detailed Execution Notes
 
@@ -253,6 +255,27 @@ Current batch status:
 - testing closeout:
   - route tests should resolve the artifact id from a completion and round-trip it through `/workspace/artifacts/:artifactId`
   - persistence tests should assert both the `workspace_artifacts` row and the route response after restart
+
+### P2-B3 Artifact 预览页
+
+- current UI surface:
+  - `/chat/[conversationId]` now renders artifact summary cards on completed assistant messages
+  - selected run replay now renders the same artifact entry cards from `run.artifacts`
+  - `/chat/artifacts/[artifactId]` renders the persisted artifact payload with support for `markdown`, `text`, `json`, `table`, and `link`
+- current route/client contract:
+  - the preview page reads `GET /workspace/artifacts/:artifactId` through `fetchWorkspaceArtifact()`
+  - preview deep links carry `conversationId` and optional `runId` as query params so the user can return to the thread context
+  - shared transcripts intentionally do not deep-link into artifact preview yet
+    - `P2-B4` owns the shared/download access model
+- browser-testing guardrails:
+  - the artifact preview browser flow should seed a persisted conversation plus `workspace_artifacts` row directly in Postgres
+    - launching through `/workspace/apps/launch` can exhaust quota before the preview assertions even start
+    - the helper is `seedWorkspaceArtifactConversation(email, ...)` in `tests/e2e/phase1-flows.spec.ts`
+  - `expectAppsWorkspace()` now uses a `60s` URL timeout instead of Playwright's default `5s`
+    - on this host, auth redirects can lag behind the successful `/auth/login` response under heavy DB or memory pressure
+  - this host's Playwright runs are sensitive to system pressure
+    - repeated failures can drift between `browser.newContext()` timeouts and slow post-login redirects on unrelated tests
+    - rerun the wrapper before assuming a regression in artifact preview itself
 
 ### Operational Continuity
 
