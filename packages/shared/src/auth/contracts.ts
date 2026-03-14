@@ -65,6 +65,8 @@ export type AuthAuditAction =
   | 'auth.mfa.disabled'
   | 'workspace.preferences.updated'
   | 'workspace.app.launched'
+  | 'workspace.conversation.updated'
+  | 'workspace.conversation.deleted'
   | 'workspace.conversation_share.created'
   | 'workspace.conversation_share.revoked'
   | 'workspace.conversation_share.accessed'

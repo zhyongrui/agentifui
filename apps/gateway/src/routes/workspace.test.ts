@@ -7,6 +7,7 @@ import type {
   WorkspaceConversationShareResponse,
   WorkspaceConversationSharesResponse,
   WorkspaceConversationUploadResponse,
+  WorkspaceConversationUpdateResponse,
   WorkspaceConversationRunsResponse,
   WorkspacePreferencesResponse,
   WorkspaceSharedConversationResponse,
@@ -460,6 +461,7 @@ describe("workspace routes", () => {
           id: conversationId,
           title: "Policy Watch",
           status: "active",
+          pinned: false,
           createdAt: expect.any(String),
           updatedAt: expect.any(String),
           launchId: body.data.id,
@@ -540,6 +542,210 @@ describe("workspace routes", () => {
           totalTokens: 0,
         },
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("renames, pins, archives, and deletes conversations through the workspace route", async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include a conversation id");
+      }
+
+      const update = await app.inject({
+        method: "PUT",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          title: "Policy follow-up",
+          pinned: true,
+          status: "archived",
+        },
+      });
+
+      expect(update.statusCode).toBe(200);
+      expect(update.json()).toEqual({
+        ok: true,
+        data: {
+          id: conversationId,
+          title: "Policy follow-up",
+          status: "archived",
+          pinned: true,
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+          launchId: launchBody.data.id,
+          app: expect.objectContaining({
+            id: "app_policy_watch",
+          }),
+          activeGroup: expect.objectContaining({
+            id: "grp_research",
+          }),
+          messages: [],
+          run: expect.objectContaining({
+            id: launchBody.data.runId,
+          }),
+        },
+      } satisfies WorkspaceConversationUpdateResponse);
+
+      const refreshedConversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(refreshedConversation.statusCode).toBe(200);
+      expect(
+        (refreshedConversation.json() as WorkspaceConversationResponse).data,
+      ).toMatchObject({
+        id: conversationId,
+        title: "Policy follow-up",
+        status: "archived",
+        pinned: true,
+      });
+
+      const history = await app.inject({
+        method: "GET",
+        url: "/workspace/conversations?q=follow-up",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(history.statusCode).toBe(200);
+      expect(
+        (history.json() as WorkspaceConversationListResponse).data.items,
+      ).toEqual([
+        expect.objectContaining({
+          id: conversationId,
+          title: "Policy follow-up",
+          status: "archived",
+          pinned: true,
+        }),
+      ]);
+
+      const remove = await app.inject({
+        method: "PUT",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          status: "deleted",
+        },
+      });
+
+      expect(remove.statusCode).toBe(200);
+      expect(remove.json()).toEqual({
+        ok: true,
+        data: expect.objectContaining({
+          id: conversationId,
+          status: "deleted",
+          pinned: true,
+        }),
+      } satisfies WorkspaceConversationUpdateResponse);
+
+      const deletedConversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(deletedConversation.statusCode).toBe(404);
+
+      const deletedRunList = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/runs`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(deletedRunList.statusCode).toBe(404);
+
+      const historyAfterDelete = await app.inject({
+        method: "GET",
+        url: "/workspace/conversations?q=follow-up",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(historyAfterDelete.statusCode).toBe(200);
+      expect(
+        (historyAfterDelete.json() as WorkspaceConversationListResponse).data
+          .items,
+      ).toEqual([]);
+
+      expect(
+        await auditService.listEvents({ actorUserId: login.data.user.id }),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.conversation.updated",
+            entityType: "conversation",
+            entityId: conversationId,
+            payload: expect.objectContaining({
+              title: "Policy follow-up",
+              status: "archived",
+              pinned: true,
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.conversation.deleted",
+            entityType: "conversation",
+            entityId: conversationId,
+            payload: expect.objectContaining({
+              status: "deleted",
+              pinned: true,
+            }),
+          }),
+        ]),
+      );
     } finally {
       await app.close();
     }

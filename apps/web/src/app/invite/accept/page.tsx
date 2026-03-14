@@ -4,7 +4,7 @@ import type {
   AuthErrorResponse,
   InvitationAcceptResponse,
 } from '@agentifui/shared/auth';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import type { FormEvent } from 'react';
 import { Suspense, useEffect, useState } from 'react';
 
@@ -17,7 +17,6 @@ function isAuthErrorResponse(
 }
 
 function InviteAcceptPageContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [token, setToken] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -55,7 +54,7 @@ function InviteAcceptPageContent() {
         return;
       }
 
-      router.push('/login?activated=1');
+      window.location.assign('/login?activated=1');
     } catch {
       setError('Unable to reach the auth gateway. Check the gateway server and try again.');
     } finally {

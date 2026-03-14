@@ -12,6 +12,8 @@ import type {
   WorkspaceConversationSharesResponse,
   WorkspaceConversationUploadRequest,
   WorkspaceConversationUploadResponse,
+  WorkspaceConversationUpdateRequest,
+  WorkspaceConversationUpdateResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
@@ -145,6 +147,21 @@ export async function updateWorkspaceConversationMessageFeedback(
 ): Promise<WorkspaceConversationMessageFeedbackResponse | WorkspaceErrorResponse> {
   return fetchWorkspaceJson<WorkspaceConversationMessageFeedbackResponse>(
     `/workspace/conversations/${conversationId}/messages/${messageId}/feedback`,
+    {
+      method: 'PUT',
+      sessionToken,
+      body: input,
+    }
+  );
+}
+
+export async function updateWorkspaceConversation(
+  sessionToken: string,
+  conversationId: string,
+  input: WorkspaceConversationUpdateRequest
+): Promise<WorkspaceConversationUpdateResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationUpdateResponse>(
+    `/workspace/conversations/${conversationId}`,
     {
       method: 'PUT',
       sessionToken,

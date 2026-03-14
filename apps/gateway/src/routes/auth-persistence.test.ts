@@ -1106,6 +1106,7 @@ describe.sequential('persistent auth runtime', () => {
             id: conversationId,
             title: 'Policy Watch',
             status: 'active',
+            pinned: false,
             createdAt: expect.any(String),
             updatedAt: expect.any(String),
             launchId: launchBody.data.id,
@@ -1433,6 +1434,183 @@ describe.sequential('persistent auth runtime', () => {
             }),
           ])
         );
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'persists conversation organization updates across restarts and hides deleted records',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Developer',
+          },
+        });
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'developer@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+          user: {
+            id: string;
+          };
+        };
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const conversationId = (launch.json() as WorkspaceAppLaunchResponse).data.conversationId;
+
+        if (!conversationId) {
+          throw new Error('expected launch payload to include a conversation id');
+        }
+
+        const update = await app.inject({
+          method: 'PUT',
+          url: `/workspace/conversations/${conversationId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            title: 'Policy follow-up',
+            pinned: true,
+            status: 'archived',
+          },
+        });
+
+        expect(update.statusCode).toBe(200);
+        expect((update.json() as WorkspaceConversationResponse).data).toMatchObject({
+          id: conversationId,
+          title: 'Policy follow-up',
+          status: 'archived',
+          pinned: true,
+        });
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const [conversationRow] = await runtimeDatabase<{
+            pinned: boolean;
+            status: string;
+            title: string;
+          }[]>`
+            select title, status, pinned
+            from conversations
+            where id = ${conversationId}
+            limit 1
+          `;
+
+          expect(conversationRow).toEqual({
+            title: 'Policy follow-up',
+            status: 'archived',
+            pinned: true,
+          });
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+        let restartedAppClosed = false;
+
+        try {
+          const history = await restartedApp.inject({
+            method: 'GET',
+            url: '/workspace/conversations?q=follow-up',
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(history.statusCode).toBe(200);
+          expect((history.json() as WorkspaceConversationListResponse).data.items).toEqual([
+            expect.objectContaining({
+              id: conversationId,
+              title: 'Policy follow-up',
+              status: 'archived',
+              pinned: true,
+            }),
+          ]);
+
+          const remove = await restartedApp.inject({
+            method: 'PUT',
+            url: `/workspace/conversations/${conversationId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+            payload: {
+              status: 'deleted',
+            },
+          });
+
+          expect(remove.statusCode).toBe(200);
+
+          const lookupAfterDelete = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/conversations/${conversationId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(lookupAfterDelete.statusCode).toBe(404);
+
+          const historyAfterDelete = await restartedApp.inject({
+            method: 'GET',
+            url: '/workspace/conversations?q=follow-up',
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(historyAfterDelete.statusCode).toBe(200);
+          expect(
+            (historyAfterDelete.json() as WorkspaceConversationListResponse).data.items,
+          ).toEqual([]);
+        } finally {
+          if (!restartedAppClosed) {
+            await restartedApp.close();
+            restartedAppClosed = true;
+          }
+        }
       } finally {
         if (!appClosed) {
           await app.close();

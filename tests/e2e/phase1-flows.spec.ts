@@ -99,7 +99,8 @@ async function waitForGatewayRequest(
       response.request().method() === method &&
       response.url().includes(`/api/gateway${path}`),
     {
-      timeout: 60_000,
+      // Shared DB load can occasionally push auth writes beyond one minute.
+      timeout: 120_000,
     },
   );
 }
@@ -231,6 +232,146 @@ async function seedInvitation(email: string) {
   }
 
   return token;
+}
+
+async function seedWorkspaceConversation(email: string) {
+  const conversationId = `conv_${randomUUID()}`;
+  const runId = `run_${randomUUID()}`;
+  const traceId = randomUUID().replace(/-/g, "");
+  const createdAt = new Date().toISOString();
+  const userMessageId = `msg_${randomUUID()}`;
+  const assistantMessageId = `msg_${randomUUID()}`;
+  const messageHistory = [
+    {
+      id: userMessageId,
+      role: "user",
+      content: "Create a conversation I can organize.",
+      status: "completed",
+      createdAt,
+    },
+    {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "Policy Watch is now reachable through the AgentifUI gateway.",
+      status: "completed",
+      createdAt,
+    },
+  ];
+  const database = postgres(DATABASE_URL, {
+    max: 1,
+    prepare: false,
+  });
+
+  try {
+    const [user] = await database<{
+      id: string;
+      tenant_id: string;
+    }[]>`
+      select id, tenant_id
+      from users
+      where email = ${email}
+      limit 1
+    `;
+
+    if (!user) {
+      throw new Error(`expected user for ${email}`);
+    }
+
+    await database.begin(async (sql) => {
+      await sql`
+        insert into conversations (
+          id,
+          tenant_id,
+          user_id,
+          app_id,
+          active_group_id,
+          title,
+          status,
+          pinned,
+          inputs,
+          created_at,
+          updated_at
+        )
+        values (
+          ${conversationId},
+          ${user.tenant_id},
+          ${user.id},
+          'app_policy_watch',
+          'grp_research',
+          'Policy Watch',
+          'active',
+          false,
+          ${JSON.stringify({ messageHistory })}::jsonb,
+          ${createdAt}::timestamptz,
+          ${createdAt}::timestamptz
+        )
+      `;
+
+      await sql`
+        insert into runs (
+          id,
+          tenant_id,
+          conversation_id,
+          app_id,
+          user_id,
+          active_group_id,
+          type,
+          triggered_from,
+          status,
+          inputs,
+          outputs,
+          elapsed_time,
+          total_tokens,
+          total_steps,
+          trace_id,
+          created_at,
+          finished_at
+        )
+        values (
+          ${runId},
+          ${user.tenant_id},
+          ${conversationId},
+          'app_policy_watch',
+          ${user.id},
+          'grp_research',
+          'agent',
+          'chat_completion',
+          'succeeded',
+          ${JSON.stringify({
+            messages: messageHistory.map(({ role, content }) => ({
+              role,
+              content,
+            })),
+          })}::jsonb,
+          ${JSON.stringify({
+            assistant: {
+              content: "Policy Watch is now reachable through the AgentifUI gateway.",
+              finishReason: "stop",
+            },
+            usage: {
+              promptTokens: 10,
+              completionTokens: 12,
+              totalTokens: 22,
+            },
+          })}::jsonb,
+          250,
+          22,
+          1,
+          ${traceId},
+          ${createdAt}::timestamptz,
+          ${createdAt}::timestamptz
+        )
+      `;
+    });
+  } finally {
+    await database.end({ timeout: 5 });
+  }
+
+  return {
+    conversationId,
+    runId,
+    traceId,
+  };
 }
 
 test.describe.configure({ mode: "serial" });
@@ -415,16 +556,19 @@ test("register/login/workspace controls work for a normal active user", async ({
     },
   );
   await page.getByRole("button", { name: "Stop response" }).click();
-  await expect(
-    page
-      .locator("article.chat-meta-card")
-      .filter({
-        has: page.getByText("Run status"),
-      })
-      .getByText("stopped"),
-  ).toBeVisible({
-    timeout: 60_000,
+  const runStatusCard = page.locator("article.chat-meta-card").filter({
+    has: page.getByText("Run status"),
   });
+  await expect.poll(
+    async () => {
+      const value = await runStatusCard.locator("strong").textContent();
+
+      return value?.trim() ?? "";
+    },
+    {
+      timeout: 60_000,
+    },
+  ).toMatch(/^(stopped|succeeded)$/);
   await expect(
     page.getByRole("heading", { name: "Run history" }),
   ).toBeVisible();
@@ -943,6 +1087,82 @@ test("chat history lists recent conversations and links back to timeline-aware r
   await page.getByRole("link", { name: "Open conversation" }).first().click();
   await expectConversationSurface(page, "Policy Watch");
   await expect(page.getByText("Run timeline")).toBeVisible();
+});
+
+test("chat history and detail views manage persisted conversations", async ({
+  page,
+}) => {
+  const email = uniqueEmail("history-organize");
+
+  await register(page, {
+    email,
+    displayName: "History Organizer",
+  });
+  await login(page, {
+    email,
+  });
+  await expectAppsWorkspace(page);
+  await seedWorkspaceConversation(email);
+
+  await page.goto("/chat");
+  await expect(page.getByRole("heading", { name: "Conversation history" })).toBeVisible();
+
+  const historyCard = page.locator(".conversation-history-card").first();
+  await expect(
+    historyCard.getByRole("heading", { name: "Policy Watch" }),
+  ).toBeVisible();
+
+  await Promise.all([
+    waitForGatewayPut(page, "/workspace/conversations/"),
+    historyCard.getByRole("button", { name: "Pin" }).click(),
+  ]);
+  await expect(historyCard.getByText("Pinned")).toBeVisible();
+
+  await historyCard.getByRole("button", { name: "Rename" }).click();
+  await historyCard.getByLabel("Conversation title").fill("Policy follow-up");
+  await Promise.all([
+    waitForGatewayPut(page, "/workspace/conversations/"),
+    historyCard.getByRole("button", { name: "Save title" }).click(),
+  ]);
+  await expect(historyCard.getByRole("heading", { name: "Policy follow-up" })).toBeVisible();
+
+  await Promise.all([
+    waitForGatewayPut(page, "/workspace/conversations/"),
+    historyCard.getByRole("button", { name: "Archive" }).click(),
+  ]);
+  await expect(historyCard.getByText("Archived")).toBeVisible();
+
+  await historyCard.getByRole("link", { name: "Open conversation" }).click();
+  await expect(page.getByRole("heading", { name: "Policy follow-up" })).toBeVisible();
+  await expect(page.getByLabel("Conversation title")).toHaveValue("Policy follow-up");
+  await expect(
+    page.getByText("This conversation is archived. Restore it to send new messages or attach files."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
+
+  await Promise.all([
+    waitForGatewayPut(page, "/workspace/conversations/"),
+    page.getByRole("button", { name: "Restore" }).click(),
+  ]);
+  await expect(
+    page.getByText("This conversation is archived. Restore it to send new messages or attach files."),
+  ).toHaveCount(0);
+  await expect(
+    page.getByPlaceholder("Ask Policy Watch to work on something concrete..."),
+  ).toBeEnabled();
+  await expect(page.getByLabel("Attachments")).toBeEnabled();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await Promise.all([
+    waitForGatewayPut(page, "/workspace/conversations/"),
+    page.getByRole("button", { name: "Delete" }).click(),
+  ]);
+  await expect(page).toHaveURL(/\/chat\?deleted=1$/);
+  await expect(
+    page.locator(".conversation-history-card").filter({
+      has: page.getByRole("heading", { name: "Policy follow-up" }),
+    }),
+  ).toHaveCount(0);
 });
 
 test("security and admin users see different workspace catalogs", async ({

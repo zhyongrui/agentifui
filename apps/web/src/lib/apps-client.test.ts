@@ -7,6 +7,7 @@ import {
   fetchWorkspaceCatalog,
   fetchWorkspaceRun,
   launchWorkspaceApp,
+  updateWorkspaceConversation,
   updateWorkspaceConversationMessageFeedback,
   updateWorkspacePreferences,
 } from './apps-client.js';
@@ -254,6 +255,7 @@ describe('apps client', () => {
             id: 'conv-123',
             title: 'Market Brief',
             status: 'active',
+            pinned: false,
             createdAt: '2026-03-12T10:05:00.000Z',
             updatedAt: '2026-03-12T10:05:00.000Z',
             launchId: 'launch-123',
@@ -303,6 +305,7 @@ describe('apps client', () => {
       ok: true,
       data: {
         id: 'conv-123',
+        pinned: false,
         run: {
           traceId: 'trace-123',
         },
@@ -371,6 +374,82 @@ describe('apps client', () => {
     });
   });
 
+  it('updates conversation metadata through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'conv-123',
+            title: 'Policy follow-up',
+            status: 'archived',
+            pinned: true,
+            createdAt: '2026-03-12T10:05:00.000Z',
+            updatedAt: '2026-03-13T10:05:00.000Z',
+            launchId: 'launch-123',
+            app: {
+              id: 'app_policy_watch',
+              slug: 'policy-watch',
+              name: 'Policy Watch',
+              summary: 'summary',
+              kind: 'governance',
+              status: 'ready',
+              shortCode: 'PW',
+            },
+            activeGroup: {
+              id: 'grp_research',
+              name: 'Research Lab',
+              description: 'desc',
+            },
+            messages: [],
+            run: {
+              id: 'run-123',
+              type: 'agent',
+              status: 'succeeded',
+              triggeredFrom: 'chat_completion',
+              traceId: 'trace-123',
+              createdAt: '2026-03-12T10:05:00.000Z',
+              finishedAt: '2026-03-12T10:10:00.000Z',
+              elapsedTime: 5000,
+              totalTokens: 42,
+              totalSteps: 1,
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await updateWorkspaceConversation('session-123', 'conv-123', {
+      title: 'Policy follow-up',
+      status: 'archived',
+      pinned: true,
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/conversations/conv-123', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: 'Policy follow-up',
+        status: 'archived',
+        pinned: true,
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        id: 'conv-123',
+        title: 'Policy follow-up',
+        status: 'archived',
+        pinned: true,
+      },
+    });
+  });
+
   it('loads filtered conversation history from the gateway proxy', async () => {
     vi.stubGlobal(
       'fetch',
@@ -383,6 +462,7 @@ describe('apps client', () => {
                 id: 'conv-123',
                 title: 'Policy Watch',
                 status: 'active',
+                pinned: false,
                 createdAt: '2026-03-12T10:05:00.000Z',
                 updatedAt: '2026-03-12T10:10:00.000Z',
                 messageCount: 2,

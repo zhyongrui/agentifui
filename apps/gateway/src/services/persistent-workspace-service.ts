@@ -10,6 +10,7 @@ import {
   type WorkspaceConversationListItem,
   type WorkspaceConversationShare,
   type WorkspaceConversationMessage,
+  type WorkspaceConversationStatus,
   type WorkspaceGroup,
   type WorkspaceMessageFeedbackRating,
   type WorkspacePreferences,
@@ -40,6 +41,7 @@ import type {
   WorkspaceConversationMessageFeedbackUpdateInput,
   WorkspaceConversationListInput,
   WorkspaceConversationListResult,
+  WorkspaceConversationUpdateInput,
   WorkspaceConversationShareCreateInput,
   WorkspaceConversationShareResult,
   WorkspaceConversationShareRevokeInput,
@@ -129,6 +131,7 @@ type ConversationRow = {
   created_at: Date | string;
   id: string;
   launch_id: string | null;
+  pinned: boolean;
   run_created_at: Date | string;
   run_elapsed_time: number;
   run_finished_at: Date | string | null;
@@ -938,6 +941,7 @@ function toWorkspaceConversation(row: ConversationRow): WorkspaceConversation {
     id: row.id,
     title: row.title,
     status: row.status,
+    pinned: row.pinned,
     createdAt: toIso(row.created_at)!,
     updatedAt: toIso(row.updated_at)!,
     launchId: row.launch_id,
@@ -1028,6 +1032,7 @@ function toWorkspaceConversationListItem(
     id: conversation.id,
     title: conversation.title,
     status: conversation.status,
+    pinned: conversation.pinned,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     messageCount: preview.messageCount,
@@ -1349,12 +1354,16 @@ async function readConversationForUser(
   database: DatabaseClient,
   user: AuthUser,
   conversationId: string,
+  options: {
+    includeDeleted?: boolean;
+  } = {},
 ): Promise<WorkspaceConversation | null> {
   const [row] = await database<ConversationRow[]>`
     select
       c.id,
       c.title,
       c.status,
+      c.pinned,
       c.inputs as conversation_inputs,
       c.created_at,
       c.updated_at,
@@ -1386,6 +1395,7 @@ async function readConversationForUser(
     left join workspace_app_launches l on l.conversation_id = c.id
     where c.id = ${conversationId}
       and c.user_id = ${user.id}
+      and (${options.includeDeleted ?? false} or c.status <> 'deleted')
     order by r.created_at desc
     limit 1
   `;
@@ -1396,12 +1406,16 @@ async function readConversationForUser(
 async function readConversationById(
   database: DatabaseClient,
   conversationId: string,
+  options: {
+    includeDeleted?: boolean;
+  } = {},
 ): Promise<WorkspaceConversation | null> {
   const [row] = await database<ConversationRow[]>`
     select
       c.id,
       c.title,
       c.status,
+      c.pinned,
       c.inputs as conversation_inputs,
       c.created_at,
       c.updated_at,
@@ -1432,6 +1446,7 @@ async function readConversationById(
     inner join runs r on r.conversation_id = c.id
     left join workspace_app_launches l on l.conversation_id = c.id
     where c.id = ${conversationId}
+      and (${options.includeDeleted ?? false} or c.status <> 'deleted')
     order by r.created_at desc
     limit 1
   `;
@@ -1476,6 +1491,7 @@ async function readConversationRunsForUser(
     left join groups g on g.id = r.active_group_id
     where r.conversation_id = ${conversationId}
       and c.user_id = ${user.id}
+      and c.status <> 'deleted'
     order by r.created_at desc
   `;
 
@@ -1496,6 +1512,7 @@ async function readRecentConversationsForUser(
       c.id,
       c.title,
       c.status,
+      c.pinned,
       c.inputs as conversation_inputs,
       c.created_at,
       c.updated_at,
@@ -1542,6 +1559,7 @@ async function readRecentConversationsForUser(
       limit 1
     ) r on true
     where c.user_id = ${user.id}
+      and c.status <> 'deleted'
       and (${input.appId ?? null}::varchar is null or c.app_id = ${input.appId ?? null})
       and (${input.groupId ?? null}::varchar is null or c.active_group_id = ${input.groupId ?? null})
       and (
@@ -1549,11 +1567,41 @@ async function readRecentConversationsForUser(
         or c.title ilike ${searchTerm}
         or cast(c.inputs as text) ilike ${searchTerm}
       )
-    order by c.updated_at desc
+    order by c.pinned desc, c.updated_at desc
     limit ${limit}
   `;
 
   return rows.map(toWorkspaceConversationListItem);
+}
+
+async function updateConversationForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceConversationUpdateInput,
+): Promise<WorkspaceConversation | null> {
+  const nextUpdatedAt = new Date().toISOString();
+  const nextTitle = input.title ?? null;
+  const nextStatus = input.status ?? null;
+  const nextPinned = input.pinned ?? null;
+
+  const rows = await database<{ id: string }[]>`
+    update conversations c
+    set title = coalesce(${nextTitle}::varchar, c.title),
+        status = coalesce(${nextStatus}::conversation_status, c.status),
+        pinned = coalesce(${nextPinned}::boolean, c.pinned),
+        updated_at = ${nextUpdatedAt}::timestamptz
+    where c.id = ${input.conversationId}
+      and c.user_id = ${user.id}
+    returning c.id
+  `;
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return readConversationForUser(database, user, input.conversationId, {
+    includeDeleted: true,
+  });
 }
 
 async function readRunTimelineForUser(
@@ -1651,6 +1699,7 @@ async function readRunForUser(
     left join groups g on g.id = r.active_group_id
     where r.id = ${runId}
       and c.user_id = ${user.id}
+      and c.status <> 'deleted'
     limit 1
   `;
 
@@ -2633,6 +2682,26 @@ export function createPersistentWorkspaceService(
             limit: Math.min(Math.max(input.limit ?? 12, 1), 50),
           },
         },
+      };
+    },
+    async updateConversationForUser(
+      user,
+      input,
+    ): Promise<WorkspaceConversationResult> {
+      const conversation = await updateConversationForUser(database, user, input);
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "WORKSPACE_NOT_FOUND",
+          message: "The target workspace conversation could not be found.",
+        };
+      }
+
+      return {
+        ok: true,
+        data: conversation,
       };
     },
     async listConversationRunsForUser(

@@ -5,6 +5,7 @@ import type {
   WorkspaceCatalog,
   WorkspaceConversationAttachment,
   WorkspaceConversation,
+  WorkspaceConversationStatus,
   WorkspaceConversationMessageFeedback,
   WorkspaceConversationListItem,
   WorkspaceConversationShare,
@@ -89,6 +90,13 @@ type WorkspaceConversationListInput = {
   groupId?: string | null;
   limit?: number;
   query?: string | null;
+};
+
+type WorkspaceConversationUpdateInput = {
+  conversationId: string;
+  pinned?: boolean;
+  status?: WorkspaceConversationStatus;
+  title?: string;
 };
 
 type WorkspaceConversationListResult =
@@ -240,6 +248,10 @@ type WorkspaceService = {
     user: AuthUser,
     input: WorkspaceConversationListInput
   ): WorkspaceConversationListResult | Promise<WorkspaceConversationListResult>;
+  updateConversationForUser(
+    user: AuthUser,
+    input: WorkspaceConversationUpdateInput
+  ): WorkspaceConversationResult | Promise<WorkspaceConversationResult>;
   listConversationRunsForUser(
     user: AuthUser,
     conversationId: string
@@ -466,6 +478,7 @@ function toWorkspaceConversationListItem(
     id: conversation.id,
     title: conversation.title,
     status: conversation.status,
+    pinned: conversation.pinned,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     messageCount: preview.messageCount,
@@ -661,6 +674,7 @@ export function createWorkspaceService(options: {
       id: conversation.id,
       title: conversation.title,
       status: conversation.status,
+      pinned: conversation.pinned,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
       launchId: conversation.launchId,
@@ -795,6 +809,7 @@ export function createWorkspaceService(options: {
         id: conversationId,
         title: app.name,
         status: 'active',
+        pinned: false,
         createdAt: launchedAt,
         updatedAt: launchedAt,
         launchId,
@@ -876,7 +891,11 @@ export function createWorkspaceService(options: {
     getConversationForUser(user, conversationId) {
       const conversation = conversationsById.get(conversationId);
 
-      if (!conversation || conversation.userId !== user.id) {
+      if (
+        !conversation ||
+        conversation.userId !== user.id ||
+        conversation.status === 'deleted'
+      ) {
         return {
           ok: false,
           statusCode: 404,
@@ -900,7 +919,10 @@ export function createWorkspaceService(options: {
       const limit = Math.min(Math.max(input.limit ?? 12, 1), 50);
       const normalizedQuery = input.query?.trim().toLowerCase() || null;
       const items = [...conversationsById.values()]
-        .filter(conversation => conversation.userId === user.id)
+        .filter(
+          conversation =>
+            conversation.userId === user.id && conversation.status !== 'deleted'
+        )
         .flatMap(conversation => {
           const latestRun = listRunRecords(conversation.id)[0];
 
@@ -932,7 +954,13 @@ export function createWorkspaceService(options: {
 
           return [toWorkspaceConversationListItem(conversation, latestRun)];
         })
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .sort((left, right) => {
+          if (left.pinned !== right.pinned) {
+            return left.pinned ? -1 : 1;
+          }
+
+          return right.updatedAt.localeCompare(left.updatedAt);
+        })
         .slice(0, limit);
 
       return {
@@ -948,10 +976,45 @@ export function createWorkspaceService(options: {
         },
       };
     },
+    updateConversationForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      if (input.title !== undefined) {
+        conversation.title = input.title;
+      }
+
+      if (input.status !== undefined) {
+        conversation.status = input.status;
+      }
+
+      if (input.pinned !== undefined) {
+        conversation.pinned = input.pinned;
+      }
+
+      conversation.updatedAt = new Date().toISOString();
+
+      return {
+        ok: true,
+        data: toWorkspaceConversationData(conversation),
+      };
+    },
     listConversationRunsForUser(user, conversationId) {
       const conversation = conversationsById.get(conversationId);
 
-      if (!conversation || conversation.userId !== user.id) {
+      if (
+        !conversation ||
+        conversation.userId !== user.id ||
+        conversation.status === 'deleted'
+      ) {
         return {
           ok: false,
           statusCode: 404,
@@ -970,8 +1033,15 @@ export function createWorkspaceService(options: {
     },
     getRunForUser(user, runId) {
       const run = runsById.get(runId);
+      const conversation =
+        run ? conversationsById.get(run.conversationId) : null;
 
-      if (!run || run.userId !== user.id) {
+      if (
+        !run ||
+        run.userId !== user.id ||
+        !conversation ||
+        conversation.status === 'deleted'
+      ) {
         return {
           ok: false,
           statusCode: 404,
@@ -1453,6 +1523,7 @@ export type {
   WorkspaceConversationListResult,
   WorkspaceConversationResult,
   WorkspaceConversationRunsResult,
+  WorkspaceConversationUpdateInput,
   WorkspaceConversationShareCreateInput,
   WorkspaceConversationShareResult,
   WorkspaceConversationShareRevokeInput,

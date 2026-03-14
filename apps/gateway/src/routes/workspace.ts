@@ -10,11 +10,14 @@ import type {
   WorkspaceConversationMessageFeedbackRequest,
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationStatus,
   WorkspaceConversationShareCreateRequest,
   WorkspaceConversationShareResponse,
   WorkspaceConversationSharesResponse,
   WorkspaceConversationUploadRequest,
   WorkspaceConversationUploadResponse,
+  WorkspaceConversationUpdateRequest,
+  WorkspaceConversationUpdateResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
@@ -68,6 +71,10 @@ function isNullableString(value: unknown): value is string | null {
 
 function isMessageFeedbackRating(value: unknown): value is 'positive' | 'negative' | null {
   return value === null || value === 'positive' || value === 'negative';
+}
+
+function isConversationStatus(value: unknown): value is WorkspaceConversationStatus {
+  return value === 'active' || value === 'archived' || value === 'deleted';
 }
 
 function readSingleQueryValue(value: unknown): string | null {
@@ -415,6 +422,93 @@ export async function registerWorkspaceRoutes(
       ok: true,
       data: result.data,
     };
+
+    return response;
+  });
+
+  app.put('/workspace/conversations/:conversationId', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+    const body = (request.body ?? {}) as Partial<WorkspaceConversationUpdateRequest>;
+    const title =
+      typeof body.title === 'string' ? body.title.trim() : undefined;
+    const nextTitle = body.title === undefined ? undefined : title;
+    const nextStatus =
+      body.status === undefined
+        ? undefined
+        : isConversationStatus(body.status)
+          ? body.status
+          : null;
+    const nextPinned =
+      typeof body.pinned === 'boolean' ? body.pinned : body.pinned === undefined ? undefined : null;
+
+    if (
+      !conversationId ||
+      nextStatus === null ||
+      nextPinned === null ||
+      (body.title !== undefined && !nextTitle)
+    ) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace conversation updates require a conversation id plus valid title, status, or pinned changes.'
+      );
+    }
+
+    if (
+      nextTitle === undefined &&
+      nextStatus === undefined &&
+      nextPinned === undefined
+    ) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace conversation updates require at least one title, status, or pinned change.'
+      );
+    }
+
+    const result = await workspaceService.updateConversationForUser(access.user, {
+      conversationId,
+      title: nextTitle,
+      status: nextStatus ?? undefined,
+      pinned: nextPinned ?? undefined,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationUpdateResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: result.data.status === 'deleted'
+        ? 'workspace.conversation.deleted'
+        : 'workspace.conversation.updated',
+      entityType: 'conversation',
+      entityId: conversationId,
+      ipAddress: request.ip,
+      payload: {
+        conversationId,
+        title: result.data.title,
+        status: result.data.status,
+        pinned: result.data.pinned,
+      },
+    });
 
     return response;
   });

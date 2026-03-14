@@ -39,6 +39,7 @@ import {
   fetchWorkspaceConversation,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceRun,
+  updateWorkspaceConversation,
   updateWorkspaceConversationMessageFeedback,
   uploadWorkspaceConversationFile,
 } from "../../../../lib/apps-client";
@@ -309,6 +310,13 @@ export default function ConversationPage() {
   >(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [conversationActionError, setConversationActionError] = useState<
+    string | null
+  >(null);
+  const [activeConversationAction, setActiveConversationAction] = useState<
+    "archive" | "delete" | "pin" | "rename" | "restore" | "unpin" | null
+  >(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const copiedMessageResetRef = useRef<number | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
@@ -420,6 +428,7 @@ export default function ConversationPage() {
       }
 
       setConversation(result.data);
+      setTitleDraft(result.data.title);
       setLastTraceId(result.data.run.traceId);
       activeRunIdRef.current = result.data.run.id;
 
@@ -453,6 +462,9 @@ export default function ConversationPage() {
     setDraftAttachments([]);
     setComposerError(null);
     setLastTraceId(null);
+    setTitleDraft("");
+    setConversationActionError(null);
+    setActiveConversationAction(null);
     setActiveFeedbackMessageId(null);
     setCopiedMessageId(null);
     activeAssistantMessageIdRef.current = null;
@@ -507,11 +519,79 @@ export default function ConversationPage() {
     };
   }, [conversationId, router, session]);
 
+  async function handleConversationUpdateAction(
+    action: "archive" | "delete" | "pin" | "rename" | "restore" | "unpin",
+    input: {
+      pinned?: boolean;
+      status?: WorkspaceConversation["status"];
+      title?: string;
+    },
+  ) {
+    if (!session || !conversation) {
+      return;
+    }
+
+    setConversationActionError(null);
+    setActiveConversationAction(action);
+
+    try {
+      const result = await updateWorkspaceConversation(
+        session.sessionToken,
+        conversation.id,
+        input,
+      );
+
+      if (!result.ok) {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+          clearAuthSession(window.sessionStorage);
+          router.replace("/login");
+          return;
+        }
+
+        if (result.error.code === "WORKSPACE_NOT_FOUND") {
+          router.replace("/chat");
+          return;
+        }
+
+        setConversationActionError(result.error.message);
+        return;
+      }
+
+      if (result.data.status === "deleted") {
+        router.replace("/chat?deleted=1");
+        return;
+      }
+
+      setConversation(result.data);
+      setMessages(result.data.messages);
+      setTitleDraft(result.data.title);
+    } catch {
+      setConversationActionError(
+        "The conversation update could not be saved. Please retry.",
+      );
+    } finally {
+      setActiveConversationAction(null);
+    }
+  }
+
+  function isConversationActionPending(
+    action?: "archive" | "delete" | "pin" | "rename" | "restore" | "unpin",
+  ) {
+    return action
+      ? activeConversationAction === action
+      : activeConversationAction !== null;
+  }
+
   async function handleAttachmentSelect(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
     event.target.value = "";
 
-    if (!session || !conversation || selectedFiles.length === 0) {
+    if (
+      !session ||
+      !conversation ||
+      conversation.status === "archived" ||
+      selectedFiles.length === 0
+    ) {
       return;
     }
 
@@ -766,6 +846,7 @@ export default function ConversationPage() {
     if (
       !session ||
       !conversation ||
+      conversation.status === "archived" ||
       isStreaming ||
       isUploadingAttachments ||
       (nextDraft.length === 0 && nextAttachments.length === 0)
@@ -1079,6 +1160,7 @@ export default function ConversationPage() {
     ? buildReplayAttachments(selectedRun)
     : [];
   const quotaAlerts = listQuotaAlerts(quotaUsages);
+  const isConversationArchived = conversation.status === "archived";
 
   return (
     <div className="chat-surface stack">
@@ -1086,18 +1168,21 @@ export default function ConversationPage() {
 
       <header className="chat-header">
         <div>
-          <span className="eyebrow">R12 Attachments</span>
+          <span className="eyebrow">P2-A5</span>
           <h1>{conversation.title}</h1>
           <p className="lead">
-            The conversation surface now keeps independent runs per completion,
-            supports live stop control and can bind uploaded workspace
-            attachments onto the persisted chat boundary.
+            Rename, pin, archive, and delete conversation records without
+            breaking the persisted run and transcript boundary.
           </p>
         </div>
         <div className="workspace-badges">
           <span className="workspace-badge">
             Conversation {conversation.id}
           </span>
+          <span className="workspace-badge">Status {conversation.status}</span>
+          {conversation.pinned ? (
+            <span className="workspace-badge">Pinned</span>
+          ) : null}
           <span className="workspace-badge">Run {conversation.run.id}</span>
           <span className="workspace-badge">
             Trace {lastTraceId ?? conversation.run.traceId}
@@ -1131,6 +1216,11 @@ export default function ConversationPage() {
             <p>{conversation.activeGroup.description}</p>
           </article>
           <article className="chat-meta-card">
+            <span>Conversation state</span>
+            <strong>{conversation.status}</strong>
+            <p>{conversation.pinned ? "Pinned in history." : "Not pinned in history."}</p>
+          </article>
+          <article className="chat-meta-card">
             <span>Run status</span>
             <strong>{conversation.run.status}</strong>
             <p>
@@ -1150,6 +1240,97 @@ export default function ConversationPage() {
             <strong>{runs.length} runs</strong>
             <p>Each completion is now tracked separately for replay.</p>
           </article>
+        </div>
+
+        <div className="conversation-management-panel">
+          <label className="field" htmlFor="conversation-title">
+            Conversation title
+          </label>
+          <input
+            id="conversation-title"
+            className="chat-composer-input"
+            value={titleDraft}
+            onChange={(event) => setTitleDraft(event.target.value)}
+            disabled={isConversationActionPending()}
+          />
+          {conversationActionError ? (
+            <div className="notice error">{conversationActionError}</div>
+          ) : null}
+          <div className="actions">
+            <button
+              className="primary"
+              type="button"
+              disabled={
+                isConversationActionPending() || titleDraft.trim().length === 0
+              }
+              onClick={() =>
+                void handleConversationUpdateAction("rename", {
+                  title: titleDraft.trim(),
+                })
+              }
+            >
+              {isConversationActionPending("rename") ? "Saving..." : "Save title"}
+            </button>
+            <button
+              className="secondary"
+              type="button"
+              disabled={isConversationActionPending()}
+              onClick={() =>
+                void handleConversationUpdateAction(
+                  conversation.pinned ? "unpin" : "pin",
+                  {
+                    pinned: !conversation.pinned,
+                  },
+                )
+              }
+            >
+              {isConversationActionPending(conversation.pinned ? "unpin" : "pin")
+                ? "Saving..."
+                : conversation.pinned
+                  ? "Unpin"
+                  : "Pin"}
+            </button>
+            <button
+              className="secondary"
+              type="button"
+              disabled={isConversationActionPending()}
+              onClick={() =>
+                void handleConversationUpdateAction(
+                  conversation.status === "archived" ? "restore" : "archive",
+                  {
+                    status:
+                      conversation.status === "archived" ? "active" : "archived",
+                  },
+                )
+              }
+            >
+              {isConversationActionPending(
+                conversation.status === "archived" ? "restore" : "archive",
+              )
+                ? "Saving..."
+                : conversation.status === "archived"
+                  ? "Restore"
+                  : "Archive"}
+            </button>
+            <button
+              className="secondary danger"
+              type="button"
+              disabled={isConversationActionPending()}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Delete "${conversation.title}" from workspace history? This hides the conversation and its runs from normal workspace reads.`,
+                  )
+                ) {
+                  void handleConversationUpdateAction("delete", {
+                    status: "deleted",
+                  });
+                }
+              }}
+            >
+              {isConversationActionPending("delete") ? "Deleting..." : "Delete"}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -1221,10 +1402,18 @@ export default function ConversationPage() {
             <p>
               Send a prompt to stream an assistant response. Refreshing the page
               now reloads both the transcript and the latest run from persisted
-              workspace state.
+              workspace state. Archived conversations stay readable until you
+              restore them.
             </p>
           </div>
         </div>
+
+        {isConversationArchived ? (
+          <div className="notice warning">
+            This conversation is archived. Restore it to send new messages or
+            attach files.
+          </div>
+        ) : null}
 
         {composerError ? (
           <div className="notice error">{composerError}</div>
@@ -1287,7 +1476,11 @@ export default function ConversationPage() {
                       type="button"
                       className="message-action-button"
                       onClick={() => handleRetryMessage(message)}
-                      disabled={isStreaming || isUploadingAttachments}
+                      disabled={
+                        isStreaming ||
+                        isUploadingAttachments ||
+                        isConversationArchived
+                      }
                     >
                       Retry
                     </button>
@@ -1299,7 +1492,11 @@ export default function ConversationPage() {
                       type="button"
                       className="message-action-button"
                       onClick={() => void handleRegenerateMessage(message.id)}
-                      disabled={isStreaming || isUploadingAttachments}
+                      disabled={
+                        isStreaming ||
+                        isUploadingAttachments ||
+                        isConversationArchived
+                      }
                     >
                       Regenerate
                     </button>
@@ -1366,7 +1563,11 @@ export default function ConversationPage() {
                           type="button"
                           className="suggested-prompt-button"
                           onClick={() => handleSuggestedPrompt(prompt)}
-                          disabled={isStreaming || isUploadingAttachments}
+                          disabled={
+                            isStreaming ||
+                            isUploadingAttachments ||
+                            isConversationArchived
+                          }
                         >
                           {prompt}
                         </button>
@@ -1391,7 +1592,7 @@ export default function ConversationPage() {
             placeholder={`Ask ${conversation.app.name} to work on something concrete...`}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            disabled={isStreaming}
+            disabled={isStreaming || isConversationArchived}
           />
           <label className="field" htmlFor="chat-attachment">
             Attachments
@@ -1402,7 +1603,9 @@ export default function ConversationPage() {
             multiple
             accept={WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES.join(",")}
             onChange={(event) => void handleAttachmentSelect(event)}
-            disabled={isStreaming || isUploadingAttachments}
+            disabled={
+              isStreaming || isUploadingAttachments || isConversationArchived
+            }
           />
           <p className="chat-composer-hint">
             Up to {formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} per
@@ -1417,7 +1620,7 @@ export default function ConversationPage() {
                     type="button"
                     className="secondary"
                     onClick={() => handleAttachmentRemove(attachment.id)}
-                    disabled={isStreaming}
+                    disabled={isStreaming || isConversationArchived}
                   >
                     Remove
                   </button>
@@ -1431,6 +1634,7 @@ export default function ConversationPage() {
               type="submit"
               disabled={
                 isStreaming ||
+                isConversationArchived ||
                 isUploadingAttachments ||
                 (draft.trim().length === 0 && draftAttachments.length === 0)
               }

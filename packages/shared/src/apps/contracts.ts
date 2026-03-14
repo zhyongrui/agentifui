@@ -247,6 +247,7 @@ export type WorkspaceConversation = {
   id: string;
   title: string;
   status: WorkspaceConversationStatus;
+  pinned: boolean;
   createdAt: string;
   updatedAt: string;
   launchId: string | null;
@@ -263,6 +264,7 @@ export type WorkspaceConversationListItem = {
   id: string;
   title: string;
   status: WorkspaceConversationStatus;
+  pinned: boolean;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -276,6 +278,17 @@ export type WorkspaceConversationListItem = {
 };
 
 export type WorkspaceConversationResponse = {
+  ok: true;
+  data: WorkspaceConversation;
+};
+
+export type WorkspaceConversationUpdateRequest = {
+  title?: string;
+  status?: WorkspaceConversationStatus;
+  pinned?: boolean;
+};
+
+export type WorkspaceConversationUpdateResponse = {
   ok: true;
   data: WorkspaceConversation;
 };

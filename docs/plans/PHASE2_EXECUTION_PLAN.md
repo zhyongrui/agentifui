@@ -78,11 +78,11 @@ Useful continuity constraints:
 
 Default execution order after Phase 1 closeout:
 
-1. `P2-A5` 会话整理能力
-2. `P2-A6` 对话搜索增强
-3. `P2-B1` Artifact 合同
-4. `P2-B2` Artifact 持久化
-5. `P2-C1` HITL step 合同
+1. `P2-A6` 对话搜索增强
+2. `P2-B1` Artifact 合同
+3. `P2-B2` Artifact 持久化
+4. `P2-C1` HITL step 合同
+5. `P2-C2` pending-action route
 
 Execution status:
 
@@ -92,8 +92,8 @@ Execution status:
 | completed | `P2-A2` | transcript 已补齐 copy / quote / retry / regenerate 基础动作          |
 | completed | `P2-A3` | markdown/code/math 渲染已落到 transcript、replay 和 shared transcript |
 | completed | `P2-A4` | assistant suggested prompts 已进入 contract、stream 尾块和 chat UI    |
-| active    | `P2-A5` | 下一项，收 archive / pin / rename / delete 会话整理闭环               |
-| queued    | `P2-A6` | 在会话整理落地后补历史过滤与搜索增强                                  |
+| completed | `P2-A5` | 会话支持 rename / pin / archive / delete，history 与 detail 已同步     |
+| active    | `P2-A6` | 下一项，补 tag / attachment / feedback / status 过滤历史              |
 | queued    | `P2-B1` | transcript 元数据稳定后冻结 artifact 合同                             |
 | queued    | `P2-B2` | 依赖 artifact 合同和 run 输出边界                                     |
 
@@ -122,7 +122,8 @@ Current batch status:
 - `P2-A2` complete
 - `P2-A3` complete
 - `P2-A4` complete
-- the active follow-on item is `P2-A5`
+- `P2-A5` complete
+- the active follow-on item is `P2-A6`
 
 ## 6. Detailed Execution Notes
 
@@ -173,6 +174,27 @@ Current batch status:
   - `Policy Watch` still requires switching to `Research Lab` before launch
   - suggestion-chip browser tests should perform the same group switch as the markdown test before opening the app
 
+### P2-A5 会话整理能力
+
+- backend contract:
+  - `WorkspaceConversation.pinned`
+  - `PUT /workspace/conversations/:conversationId`
+  - audit actions `workspace.conversation.updated` and `workspace.conversation.deleted`
+- current semantics:
+  - `archive` keeps the transcript readable but disables new prompts, regenerate, retry and uploads
+  - `pin` only affects ordering on `/chat`; pinned records sort ahead of non-pinned by `updatedAt desc`
+  - `delete` is a soft-hide at the workspace boundary
+    - the conversation and runs remain persisted
+    - normal workspace reads (`conversation`, `history`, `run detail`) filter deleted records out
+- browser-testing guardrails:
+  - for history-management coverage, seed the conversation directly in Postgres instead of launching through `/workspace/apps/launch`
+    - this avoids quota/recent-state coupling when the test only needs a persisted conversation shell
+  - do not assert `Send message` becomes enabled immediately after `Restore`
+    - the button stays disabled when the composer is empty
+    - assert the `Message` textarea and `Attachments` input are enabled instead
+  - the history-card heading is mutable after rename
+    - avoid locators permanently filtered by the original title once the test renames the conversation
+
 ### Operational Continuity
 
 - browser tests that assert root-admin navigation should wait for `/api/gateway/admin/context`
@@ -182,6 +204,11 @@ Current batch status:
   - `AuthAuditEntityType` now includes `conversation_message`
 - the persistence stage in `npm test` can stay silent for about two minutes
   - `apps/gateway/src/routes/auth-persistence.test.ts` is long-running and may look hung while still progressing
+- shared DB load can occasionally push auth responses past one minute in Playwright
+  - `tests/e2e/phase1-flows.spec.ts` now uses a `120_000ms` response wait window for `/api/gateway/*` POST/PUT helpers
+- use `npm run test:e2e` instead of raw `npx playwright test` on this host
+  - the wrapper brings the project up in the expected environment
+  - direct Playwright launches can fail on this machine with missing browser runtime libs such as `libatk-1.0.so.0`
 
 ## 7. References
 
