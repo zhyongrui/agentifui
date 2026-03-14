@@ -41,6 +41,21 @@ describe("chat client", () => {
               message: {
                 role: "assistant",
                 content: "gateway response",
+                artifacts: [
+                  {
+                    id: "artifact-123",
+                    title: "policy response",
+                    kind: "markdown",
+                    source: "assistant_response",
+                    status: "draft",
+                    createdAt: "2026-03-14T00:00:00.000Z",
+                    updatedAt: "2026-03-14T00:00:00.000Z",
+                    summary: "gateway response",
+                    mimeType: "text/markdown",
+                    sizeBytes: 16,
+                    content: "gateway response",
+                  },
+                ],
                 suggested_prompts: [
                   'Summarize the key takeaways about "policy changes".',
                 ],
@@ -109,6 +124,13 @@ describe("chat client", () => {
       choices: [
         {
           message: {
+            artifacts: [
+              expect.objectContaining({
+                id: "artifact-123",
+                kind: "markdown",
+                source: "assistant_response",
+              }),
+            ],
             suggested_prompts: [
               'Summarize the key takeaways about "policy changes".',
             ],
@@ -124,6 +146,7 @@ describe("chat client", () => {
       runId: string;
       traceId: string;
     }> = [];
+    const artifactEvents: string[][] = [];
     const chunkEvents: string[] = [];
     const suggestedPrompts: string[][] = [];
 
@@ -136,7 +159,7 @@ describe("chat client", () => {
           'data: {"conversation_id":"conv-123","run_id":"run-123","trace_id":"trace-123"}\n\n',
           'data: {"id":"run-123","object":"chat.completion.chunk","created":1,"model":"policy-watch","conversation_id":"conv-123","trace_id":"trace-123","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
           'data: {"id":"run-123","object":"chat.completion.chunk","created":1,"model":"policy-watch","conversation_id":"conv-123","trace_id":"trace-123","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
-          'data: {"id":"run-123","object":"chat.completion.chunk","created":1,"model":"policy-watch","conversation_id":"conv-123","trace_id":"trace-123","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"suggested_prompts":["Summarize the key takeaways about \\"hello\\"."]}\n\n',
+          'data: {"id":"run-123","object":"chat.completion.chunk","created":1,"model":"policy-watch","conversation_id":"conv-123","trace_id":"trace-123","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"artifacts":[{"id":"artifact-123","title":"hello response","kind":"markdown","source":"assistant_response","status":"draft","createdAt":"2026-03-14T00:00:00.000Z","updatedAt":"2026-03-14T00:00:00.000Z","summary":"Hello","mimeType":"text/markdown","sizeBytes":5,"content":"Hello"}],"suggested_prompts":["Summarize the key takeaways about \\"hello\\"."]}\n\n',
           "data: [DONE]\n\n",
         ]),
       }),
@@ -167,6 +190,10 @@ describe("chat client", () => {
 
           if (chunk.suggested_prompts) {
             suggestedPrompts.push(chunk.suggested_prompts);
+          }
+
+          if (chunk.artifacts) {
+            artifactEvents.push(chunk.artifacts.map((artifact) => artifact.id));
           }
         },
       },
@@ -203,6 +230,7 @@ describe("chat client", () => {
       },
     ]);
     expect(chunkEvents).toEqual(["Hello"]);
+    expect(artifactEvents).toEqual([["artifact-123"]]);
     expect(suggestedPrompts).toEqual([
       ['Summarize the key takeaways about "hello".'],
     ]);

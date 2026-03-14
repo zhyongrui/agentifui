@@ -237,6 +237,13 @@ describe("chat routes", () => {
               content: expect.stringContaining(
                 "Policy Watch is now reachable through the AgentifUI gateway.",
               ),
+              artifacts: [
+                expect.objectContaining({
+                  kind: "markdown",
+                  source: "assistant_response",
+                  status: "draft",
+                }),
+              ],
               suggested_prompts: expect.arrayContaining([
                 expect.stringContaining("Summarize the key takeaways about"),
               ]),
@@ -282,6 +289,12 @@ describe("chat routes", () => {
             content: expect.stringContaining(
               "Policy Watch is now reachable through the AgentifUI gateway.",
             ),
+            artifacts: [
+              expect.objectContaining({
+                kind: "markdown",
+                source: "assistant_response",
+              }),
+            ],
             status: "completed",
             suggestedPrompts: expect.arrayContaining([
               expect.stringContaining("Summarize the key takeaways about"),
@@ -431,6 +444,12 @@ describe("chat routes", () => {
         conversationId,
         status: "succeeded",
         triggeredFrom: "chat_completion",
+        artifacts: [
+          expect.objectContaining({
+            kind: "markdown",
+            source: "assistant_response",
+          }),
+        ],
         usage: {
           totalTokens: expect.any(Number),
         },
@@ -559,6 +578,8 @@ describe("chat routes", () => {
       expect(response.headers["content-type"]).toContain("text/event-stream");
       expect(response.body).toContain("event: agentif.metadata");
       expect(response.body).toContain('"object":"chat.completion.chunk"');
+      expect(response.body).toContain('"artifacts"');
+      expect(response.body).toContain('"source":"assistant_response"');
       expect(response.body).toContain('"suggested_prompts"');
       expect(response.body).toContain("data: [DONE]");
     } finally {
@@ -747,6 +768,12 @@ describe("chat routes", () => {
           },
         ],
       });
+      expect((runResponse.json() as WorkspaceRunResponse).data.artifacts).toEqual([
+        expect.objectContaining({
+          kind: "markdown",
+          source: "assistant_response",
+        }),
+      ]);
     } finally {
       await app.close();
     }

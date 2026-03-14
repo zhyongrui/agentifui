@@ -174,6 +174,73 @@ export type WorkspaceConversationAttachment = {
   uploadedAt: string;
 };
 
+export type WorkspaceArtifactKind =
+  | "text"
+  | "markdown"
+  | "json"
+  | "table"
+  | "link";
+
+export type WorkspaceArtifactSource =
+  | "assistant_response"
+  | "tool_output"
+  | "user_upload";
+
+export type WorkspaceArtifactStatus = "draft" | "stable";
+
+export type WorkspaceArtifactJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | WorkspaceArtifactJsonValue[]
+  | { [key: string]: WorkspaceArtifactJsonValue };
+
+export type WorkspaceArtifactTableCell = string | number | boolean | null;
+
+export type WorkspaceArtifactSummary = {
+  id: string;
+  title: string;
+  kind: WorkspaceArtifactKind;
+  source: WorkspaceArtifactSource;
+  status: WorkspaceArtifactStatus;
+  createdAt: string;
+  updatedAt: string;
+  summary: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+};
+
+type WorkspaceArtifactBase = WorkspaceArtifactSummary;
+
+export type WorkspaceTextArtifact = WorkspaceArtifactBase & {
+  kind: "text" | "markdown";
+  content: string;
+};
+
+export type WorkspaceJsonArtifact = WorkspaceArtifactBase & {
+  kind: "json";
+  content: WorkspaceArtifactJsonValue;
+};
+
+export type WorkspaceTableArtifact = WorkspaceArtifactBase & {
+  kind: "table";
+  columns: string[];
+  rows: WorkspaceArtifactTableCell[][];
+};
+
+export type WorkspaceLinkArtifact = WorkspaceArtifactBase & {
+  kind: "link";
+  href: string;
+  label: string;
+};
+
+export type WorkspaceArtifact =
+  | WorkspaceTextArtifact
+  | WorkspaceJsonArtifact
+  | WorkspaceTableArtifact
+  | WorkspaceLinkArtifact;
+
 export type WorkspaceMessageFeedbackRating = "positive" | "negative";
 
 export type WorkspaceConversationMessageFeedback = {
@@ -188,6 +255,7 @@ export type WorkspaceConversationMessage = {
   status: WorkspaceConversationMessageStatus;
   createdAt: string;
   attachments?: WorkspaceConversationAttachment[];
+  artifacts?: WorkspaceArtifactSummary[];
   feedback?: WorkspaceConversationMessageFeedback | null;
   suggestedPrompts?: string[];
 };
@@ -228,6 +296,7 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   error: string | null;
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  artifacts: WorkspaceArtifact[];
   usage: WorkspaceRunUsage;
   timeline: WorkspaceRunTimelineEvent[];
 };

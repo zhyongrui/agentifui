@@ -1302,6 +1302,13 @@ describe.sequential('persistent auth runtime', () => {
               content: expect.stringContaining('Policy Watch is now reachable through the AgentifUI gateway.'),
               finishReason: 'stop',
             },
+            artifacts: [
+              expect.objectContaining({
+                kind: 'markdown',
+                source: 'assistant_response',
+                status: 'draft',
+              }),
+            ],
           });
         } finally {
           await runtimeDatabase.end({ timeout: 5 });
@@ -1331,6 +1338,12 @@ describe.sequential('persistent auth runtime', () => {
               content: expect.stringContaining(
                 'Policy Watch is now reachable through the AgentifUI gateway.'
               ),
+              artifacts: [
+                expect.objectContaining({
+                  kind: 'markdown',
+                  source: 'assistant_response',
+                }),
+              ],
               status: 'completed',
             },
           ],
@@ -1369,6 +1382,14 @@ describe.sequential('persistent auth runtime', () => {
         });
 
         expect(run.statusCode).toBe(200);
+        expect((run.json() as WorkspaceRunResponse).data).toMatchObject({
+          artifacts: [
+            expect.objectContaining({
+              kind: 'markdown',
+              source: 'assistant_response',
+            }),
+          ],
+        });
         expect((run.json() as WorkspaceRunResponse).data.timeline).toEqual(
           expect.arrayContaining([
             expect.objectContaining({ type: 'run_created' }),

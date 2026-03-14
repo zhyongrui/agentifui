@@ -94,8 +94,8 @@ Execution status:
 | completed | `P2-A4` | assistant suggested prompts 已进入 contract、stream 尾块和 chat UI    |
 | completed | `P2-A5` | 会话支持 rename / pin / archive / delete，history 与 detail 已同步     |
 | completed | `P2-A6` | `/chat` 已支持按 tag / attachment / feedback / status 检索历史        |
-| active    | `P2-B1` | artifact 合同现在是下一个活动项                                       |
-| queued    | `P2-B2` | 依赖 artifact 合同和 run 输出边界                                     |
+| completed | `P2-B1` | artifact DTO、来源和消息/run/chat 绑定已冻结                          |
+| active    | `P2-B2` | 下一项，把 artifact 从 JSON 边界推进到独立持久化记录                  |
 
 ## 5. First Batch Definition
 
@@ -124,7 +124,8 @@ Current batch status:
 - `P2-A4` complete
 - `P2-A5` complete
 - `P2-A6` complete
-- the active follow-on item is `P2-B1`
+- `P2-B1` complete
+- the active follow-on item is `P2-B2`
 
 ## 6. Detailed Execution Notes
 
@@ -216,6 +217,25 @@ Current batch status:
   - assert both the filter chip summary (`4 active filters`) and the card metadata (`1 attachments`, `Feedback +1 / -0`)
     - this proves the UI is bound to the enriched list-item payload, not only the URL state
 
+### P2-B1 Artifact 合同
+
+- shared contract:
+  - `WorkspaceArtifact` now freezes artifact `kind`, `source`, `status`, summary fields, and payload shapes
+  - chat responses, SSE final chunks, workspace messages, and workspace run detail all share the same artifact DTO family
+- current semantics:
+  - the Phase 2 bootstrap artifact is a draft markdown artifact generated from the assistant response body
+  - `source = assistant_response`
+  - `status = draft`
+  - assistant transcript messages only keep `WorkspaceArtifactSummary[]`
+  - run detail and chat gateway responses carry the full artifact payload
+- implementation guardrail:
+  - artifact payloads still travel inside existing `runs.outputs` and `conversations.inputs.messageHistory`
+  - this is intentional for `P2-B1`; `P2-B2` is where dedicated artifact persistence and lookup tables should land
+- testing closeout:
+  - blocking responses should expose `choices[0].message.artifacts`
+  - streaming responses should expose `artifacts` on the final SSE chunk
+  - persistence tests should prove artifact summaries survive restart on the conversation view and full artifacts survive restart on the run view
+
 ### Operational Continuity
 
 - browser tests that assert root-admin navigation should wait for `/api/gateway/admin/context`
@@ -233,6 +253,9 @@ Current batch status:
 - if you need more visibility than the silent `npm test` wrapper gives during persistence
   - run `npm run test:unit` and `npm run test:persistence` sequentially
   - do not overlap persistence and Playwright on the shared Postgres DB
+- do not add a dedicated artifact DB table during `P2-B1`
+  - the contract is now frozen, but storage normalization belongs to `P2-B2`
+  - until then, artifact summaries come from `messageHistory` and full payloads come from `runs.outputs`
 
 ## 7. References
 

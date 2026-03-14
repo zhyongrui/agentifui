@@ -1,4 +1,6 @@
 import type {
+  WorkspaceArtifact,
+  WorkspaceArtifactSummary,
   WorkspaceConversation,
   WorkspaceConversationAttachment,
   WorkspaceConversationMessage,
@@ -51,6 +53,65 @@ function buildTraceId() {
 
 function buildConversationMessageId() {
   return `msg_${randomUUID()}`;
+}
+
+function truncateArtifactText(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function buildArtifactTitle(appName: string, latestPrompt: string) {
+  const promptTitle = truncateArtifactText(latestPrompt, 48);
+  return promptTitle.length > 0 ? promptTitle : `${appName} response`;
+}
+
+function toArtifactSummary(artifact: WorkspaceArtifact): WorkspaceArtifactSummary {
+  return {
+    id: artifact.id,
+    title: artifact.title,
+    kind: artifact.kind,
+    source: artifact.source,
+    status: artifact.status,
+    createdAt: artifact.createdAt,
+    updatedAt: artifact.updatedAt,
+    summary: artifact.summary,
+    mimeType: artifact.mimeType,
+    sizeBytes: artifact.sizeBytes,
+  };
+}
+
+function buildAssistantArtifacts(input: {
+  appName: string;
+  assistantText: string;
+  createdAt: string;
+  latestPrompt: string;
+}): WorkspaceArtifact[] {
+  const content = input.assistantText.trim();
+
+  if (content.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      id: `artifact_${randomUUID()}`,
+      title: buildArtifactTitle(input.appName, input.latestPrompt),
+      kind: "markdown",
+      source: "assistant_response",
+      status: "draft",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+      summary: truncateArtifactText(content, 120),
+      mimeType: "text/markdown",
+      sizeBytes: Buffer.byteLength(content, "utf8"),
+      content,
+    },
+  ];
 }
 
 async function recordQuotaUsageAudit(input: {
@@ -326,6 +387,7 @@ function buildPersistedHistory(
   input: {
     latestUserAttachments?: WorkspaceConversationAttachment[];
     assistantMessage?: {
+      artifacts?: WorkspaceArtifact[];
       content: string;
       status: WorkspaceConversationMessageStatus;
       suggestedPrompts?: string[];
@@ -368,6 +430,11 @@ function buildPersistedHistory(
       content: input.assistantMessage.content,
       status: input.assistantMessage.status,
       createdAt: new Date(baseTime + transcript.length).toISOString(),
+      artifacts:
+        input.assistantMessage.artifacts &&
+        input.assistantMessage.artifacts.length > 0
+          ? input.assistantMessage.artifacts.map(toArtifactSummary)
+          : undefined,
       suggestedPrompts:
         input.assistantMessage.suggestedPrompts &&
         input.assistantMessage.suggestedPrompts.length > 0
@@ -701,6 +768,7 @@ function buildChunkEvent(chunk: ChatCompletionChunk) {
 }
 
 function buildStreamingChunk(input: {
+  artifacts?: WorkspaceArtifact[];
   id: string;
   created: number;
   model: string;
@@ -730,6 +798,9 @@ function buildStreamingChunk(input: {
       },
     ],
     ...(input.usage ? { usage: input.usage } : {}),
+    ...(input.artifacts && input.artifacts.length > 0
+      ? { artifacts: input.artifacts }
+      : {}),
     ...(input.suggestedPrompts && input.suggestedPrompts.length > 0
       ? { suggested_prompts: input.suggestedPrompts }
       : {}),
@@ -743,6 +814,7 @@ function buildBlockingResponse(input: {
   promptTokens: number;
   completionTokens: number;
   assistantText: string;
+  artifacts: WorkspaceArtifact[];
   suggestedPrompts: string[];
 }): ChatCompletionResponse {
   return {
@@ -756,6 +828,7 @@ function buildBlockingResponse(input: {
         message: {
           role: "assistant",
           content: input.assistantText,
+          artifacts: input.artifacts,
           suggested_prompts: input.suggestedPrompts,
         },
         finish_reason: "stop",
@@ -832,6 +905,12 @@ async function* streamCompletionEvents(input: {
 
     const wasStopped = Boolean(streamState?.stopRequested);
     const completionTokens = estimateTokens(assistantContent);
+    const artifacts = buildAssistantArtifacts({
+      appName: input.conversation.app.name,
+      assistantText: assistantContent,
+      createdAt: new Date().toISOString(),
+      latestPrompt: extractLatestUserPrompt(input.messages),
+    });
     const updateResult =
       await input.workspaceService.updateConversationRunForUser(input.user, {
         conversationId: input.conversation.id,
@@ -840,6 +919,7 @@ async function* streamCompletionEvents(input: {
         messageHistory: buildPersistedHistory(input.messages, {
           latestUserAttachments: input.attachments,
           assistantMessage: {
+            artifacts,
             content: assistantContent,
             status: wasStopped ? "stopped" : "completed",
             suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
@@ -852,6 +932,7 @@ async function* streamCompletionEvents(input: {
             status: wasStopped ? "stopped" : "completed",
             suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
           },
+          artifacts,
           usage: {
             promptTokens: input.promptTokens,
             completionTokens,
@@ -873,6 +954,7 @@ async function* streamCompletionEvents(input: {
       conversationId: input.conversation.id,
       traceId: input.conversation.run.traceId,
       finishReason: "stop",
+      artifacts,
       suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
       usage: {
         prompt_tokens: input.promptTokens,
@@ -905,6 +987,12 @@ async function* streamCompletionEvents(input: {
 
     if (!finalized) {
       const completionTokens = estimateTokens(assistantContent);
+      const artifacts = buildAssistantArtifacts({
+        appName: input.conversation.app.name,
+        assistantText: assistantContent,
+        createdAt: new Date().toISOString(),
+        latestPrompt: extractLatestUserPrompt(input.messages),
+      });
       const fallbackResult =
         await input.workspaceService.updateConversationRunForUser(input.user, {
           conversationId: input.conversation.id,
@@ -913,6 +1001,7 @@ async function* streamCompletionEvents(input: {
           messageHistory: buildPersistedHistory(input.messages, {
             latestUserAttachments: input.attachments,
             assistantMessage: {
+              artifacts,
               content: assistantContent,
               status: streamState?.stopRequested ? "stopped" : "failed",
               suggestedPrompts: undefined,
@@ -925,6 +1014,7 @@ async function* streamCompletionEvents(input: {
               status: streamState?.stopRequested ? "stopped" : "failed",
               suggestedPrompts: undefined,
             },
+            artifacts,
             usage: {
               promptTokens: input.promptTokens,
               completionTokens,
@@ -1238,6 +1328,12 @@ export async function registerChatRoutes(
       );
     }
 
+    const artifacts = buildAssistantArtifacts({
+      appName: conversation.app.name,
+      assistantText,
+      createdAt: new Date().toISOString(),
+      latestPrompt: extractLatestUserPrompt(body.messages),
+    });
     const updateResult = await workspaceService.updateConversationRunForUser(
       access.user,
       {
@@ -1247,6 +1343,7 @@ export async function registerChatRoutes(
         messageHistory: buildPersistedHistory(body.messages, {
           latestUserAttachments: attachmentResult.attachments,
           assistantMessage: {
+            artifacts,
             content: assistantText,
             status: "completed",
             suggestedPrompts,
@@ -1259,6 +1356,7 @@ export async function registerChatRoutes(
             status: "completed",
             suggestedPrompts,
           },
+          artifacts,
           usage: {
             promptTokens,
             completionTokens,
@@ -1302,6 +1400,7 @@ export async function registerChatRoutes(
       promptTokens,
       completionTokens,
       assistantText,
+      artifacts,
       suggestedPrompts,
     });
   });

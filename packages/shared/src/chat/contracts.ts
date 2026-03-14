@@ -1,3 +1,5 @@
+import type { WorkspaceArtifact } from "../apps/contracts.js";
+
 export type ChatCompletionRole = "system" | "user" | "assistant" | "tool";
 
 export type ChatCompletionContentPart = {
@@ -56,6 +58,7 @@ export type ChatCompletionResponse = {
       role: "assistant";
       content: string | null;
       tool_calls?: unknown[];
+      artifacts?: WorkspaceArtifact[];
       suggested_prompts?: string[];
     };
     finish_reason: ChatCompletionFinishReason;
@@ -94,6 +97,7 @@ export type ChatCompletionChunk = {
   };
   conversation_id?: string;
   trace_id?: string;
+  artifacts?: WorkspaceArtifact[];
   suggested_prompts?: string[];
 };
 

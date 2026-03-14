@@ -2,6 +2,9 @@ import type { AuthUser } from '@agentifui/shared/auth';
 import type {
   QuotaUsage,
   WorkspaceAppLaunch,
+  WorkspaceArtifact,
+  WorkspaceArtifactJsonValue,
+  WorkspaceArtifactSummary,
   WorkspaceCatalog,
   WorkspaceConversationAttachment,
   WorkspaceConversation,
@@ -426,6 +429,128 @@ function buildUsageFromOutputs(run: WorkspaceRunRecord): WorkspaceRun['usage'] {
   };
 }
 
+function isWorkspaceArtifactKind(value: unknown): value is WorkspaceArtifact['kind'] {
+  return ['text', 'markdown', 'json', 'table', 'link'].includes(String(value));
+}
+
+function isWorkspaceArtifactSource(value: unknown): value is WorkspaceArtifact['source'] {
+  return ['assistant_response', 'tool_output', 'user_upload'].includes(String(value));
+}
+
+function isWorkspaceArtifactStatus(value: unknown): value is WorkspaceArtifact['status'] {
+  return ['draft', 'stable'].includes(String(value));
+}
+
+function toWorkspaceArtifactSummary(value: unknown): WorkspaceArtifactSummary | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const artifact = value as Record<string, unknown>;
+
+  if (
+    typeof artifact.id !== 'string' ||
+    typeof artifact.title !== 'string' ||
+    !isWorkspaceArtifactKind(artifact.kind) ||
+    !isWorkspaceArtifactSource(artifact.source) ||
+    !isWorkspaceArtifactStatus(artifact.status) ||
+    typeof artifact.createdAt !== 'string' ||
+    typeof artifact.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    id: artifact.id,
+    title: artifact.title,
+    kind: artifact.kind,
+    source: artifact.source,
+    status: artifact.status,
+    createdAt: artifact.createdAt,
+    updatedAt: artifact.updatedAt,
+    summary: typeof artifact.summary === 'string' ? artifact.summary : null,
+    mimeType: typeof artifact.mimeType === 'string' ? artifact.mimeType : null,
+    sizeBytes: typeof artifact.sizeBytes === 'number' ? artifact.sizeBytes : null,
+  };
+}
+
+function toWorkspaceArtifact(value: unknown): WorkspaceArtifact | null {
+  const summary = toWorkspaceArtifactSummary(value);
+
+  if (!summary || typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const artifact = value as Record<string, unknown>;
+
+  if ((summary.kind === 'text' || summary.kind === 'markdown') && typeof artifact.content === 'string') {
+    return {
+      ...summary,
+      kind: summary.kind,
+      content: artifact.content,
+    };
+  }
+
+  if (summary.kind === 'json' && artifact.content !== undefined) {
+    return {
+      ...summary,
+      kind: 'json',
+      content: artifact.content as WorkspaceArtifactJsonValue,
+    };
+  }
+
+  if (
+    summary.kind === 'table' &&
+    Array.isArray(artifact.columns) &&
+    artifact.columns.every(column => typeof column === 'string') &&
+    Array.isArray(artifact.rows) &&
+    artifact.rows.every(
+      row =>
+        Array.isArray(row) &&
+        row.every(
+          cell =>
+            typeof cell === 'string' ||
+            typeof cell === 'number' ||
+            typeof cell === 'boolean' ||
+            cell === null
+        )
+    )
+  ) {
+    return {
+      ...summary,
+      kind: 'table',
+      columns: artifact.columns,
+      rows: artifact.rows,
+    };
+  }
+
+  if (
+    summary.kind === 'link' &&
+    typeof artifact.href === 'string' &&
+    typeof artifact.label === 'string'
+  ) {
+    return {
+      ...summary,
+      kind: 'link',
+      href: artifact.href,
+      label: artifact.label,
+    };
+  }
+
+  return null;
+}
+
+function buildArtifactsFromOutputs(outputs: Record<string, unknown>): WorkspaceArtifact[] {
+  if (!Array.isArray(outputs.artifacts)) {
+    return [];
+  }
+
+  return outputs.artifacts.flatMap(artifact => {
+    const normalized = toWorkspaceArtifact(artifact);
+    return normalized ? [normalized] : [];
+  });
+}
+
 function createRunTimelineEvent(input: {
   createdAt?: string;
   metadata?: Record<string, unknown>;
@@ -615,6 +740,7 @@ function createRunRecord(input: {
     error: null,
     inputs: {},
     outputs: {},
+    artifacts: [],
     usage: {
       promptTokens: 0,
       completionTokens: 0,
@@ -1561,6 +1687,7 @@ export function createWorkspaceService(options: {
           ...run.outputs,
           ...input.outputs,
         };
+        run.artifacts = buildArtifactsFromOutputs(run.outputs);
         appendTimelineEvent(run, 'output_recorded', {
           keys: Object.keys(input.outputs),
         });
@@ -1591,6 +1718,7 @@ export function createWorkspaceService(options: {
         });
       }
 
+      run.artifacts = buildArtifactsFromOutputs(run.outputs);
       run.usage = buildUsageFromOutputs(run);
 
       if (input.messageHistory) {

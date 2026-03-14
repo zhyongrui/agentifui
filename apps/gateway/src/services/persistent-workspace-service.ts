@@ -4,6 +4,9 @@ import {
   evaluateAppLaunch,
   type QuotaUsage,
   type WorkspaceApp,
+  type WorkspaceArtifact,
+  type WorkspaceArtifactJsonValue,
+  type WorkspaceArtifactSummary,
   type WorkspaceConversationAttachment,
   type WorkspaceConversation,
   type WorkspaceConversationMessageFeedback,
@@ -705,6 +708,156 @@ function toWorkspaceConversationSuggestedPrompts(
   return prompts.length > 0 ? prompts.slice(0, 3) : undefined;
 }
 
+function isWorkspaceArtifactKind(
+  value: unknown,
+): value is WorkspaceArtifact["kind"] {
+  return ["text", "markdown", "json", "table", "link"].includes(String(value));
+}
+
+function isWorkspaceArtifactSource(
+  value: unknown,
+): value is WorkspaceArtifact["source"] {
+  return ["assistant_response", "tool_output", "user_upload"].includes(
+    String(value),
+  );
+}
+
+function isWorkspaceArtifactStatus(
+  value: unknown,
+): value is WorkspaceArtifact["status"] {
+  return ["draft", "stable"].includes(String(value));
+}
+
+function toWorkspaceArtifactSummary(
+  value: unknown,
+): WorkspaceArtifactSummary | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const artifact = value as Record<string, unknown>;
+
+  if (
+    typeof artifact.id !== "string" ||
+    typeof artifact.title !== "string" ||
+    !isWorkspaceArtifactKind(artifact.kind) ||
+    !isWorkspaceArtifactSource(artifact.source) ||
+    !isWorkspaceArtifactStatus(artifact.status) ||
+    typeof artifact.createdAt !== "string" ||
+    typeof artifact.updatedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: artifact.id,
+    title: artifact.title,
+    kind: artifact.kind,
+    source: artifact.source,
+    status: artifact.status,
+    createdAt: artifact.createdAt,
+    updatedAt: artifact.updatedAt,
+    summary: typeof artifact.summary === "string" ? artifact.summary : null,
+    mimeType:
+      typeof artifact.mimeType === "string" ? artifact.mimeType : null,
+    sizeBytes:
+      typeof artifact.sizeBytes === "number" ? artifact.sizeBytes : null,
+  };
+}
+
+function toWorkspaceArtifact(value: unknown): WorkspaceArtifact | null {
+  const summary = toWorkspaceArtifactSummary(value);
+
+  if (!summary || typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const artifact = value as Record<string, unknown>;
+
+  if (
+    (summary.kind === "text" || summary.kind === "markdown") &&
+    typeof artifact.content === "string"
+  ) {
+    return {
+      ...summary,
+      kind: summary.kind,
+      content: artifact.content,
+    };
+  }
+
+  if (summary.kind === "json" && artifact.content !== undefined) {
+    return {
+      ...summary,
+      kind: "json",
+      content: artifact.content as WorkspaceArtifactJsonValue,
+    };
+  }
+
+  if (
+    summary.kind === "table" &&
+    Array.isArray(artifact.columns) &&
+    artifact.columns.every((column) => typeof column === "string") &&
+    Array.isArray(artifact.rows) &&
+    artifact.rows.every(
+      (row) =>
+        Array.isArray(row) &&
+        row.every(
+          (cell) =>
+            typeof cell === "string" ||
+            typeof cell === "number" ||
+            typeof cell === "boolean" ||
+            cell === null,
+        ),
+    )
+  ) {
+    return {
+      ...summary,
+      kind: "table",
+      columns: artifact.columns,
+      rows: artifact.rows,
+    };
+  }
+
+  if (
+    summary.kind === "link" &&
+    typeof artifact.href === "string" &&
+    typeof artifact.label === "string"
+  ) {
+    return {
+      ...summary,
+      kind: "link",
+      href: artifact.href,
+      label: artifact.label,
+    };
+  }
+
+  return null;
+}
+
+function toWorkspaceArtifactSummaries(value: unknown): WorkspaceArtifactSummary[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const artifacts = value.flatMap((entry) => {
+    const artifact = toWorkspaceArtifactSummary(entry);
+    return artifact ? [artifact] : [];
+  });
+
+  return artifacts.length > 0 ? artifacts : undefined;
+}
+
+function toWorkspaceArtifacts(value: unknown): WorkspaceArtifact[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    const artifact = toWorkspaceArtifact(entry);
+    return artifact ? [artifact] : [];
+  });
+}
+
 function toWorkspaceConversationMessages(
   value: Record<string, unknown> | string | null | undefined,
 ): WorkspaceConversationMessage[] {
@@ -754,6 +907,7 @@ function toWorkspaceConversationMessages(
             : "completed",
         createdAt: message.createdAt,
         attachments: toWorkspaceConversationAttachments(message.attachments),
+        artifacts: toWorkspaceArtifactSummaries(message.artifacts),
         feedback: toWorkspaceConversationMessageFeedback(message.feedback),
         suggestedPrompts: toWorkspaceConversationSuggestedPrompts(
           message.suggestedPrompts,
@@ -986,6 +1140,7 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
     error: row.error,
     inputs: normalizeJsonRecord(row.inputs),
     outputs: normalizeJsonRecord(row.outputs),
+    artifacts: toWorkspaceArtifacts(normalizeJsonRecord(row.outputs).artifacts),
     usage: toWorkspaceRunUsage(row.outputs, row.total_tokens),
     timeline: [],
   };
