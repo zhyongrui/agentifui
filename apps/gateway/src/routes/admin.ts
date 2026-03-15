@@ -71,6 +71,7 @@ function isAuditLevel(value: unknown): value is AuthAuditLevel {
 function isAuditEntityType(value: unknown): value is AuthAuditEntityType {
   return (
     value === 'conversation' ||
+    value === 'knowledge_source' ||
     value === 'run' ||
     value === 'session' ||
     value === 'tenant' ||

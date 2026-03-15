@@ -23,6 +23,8 @@ export const schemaModules = [
   'runs',
   'run_timeline_events',
   'workspace_uploaded_files',
+  'workspace_artifacts',
+  'knowledge_sources',
   'workspace_app_launches',
   'workspace_conversation_shares',
 ] as const;

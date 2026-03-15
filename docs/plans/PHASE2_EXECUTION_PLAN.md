@@ -692,13 +692,13 @@ Legend:
 
 ### 7.10 Future Delivery Queue: `P3-A` Retrieval, Search, And Knowledge Context
 
-- [ ] `P3-A-01` Define a document/source ingestion contract at the shared boundary
-- [ ] `P3-A-02` Add ingestion status tracking for queued, processing, succeeded, and failed states
+- [x] `P3-A-01` Define a document/source ingestion contract at the shared boundary
+- [x] `P3-A-02` Add ingestion status tracking for queued, processing, succeeded, and failed states
 - [ ] `P3-A-03` Choose and implement a chunking strategy for text-heavy sources
-- [ ] `P3-A-04` Add metadata normalization for title, URL, owner, labels, and updated timestamp
+- [x] `P3-A-04` Add metadata normalization for title, URL, owner, labels, and updated timestamp
 - [ ] `P3-A-05` Add a retrieval query abstraction usable by runtime adapters
 - [ ] `P3-A-06` Connect retrieval results to the citation/source block model
-- [ ] `P3-A-07` Add admin visibility into indexing progress and failure reasons
+- [x] `P3-A-07` Add admin visibility into indexing progress and failure reasons
 - [ ] `P3-A-08` Add tenant/group access controls for indexed knowledge sources
 - [ ] `P3-A-09` Add unit and persistence coverage for ingestion state transitions
 - [ ] `P3-A-10` Add browser coverage for source management and retrieval-backed chat results

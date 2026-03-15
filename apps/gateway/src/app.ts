@@ -14,11 +14,16 @@ import { registerBasePlugins } from './plugins/base.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAdminRoutes } from './routes/admin.js';
+import { registerAdminSourceRoutes } from './routes/admin-sources.js';
 import { registerRootRoutes } from './routes/root.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { createAdminService, type AdminService } from './services/admin-service.js';
 import { createAuditService, type AuditService } from './services/audit-service.js';
 import { createAuthService, type AuthService } from './services/auth-service.js';
+import {
+  createKnowledgeService,
+  type KnowledgeService,
+} from './services/knowledge-service.js';
 import {
   createObservabilityService,
   type ObservabilityService,
@@ -30,6 +35,7 @@ import {
 import { createPersistentAdminService } from './services/persistent-admin-service.js';
 import { createPersistentAuditService } from './services/persistent-audit-service.js';
 import { createPersistentAuthService } from './services/persistent-auth-service.js';
+import { createPersistentKnowledgeService } from './services/persistent-knowledge-service.js';
 import {
   createPersistentWorkspaceService,
   ensureWorkspaceCatalogSeed,
@@ -50,6 +56,7 @@ type BuildAppOptions = {
   authService?: AuthService;
   auditService?: AuditService;
   adminService?: AdminService;
+  knowledgeService?: KnowledgeService;
   workspaceService?: WorkspaceService;
   runtimeService?: WorkspaceRuntimeService;
 };
@@ -126,6 +133,9 @@ export async function buildApp(
     (database ? createPersistentAuditService(database) : createAuditService());
   const adminService =
     options.adminService ?? (database ? createPersistentAdminService(database) : createAdminService());
+  const knowledgeService =
+    options.knowledgeService ??
+    (database ? createPersistentKnowledgeService(database) : createKnowledgeService());
   const workspaceService =
     options.workspaceService ??
     (database
@@ -201,6 +211,7 @@ export async function buildApp(
   await registerRootRoutes(app, env, observabilityService, runtimeService);
   await registerAuthRoutes(app, env, authService, auditService);
   await registerAdminRoutes(app, authService, adminService, auditService);
+  await registerAdminSourceRoutes(app, authService, adminService, knowledgeService, auditService);
   await registerWorkspaceRoutes(
     app,
     authService,

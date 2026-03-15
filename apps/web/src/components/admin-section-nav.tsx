@@ -21,6 +21,10 @@ const SHARED_ADMIN_ITEMS = [
     label: 'Apps',
   },
   {
+    href: '/admin/sources',
+    label: 'Sources',
+  },
+  {
     href: '/admin/audit',
     label: 'Audit',
   },

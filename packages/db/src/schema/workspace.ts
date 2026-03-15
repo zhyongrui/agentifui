@@ -69,6 +69,21 @@ export const workspaceArtifactStatusEnum = pgEnum('workspace_artifact_status', [
   'draft',
   'stable',
 ]);
+export const knowledgeSourceKindEnum = pgEnum('knowledge_source_kind', [
+  'url',
+  'markdown',
+  'file',
+]);
+export const knowledgeSourceScopeEnum = pgEnum('knowledge_source_scope', [
+  'tenant',
+  'group',
+]);
+export const knowledgeIngestionStatusEnum = pgEnum('knowledge_ingestion_status', [
+  'queued',
+  'processing',
+  'succeeded',
+  'failed',
+]);
 
 export const workspaceApps = pgTable(
   'workspace_apps',
@@ -356,6 +371,43 @@ export const workspaceArtifacts = pgTable(
     workspaceArtifactsRunIndex: index('workspace_artifacts_run_idx').on(
       table.runId,
       table.sequence
+    ),
+  })
+);
+
+export const knowledgeSources = pgTable(
+  'knowledge_sources',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    groupId: varchar('group_id', { length: 120 }).references(() => groups.id, {
+      onDelete: 'set null',
+    }),
+    ownerUserId: varchar('owner_user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 255 }).notNull(),
+    sourceKind: knowledgeSourceKindEnum('source_kind').notNull(),
+    sourceUri: text('source_uri'),
+    scope: knowledgeSourceScopeEnum('scope').notNull(),
+    labels: jsonb('labels').$type<string[]>().notNull().default([]),
+    status: knowledgeIngestionStatusEnum('status').notNull().default('queued'),
+    chunkCount: integer('chunk_count').notNull().default(0),
+    lastError: text('last_error'),
+    updatedSourceAt: timestamp('updated_source_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    knowledgeSourcesTenantIndex: index('knowledge_sources_tenant_idx').on(table.tenantId),
+    knowledgeSourcesGroupIndex: index('knowledge_sources_group_idx').on(table.groupId),
+    knowledgeSourcesOwnerIndex: index('knowledge_sources_owner_idx').on(table.ownerUserId),
+    knowledgeSourcesStatusIndex: index('knowledge_sources_status_idx').on(
+      table.tenantId,
+      table.status,
+      table.updatedAt
     ),
   })
 );

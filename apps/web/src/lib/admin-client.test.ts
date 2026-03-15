@@ -3,16 +3,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createAdminTenant,
   createAdminAppGrant,
+  createAdminSource,
   exportAdminAudit,
   exportAdminUsage,
   fetchAdminApps,
   fetchAdminAudit,
   fetchAdminContext,
   fetchAdminGroups,
+  fetchAdminSources,
   fetchAdminTenants,
   fetchAdminUsage,
   fetchAdminUsers,
   revokeAdminAppGrant,
+  updateAdminSourceStatus,
   updateAdminTenantStatus,
 } from './admin-client.js';
 
@@ -231,6 +234,151 @@ describe('admin client', () => {
       ok: true,
       data: {
         events: [],
+      },
+    });
+  });
+
+  it('loads and mutates admin knowledge sources through the same-origin gateway proxy', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-15T00:00:00.000Z',
+            filters: {},
+            statusCounts: [],
+            sources: [],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'src_123',
+            tenantId: 'tenant-dev',
+            scope: 'tenant',
+            groupId: null,
+            title: 'Policy handbook',
+            sourceKind: 'url',
+            sourceUri: 'https://example.com/policy',
+            labels: ['policy'],
+            owner: {
+              userId: 'user-admin',
+              email: 'admin@iflabx.com',
+              displayName: 'Admin User',
+            },
+            status: 'queued',
+            chunkCount: 0,
+            lastError: null,
+            updatedSourceAt: null,
+            createdAt: '2026-03-15T00:00:00.000Z',
+            updatedAt: '2026-03-15T00:00:00.000Z',
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'src_123',
+            tenantId: 'tenant-dev',
+            scope: 'tenant',
+            groupId: null,
+            title: 'Policy handbook',
+            sourceKind: 'url',
+            sourceUri: 'https://example.com/policy',
+            labels: ['policy'],
+            owner: {
+              userId: 'user-admin',
+              email: 'admin@iflabx.com',
+              displayName: 'Admin User',
+            },
+            status: 'succeeded',
+            chunkCount: 12,
+            lastError: null,
+            updatedSourceAt: null,
+            createdAt: '2026-03-15T00:00:00.000Z',
+            updatedAt: '2026-03-15T00:10:00.000Z',
+          },
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const [sourcesResult, createResult, updateResult] = await Promise.all([
+      fetchAdminSources('session-123'),
+      createAdminSource('session-123', {
+        title: 'Policy handbook',
+        sourceKind: 'url',
+        sourceUri: 'https://example.com/policy',
+        scope: 'tenant',
+        groupId: null,
+        labels: ['policy'],
+        updatedSourceAt: null,
+      }),
+      updateAdminSourceStatus('session-123', 'src_123', {
+        status: 'succeeded',
+        chunkCount: 12,
+        lastError: null,
+      }),
+    ]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/admin/sources', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/admin/sources', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: 'Policy handbook',
+        sourceKind: 'url',
+        sourceUri: 'https://example.com/policy',
+        scope: 'tenant',
+        groupId: null,
+        labels: ['policy'],
+        updatedSourceAt: null,
+      }),
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/gateway/admin/sources/src_123/status', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'succeeded',
+        chunkCount: 12,
+        lastError: null,
+      }),
+      cache: 'no-store',
+    });
+    expect(sourcesResult).toMatchObject({
+      ok: true,
+      data: {
+        sources: [],
+      },
+    });
+    expect(createResult).toMatchObject({
+      ok: true,
+      data: {
+        id: 'src_123',
+        status: 'queued',
+      },
+    });
+    expect(updateResult).toMatchObject({
+      ok: true,
+      data: {
+        id: 'src_123',
+        status: 'succeeded',
       },
     });
   });

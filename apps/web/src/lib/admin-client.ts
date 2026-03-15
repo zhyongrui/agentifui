@@ -20,7 +20,13 @@ import type {
   AdminUsageExportMetadata,
   AdminUsageResponse,
   AdminUsersResponse,
-} from '@agentifui/shared/admin';
+  KnowledgeSourceCreateRequest,
+  KnowledgeSourceCreateResponse,
+  KnowledgeSourceListFilters,
+  KnowledgeSourceListResponse,
+  KnowledgeSourceStatusUpdateRequest,
+  KnowledgeSourceStatusUpdateResponse,
+} from '@agentifui/shared';
 
 const GATEWAY_PROXY_BASE_PATH = '/api/gateway';
 
@@ -178,6 +184,61 @@ export async function fetchAdminApps(
   sessionToken: string
 ): Promise<AdminAppsResponse | AdminErrorResponse> {
   return fetchAdminJson<AdminAppsResponse>('/admin/apps', sessionToken);
+}
+
+export async function fetchAdminSources(
+  sessionToken: string,
+  filters: KnowledgeSourceListFilters = {}
+): Promise<KnowledgeSourceListResponse | AdminErrorResponse> {
+  const params = new URLSearchParams();
+
+  if (filters.status) {
+    params.set('status', filters.status);
+  }
+
+  if (filters.scope) {
+    params.set('scope', filters.scope);
+  }
+
+  if (filters.groupId) {
+    params.set('groupId', filters.groupId);
+  }
+
+  if (filters.q) {
+    params.set('q', filters.q);
+  }
+
+  const query = params.toString();
+
+  return fetchAdminJson<KnowledgeSourceListResponse>(
+    `/admin/sources${query ? `?${query}` : ''}`,
+    sessionToken
+  );
+}
+
+export async function createAdminSource(
+  sessionToken: string,
+  payload: KnowledgeSourceCreateRequest
+): Promise<KnowledgeSourceCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<KnowledgeSourceCreateResponse>('/admin/sources', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function updateAdminSourceStatus(
+  sessionToken: string,
+  sourceId: string,
+  payload: KnowledgeSourceStatusUpdateRequest
+): Promise<KnowledgeSourceStatusUpdateResponse | AdminErrorResponse> {
+  return fetchAdminJson<KnowledgeSourceStatusUpdateResponse>(
+    `/admin/sources/${sourceId}/status`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
 }
 
 export async function fetchAdminCleanup(

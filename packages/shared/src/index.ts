@@ -21,3 +21,4 @@ export * from './auth/index.js';
 export * from './apps/index.js';
 export * from './chat/index.js';
 export * from './admin/index.js';
+export * from './knowledge/index.js';
