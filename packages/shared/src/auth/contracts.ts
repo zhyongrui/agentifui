@@ -79,6 +79,7 @@ export type AuthAuditAction =
   | 'workspace.pending_action.expired'
   | 'workspace.quota.launch_blocked'
   | 'workspace.quota.usage_recorded'
+  | 'workspace.run.safety_flagged'
   | 'workspace.run.stop_requested'
   | 'admin.tenant.created'
   | 'admin.tenant.suspended'

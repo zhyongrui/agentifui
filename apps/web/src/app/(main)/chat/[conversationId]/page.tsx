@@ -37,6 +37,10 @@ import { ChatMarkdown } from "../../../../components/chat-markdown";
 import { ConversationSharePanel } from "../../../../components/conversation-share-panel";
 import { WorkspaceArtifactLinkList } from "../../../../components/workspace-artifacts";
 import {
+  WorkspaceSafetyBanner,
+  WorkspaceSafetySignalList,
+} from "../../../../components/workspace-safety";
+import {
   WorkspaceCitationList,
   WorkspaceSourceBlockList,
 } from "../../../../components/workspace-sources";
@@ -311,6 +315,17 @@ function describeTimelineEvent(event: WorkspaceRunTimelineEvent) {
   return typeof event.metadata.traceId === "string"
     ? `trace ${event.metadata.traceId}`
     : "";
+}
+
+function findLatestSafetySignals(messages: WorkspaceConversationMessage[]) {
+  const latestAssistantMessage = [...messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === "assistant" && (message.safetySignals?.length ?? 0) > 0,
+    );
+
+  return latestAssistantMessage?.safetySignals ?? [];
 }
 
 export default function ConversationPage() {
@@ -837,12 +852,14 @@ export default function ConversationPage() {
             const finishReason = chunk.choices[0]?.finish_reason;
             const suggestedPrompts = chunk.suggested_prompts;
             const citations = chunk.citations;
+            const safetySignals = chunk.safety_signals;
 
             if (
               delta?.content ||
               finishReason ||
               (suggestedPrompts && suggestedPrompts.length > 0) ||
-              (citations && citations.length > 0)
+              (citations && citations.length > 0) ||
+              (safetySignals && safetySignals.length > 0)
             ) {
               setMessages((currentMessages) =>
                 currentMessages.map((message) =>
@@ -860,6 +877,10 @@ export default function ConversationPage() {
                           citations && citations.length > 0
                             ? citations
                             : message.citations,
+                        safetySignals:
+                          safetySignals && safetySignals.length > 0
+                            ? safetySignals
+                            : message.safetySignals,
                         status: finishReason
                           ? stopRequestedRef.current
                             ? "stopped"
@@ -1337,6 +1358,10 @@ export default function ConversationPage() {
   const replayAttachments = selectedRun
     ? buildReplayAttachments(selectedRun)
     : [];
+  const latestSafetySignals =
+    selectedRun && selectedRun.id === conversation.run.id
+      ? selectedRun.safetySignals
+      : findLatestSafetySignals(messages);
   const quotaAlerts = listQuotaAlerts(quotaUsages);
   const isConversationArchived = conversation.status === "archived";
 
@@ -1600,6 +1625,8 @@ export default function ConversationPage() {
         {pendingActionError ? (
           <div className="notice error">{pendingActionError}</div>
         ) : null}
+
+        <WorkspaceSafetyBanner signals={latestSafetySignals} />
 
         {pendingActions.length > 0 ? (
           <div className="chat-placeholder">
@@ -1928,6 +1955,9 @@ export default function ConversationPage() {
                     </div>
                   </div>
                 ) : null}
+                {message.safetySignals && message.safetySignals.length > 0 ? (
+                  <WorkspaceSafetySignalList signals={message.safetySignals} />
+                ) : null}
                 {message.citations && message.citations.length > 0 ? (
                   <WorkspaceCitationList citations={message.citations} />
                 ) : null}
@@ -2134,6 +2164,19 @@ export default function ConversationPage() {
                       persisted run outputs.
                     </p>
                   </article>
+                  {selectedRun.safetySignals.length > 0 ? (
+                    <article className="chat-meta-card">
+                      <span>Safety signals</span>
+                      <strong>{selectedRun.safetySignals.length}</strong>
+                      <p>
+                        {selectedRun.safetySignals.some(
+                          (signal) => signal.severity === "critical",
+                        )
+                          ? "Critical review required"
+                          : "Warning review suggested"}
+                      </p>
+                    </article>
+                  ) : null}
                   <article className="chat-meta-card">
                     <span>Timeline events</span>
                     <strong>{selectedRun.timeline.length}</strong>
@@ -2145,6 +2188,22 @@ export default function ConversationPage() {
                 </div>
 
                 <div className="run-replay-stack">
+                  {selectedRun.safetySignals.length > 0 ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Safety signals</span>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <WorkspaceSafetySignalList
+                        signals={selectedRun.safetySignals}
+                        title="Run safety signals"
+                      />
+                    </article>
+                  ) : null}
                   {selectedRun.failure ? (
                     <article className="chat-bubble assistant">
                       <div className="chat-bubble-meta">

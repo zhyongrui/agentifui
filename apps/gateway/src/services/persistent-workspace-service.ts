@@ -21,6 +21,7 @@ import {
   type WorkspacePreferencesUpdateRequest,
   type WorkspaceRun,
   type WorkspaceRunSummary,
+  type WorkspaceSafetySignal,
   type WorkspaceRunTimelineEvent,
   type WorkspaceRunTimelineEventType,
   type WorkspaceRunTrigger,
@@ -778,6 +779,64 @@ function toWorkspaceCitations(value: unknown): WorkspaceCitation[] | undefined {
   return citations.length > 0 ? citations : undefined;
 }
 
+function isWorkspaceSafetySignalSeverity(
+  value: unknown,
+): value is WorkspaceSafetySignal["severity"] {
+  return value === "warning" || value === "critical";
+}
+
+function isWorkspaceSafetySignalCategory(
+  value: unknown,
+): value is WorkspaceSafetySignal["category"] {
+  return (
+    value === "prompt_injection" ||
+    value === "data_exfiltration" ||
+    value === "policy_violation"
+  );
+}
+
+function toWorkspaceSafetySignal(value: unknown): WorkspaceSafetySignal | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const signal = value as Record<string, unknown>;
+
+  if (
+    typeof signal.id !== "string" ||
+    !isWorkspaceSafetySignalSeverity(signal.severity) ||
+    !isWorkspaceSafetySignalCategory(signal.category) ||
+    typeof signal.summary !== "string" ||
+    typeof signal.recordedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: signal.id,
+    severity: signal.severity,
+    category: signal.category,
+    summary: signal.summary,
+    detail: typeof signal.detail === "string" ? signal.detail : null,
+    recordedAt: signal.recordedAt,
+  };
+}
+
+function toWorkspaceSafetySignals(
+  value: unknown,
+): WorkspaceSafetySignal[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const signals = value.flatMap((entry) => {
+    const signal = toWorkspaceSafetySignal(entry);
+    return signal ? [signal] : [];
+  });
+
+  return signals.length > 0 ? signals : undefined;
+}
+
 function toWorkspaceSourceBlock(value: unknown): WorkspaceSourceBlock | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -1051,6 +1110,7 @@ function toWorkspaceConversationMessages(
         attachments: toWorkspaceConversationAttachments(message.attachments),
         artifacts: toWorkspaceArtifactSummaries(message.artifacts),
         citations: toWorkspaceCitations(message.citations),
+        safetySignals: toWorkspaceSafetySignals(message.safetySignals),
         feedback: toWorkspaceConversationMessageFeedback(message.feedback),
         suggestedPrompts: toWorkspaceConversationSuggestedPrompts(
           message.suggestedPrompts,
@@ -1263,6 +1323,12 @@ function toWorkspaceConversation(row: ConversationRow): WorkspaceConversation {
 }
 
 function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
+  const outputs = normalizeJsonRecord(row.outputs);
+  const assistant =
+    typeof outputs.assistant === "object" && outputs.assistant !== null
+      ? (outputs.assistant as Record<string, unknown>)
+      : null;
+
   return {
     ...toWorkspaceRunSummary(row),
     conversationId: row.conversation_id,
@@ -1281,17 +1347,22 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
       description: row.active_group_description ?? "",
     },
     error: row.error,
-    failure: parseWorkspaceRunFailure(normalizeJsonRecord(row.outputs).failure, {
+    failure: parseWorkspaceRunFailure(outputs.failure, {
       error: row.error,
       recordedAt: toIso(row.finished_at) ?? toIso(row.created_at),
     }),
     inputs: normalizeJsonRecord(row.inputs),
-    outputs: normalizeJsonRecord(row.outputs),
-    artifacts: toWorkspaceArtifacts(normalizeJsonRecord(row.outputs).artifacts),
-    citations: toWorkspaceCitations(normalizeJsonRecord(row.outputs).citations) ?? [],
-    sourceBlocks:
-      toWorkspaceSourceBlocks(normalizeJsonRecord(row.outputs).sourceBlocks) ??
+    outputs,
+    artifacts: toWorkspaceArtifacts(outputs.artifacts),
+    citations: toWorkspaceCitations(outputs.citations) ?? [],
+    safetySignals:
+      toWorkspaceSafetySignals(outputs.safetySignals) ??
+      toWorkspaceSafetySignals(outputs.safety_signals) ??
+      toWorkspaceSafetySignals(assistant?.safetySignals) ??
+      toWorkspaceSafetySignals(assistant?.safety_signals) ??
       [],
+    sourceBlocks:
+      toWorkspaceSourceBlocks(outputs.sourceBlocks) ?? [],
     usage: toWorkspaceRunUsage(row.outputs, row.total_tokens),
     timeline: [],
   };

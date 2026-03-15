@@ -2,6 +2,7 @@ import type {
   WorkspaceArtifact,
   WorkspaceCitation,
   WorkspaceHitlStep,
+  WorkspaceSafetySignal,
   WorkspaceSourceBlock,
 } from "../apps/contracts.js";
 
@@ -65,6 +66,7 @@ export type ChatCompletionResponse = {
       tool_calls?: unknown[];
       artifacts?: WorkspaceArtifact[];
       citations?: WorkspaceCitation[];
+      safety_signals?: WorkspaceSafetySignal[];
       source_blocks?: WorkspaceSourceBlock[];
       pending_actions?: WorkspaceHitlStep[];
       suggested_prompts?: string[];
@@ -107,6 +109,7 @@ export type ChatCompletionChunk = {
   trace_id?: string;
   artifacts?: WorkspaceArtifact[];
   citations?: WorkspaceCitation[];
+  safety_signals?: WorkspaceSafetySignal[];
   source_blocks?: WorkspaceSourceBlock[];
   pending_actions?: WorkspaceHitlStep[];
   suggested_prompts?: string[];

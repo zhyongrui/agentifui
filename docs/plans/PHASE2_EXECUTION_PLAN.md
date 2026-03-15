@@ -119,7 +119,8 @@ Execution status:
 | completed | `P2-C5` | HITL responded/cancelled/expired 已进入 audit，超时与放弃状态可持久化 |
 | completed | `P2-D1` | failed run 已带结构化 failure taxonomy，run detail 和 UI 已可读      |
 | completed | `P2-D2` | citation/source block 已接到 blocking/streaming、transcript、replay 和 shared transcript |
-| active    | `P2-D3` | 下一项，把 prompt injection / safety signal 接到 run 和 replay      |
+| completed | `P2-D3` | safety signal 已接到 blocking/streaming、run replay、shared transcript 和 audit |
+| active    | `P2-D4` | 下一项，把 placeholder protocol 抽成 formal runtime adapter boundary |
 
 ## 5. First Batch Definition
 
@@ -159,7 +160,8 @@ Current batch status:
 - `P2-C4` complete
 - `P2-C5` complete
 - `P2-D1` complete
-- the active follow-on item is `P2-D3`
+- `P2-D3` complete
+- the active follow-on item is `P2-D4`
 
 ## 6. Detailed Execution Notes
 
@@ -583,20 +585,20 @@ Legend:
 
 ### 7.3 Safety Queue: `P2-D3` Prompt Injection And Safety Signals
 
-- [ ] `P2-D3-01` Define a shared `WorkspaceSafetySignal` contract with severity, category, and summary
-- [ ] `P2-D3-02` Introduce run-level `safety` metadata on chat responses and persisted runs
-- [ ] `P2-D3-03` Distinguish prompt-injection, data-exfiltration, and policy-violation categories
-- [ ] `P2-D3-04` Add adapter hooks so a runtime can attach safety findings without breaking current placeholder responses
-- [ ] `P2-D3-05` Persist safety findings into run outputs and selected conversation snapshots
-- [ ] `P2-D3-06` Render a warning banner on the conversation page when the latest run is flagged
-- [ ] `P2-D3-07` Render a structured safety panel in run replay with severity and recommended action
-- [ ] `P2-D3-08` Add read-only safety signals to shared transcripts without exposing privileged internal detail
-- [ ] `P2-D3-09` Add audit events for severe blocked or flagged runs
-- [ ] `P2-D3-10` Add admin audit filtering for safety-related actions
-- [ ] `P2-D3-11` Add unit coverage for safety contract parsing and fallback behavior on older rows
-- [ ] `P2-D3-12` Add persistence coverage proving safety metadata survives restart and replay
-- [ ] `P2-D3-13` Add browser verification for flagged-run banners and replay panels
-- [ ] `P2-D3-14` Document how safety metadata should be masked in exports and public QA captures
+- [x] `P2-D3-01` Define a shared `WorkspaceSafetySignal` contract with severity, category, and summary
+- [x] `P2-D3-02` Introduce run-level `safety` metadata on chat responses and persisted runs
+- [x] `P2-D3-03` Distinguish prompt-injection, data-exfiltration, and policy-violation categories
+- [x] `P2-D3-04` Add adapter hooks so a runtime can attach safety findings without breaking current placeholder responses
+- [x] `P2-D3-05` Persist safety findings into run outputs and selected conversation snapshots
+- [x] `P2-D3-06` Render a warning banner on the conversation page when the latest run is flagged
+- [x] `P2-D3-07` Render a structured safety panel in run replay with severity and recommended action
+- [x] `P2-D3-08` Add read-only safety signals to shared transcripts without exposing privileged internal detail
+- [x] `P2-D3-09` Add audit events for severe blocked or flagged runs
+- [x] `P2-D3-10` Add admin audit filtering for safety-related actions
+- [x] `P2-D3-11` Add unit coverage for safety contract parsing and fallback behavior on older rows
+- [x] `P2-D3-12` Add persistence coverage proving safety metadata survives restart and replay
+- [x] `P2-D3-13` Add browser verification for flagged-run banners and replay panels
+- [x] `P2-D3-14` Document how safety metadata should be masked in exports and public QA captures
 
 ### 7.4 Runtime Queue: `P2-D4` App Runtime Abstraction
 

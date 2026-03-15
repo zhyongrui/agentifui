@@ -265,6 +265,22 @@ export type WorkspaceCitation = {
   snippet: string | null;
 };
 
+export type WorkspaceSafetySignalSeverity = "warning" | "critical";
+
+export type WorkspaceSafetySignalCategory =
+  | "prompt_injection"
+  | "data_exfiltration"
+  | "policy_violation";
+
+export type WorkspaceSafetySignal = {
+  id: string;
+  severity: WorkspaceSafetySignalSeverity;
+  category: WorkspaceSafetySignalCategory;
+  summary: string;
+  detail: string | null;
+  recordedAt: string;
+};
+
 export type WorkspaceMessageFeedbackRating = "positive" | "negative";
 
 export type WorkspaceConversationMessageFeedback = {
@@ -281,6 +297,7 @@ export type WorkspaceConversationMessage = {
   attachments?: WorkspaceConversationAttachment[];
   artifacts?: WorkspaceArtifactSummary[];
   citations?: WorkspaceCitation[];
+  safetySignals?: WorkspaceSafetySignal[];
   feedback?: WorkspaceConversationMessageFeedback | null;
   suggestedPrompts?: string[];
 };
@@ -424,6 +441,7 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   outputs: Record<string, unknown>;
   artifacts: WorkspaceArtifact[];
   citations: WorkspaceCitation[];
+  safetySignals: WorkspaceSafetySignal[];
   sourceBlocks: WorkspaceSourceBlock[];
   usage: WorkspaceRunUsage;
   timeline: WorkspaceRunTimelineEvent[];

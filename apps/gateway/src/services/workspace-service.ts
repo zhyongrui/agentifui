@@ -26,6 +26,7 @@ import type {
   WorkspaceRunFailure,
   WorkspaceRunStatus,
   WorkspaceRunSummary,
+  WorkspaceSafetySignal,
   WorkspaceRunTimelineEvent,
   WorkspaceRunTimelineEventType,
   WorkspaceRunTrigger,
@@ -563,6 +564,82 @@ function buildCitationsFromOutputs(outputs: Record<string, unknown>): WorkspaceC
   });
 }
 
+function isWorkspaceSafetySignalSeverity(
+  value: unknown,
+): value is WorkspaceSafetySignal["severity"] {
+  return value === "warning" || value === "critical";
+}
+
+function isWorkspaceSafetySignalCategory(
+  value: unknown,
+): value is WorkspaceSafetySignal["category"] {
+  return (
+    value === "prompt_injection" ||
+    value === "data_exfiltration" ||
+    value === "policy_violation"
+  );
+}
+
+function toWorkspaceSafetySignal(value: unknown): WorkspaceSafetySignal | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const signal = value as Record<string, unknown>;
+
+  if (
+    typeof signal.id !== "string" ||
+    !isWorkspaceSafetySignalSeverity(signal.severity) ||
+    !isWorkspaceSafetySignalCategory(signal.category) ||
+    typeof signal.summary !== "string" ||
+    typeof signal.recordedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: signal.id,
+    severity: signal.severity,
+    category: signal.category,
+    summary: signal.summary,
+    detail: typeof signal.detail === "string" ? signal.detail : null,
+    recordedAt: signal.recordedAt,
+  };
+}
+
+function buildSafetySignalsFromOutputs(
+  outputs: Record<string, unknown>,
+): WorkspaceSafetySignal[] {
+  const directSignals = Array.isArray(outputs.safetySignals)
+    ? outputs.safetySignals
+    : Array.isArray(outputs.safety_signals)
+      ? outputs.safety_signals
+      : null;
+
+  if (directSignals) {
+    return directSignals.flatMap((signal) => {
+      const normalized = toWorkspaceSafetySignal(signal);
+      return normalized ? [normalized] : [];
+    });
+  }
+
+  const assistant =
+    typeof outputs.assistant === "object" && outputs.assistant !== null
+      ? (outputs.assistant as Record<string, unknown>)
+      : null;
+  const nestedSignals =
+    assistant && Array.isArray(assistant.safetySignals)
+      ? assistant.safetySignals
+      : assistant && Array.isArray(assistant.safety_signals)
+        ? assistant.safety_signals
+        : [];
+
+  return nestedSignals.flatMap((signal) => {
+    const normalized = toWorkspaceSafetySignal(signal);
+    return normalized ? [normalized] : [];
+  });
+}
+
 function toWorkspaceSourceBlock(value: unknown): WorkspaceSourceBlock | null {
   if (typeof value !== 'object' || value === null) {
     return null;
@@ -939,6 +1016,7 @@ function createRunRecord(input: {
     outputs: {},
     artifacts: [],
     citations: [],
+    safetySignals: [],
     sourceBlocks: [],
     usage: {
       promptTokens: 0,
@@ -2137,6 +2215,7 @@ export function createWorkspaceService(options: {
         };
         run.artifacts = buildArtifactsFromOutputs(run.outputs);
         run.citations = buildCitationsFromOutputs(run.outputs);
+        run.safetySignals = buildSafetySignalsFromOutputs(run.outputs);
         run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
         appendTimelineEvent(run, 'output_recorded', {
           keys: Object.keys(input.outputs),
@@ -2186,6 +2265,7 @@ export function createWorkspaceService(options: {
 
       run.artifacts = buildArtifactsFromOutputs(run.outputs);
       run.citations = buildCitationsFromOutputs(run.outputs);
+      run.safetySignals = buildSafetySignalsFromOutputs(run.outputs);
       run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
       syncRunArtifacts(run, user.id);
       run.usage = buildUsageFromOutputs(run);

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { ChatMarkdown } from "../../../../../components/chat-markdown";
 import { MainSectionNav } from "../../../../../components/main-section-nav";
+import { WorkspaceSafetySignalList } from "../../../../../components/workspace-safety";
 import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-artifacts";
 import { WorkspaceCitationList } from "../../../../../components/workspace-sources";
 import { fetchWorkspaceSharedConversation } from "../../../../../lib/apps-client";
@@ -160,6 +161,13 @@ export default function SharedConversationPage() {
                     ))}
                   </div>
                 </div>
+              ) : null}
+              {message.safetySignals && message.safetySignals.length > 0 ? (
+                <WorkspaceSafetySignalList
+                  signals={message.safetySignals}
+                  title="Shared safety signals"
+                  publicView
+                />
               ) : null}
               {message.citations && message.citations.length > 0 ? (
                 <WorkspaceCitationList
