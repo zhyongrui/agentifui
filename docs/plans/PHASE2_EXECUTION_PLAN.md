@@ -122,7 +122,8 @@ Execution status:
 | completed | `P2-D3` | safety signal 已接到 blocking/streaming、run replay、shared transcript 和 audit |
 | completed | `P2-D4` | placeholder protocol 已抽成 formal runtime adapter boundary，runtime metadata/health/browser smoke 已闭环 |
 | completed | `P2-D5` | degraded fallback、只读恢复、admin health 和 browser 验证已闭环 |
-| active    | `P2-E1` | 下一项，开始 session/archive cleanup job 和保留策略 |
+| completed | `P2-E1` | cleanup policy、dry-run/execute job、admin preview、audit 和 runbook 已闭环 |
+| active    | `P2-E2` | 下一项，开始 auth/chat/admin/share 的 load/perf smoke |
 
 ## 5. First Batch Definition
 
@@ -165,7 +166,7 @@ Current batch status:
 - `P2-D2` complete
 - `P2-D3` complete
 - `P2-D4` complete
-- the active follow-on item is `P2-E1`
+- the active follow-on item is `P2-E2`
 
 ## 6. Detailed Execution Notes
 
@@ -634,16 +635,16 @@ Legend:
 
 ### 7.6 Operations Queue: `P2-E1` Session And Archive Cleanup
 
-- [ ] `P2-E1-01` Define retention policy for archived conversations, runs, shares, and artifacts
-- [ ] `P2-E1-02` Add a scheduled cleanup job entrypoint under the DB/scripts or gateway worker surface
-- [ ] `P2-E1-03` Add dry-run reporting for cleanup candidates before destructive actions
-- [ ] `P2-E1-04` Prune expired share links and record cleanup audit entries
-- [ ] `P2-E1-05` Prune orphaned artifacts whose parent run/conversation is no longer accessible
-- [ ] `P2-E1-06` Collapse or archive cold run timeline rows beyond the active replay window
-- [ ] `P2-E1-07` Add admin visibility into upcoming cleanup counts and last cleanup execution
-- [ ] `P2-E1-08` Add unit coverage for cleanup selection logic and retention windows
-- [ ] `P2-E1-09` Add persistence coverage for cleanup effects across archived conversation history
-- [ ] `P2-E1-10` Write an operations runbook for cleanup scheduling, dry runs, and rollback expectations
+- [x] `P2-E1-01` Define retention policy for archived conversations, runs, shares, and artifacts
+- [x] `P2-E1-02` Add a scheduled cleanup job entrypoint under the DB/scripts or gateway worker surface
+- [x] `P2-E1-03` Add dry-run reporting for cleanup candidates before destructive actions
+- [x] `P2-E1-04` Prune expired share links and record cleanup audit entries
+- [x] `P2-E1-05` Prune orphaned artifacts whose parent run/conversation is no longer accessible
+- [x] `P2-E1-06` Collapse or archive cold run timeline rows beyond the active replay window
+- [x] `P2-E1-07` Add admin visibility into upcoming cleanup counts and last cleanup execution
+- [x] `P2-E1-08` Add unit coverage for cleanup selection logic and retention windows
+- [x] `P2-E1-09` Add persistence coverage for cleanup effects across archived conversation history
+- [x] `P2-E1-10` Write an operations runbook for cleanup scheduling, dry runs, and rollback expectations
 
 ### 7.7 Operations Queue: `P2-E2` Load And Performance Smoke
 

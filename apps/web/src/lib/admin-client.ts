@@ -3,6 +3,7 @@ import type {
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
   AdminAppsResponse,
+  AdminCleanupResponse,
   AdminContextResponse,
   AdminAuditExportFormat,
   AdminAuditExportMetadata,
@@ -169,6 +170,12 @@ export async function fetchAdminApps(
   sessionToken: string
 ): Promise<AdminAppsResponse | AdminErrorResponse> {
   return fetchAdminJson<AdminAppsResponse>('/admin/apps', sessionToken);
+}
+
+export async function fetchAdminCleanup(
+  sessionToken: string
+): Promise<AdminCleanupResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminCleanupResponse>('/admin/cleanup', sessionToken);
 }
 
 export async function fetchAdminAudit(

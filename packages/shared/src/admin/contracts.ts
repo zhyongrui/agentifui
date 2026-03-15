@@ -189,6 +189,49 @@ export type AdminAppsResponse = {
   };
 };
 
+export type AdminCleanupPolicy = {
+  archivedConversationRetentionDays: number;
+  shareExpiryDays: number;
+  timelineRetentionDays: number;
+};
+
+export type AdminCleanupPreview = {
+  archivedConversations: number;
+  expiredShares: number;
+  orphanedArtifacts: number;
+  coldTimelineEvents: number;
+  totalCandidates: number;
+  cutoffs: {
+    archivedConversationBefore: string;
+    shareCreatedBefore: string;
+    timelineCreatedBefore: string;
+  };
+};
+
+export type AdminCleanupLastRun = {
+  occurredAt: string;
+  actorUserId: string | null;
+  summary: AdminCleanupPreview & {
+    mode: 'dry_run' | 'execute';
+    executedAt: string;
+    actorUserId: string | null;
+    archivedConversationsDeleted: number;
+    expiredSharesRevoked: number;
+    orphanedArtifactsDeleted: number;
+    coldTimelineEventsDeleted: number;
+  };
+};
+
+export type AdminCleanupResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    policy: AdminCleanupPolicy;
+    preview: AdminCleanupPreview;
+    lastRun: AdminCleanupLastRun | null;
+  };
+};
+
 export type AdminAppGrantCreateRequest = {
   subjectUserEmail: string;
   effect: AdminAppGrantEffect;

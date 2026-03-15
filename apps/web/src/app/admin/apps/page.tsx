@@ -10,6 +10,7 @@ import {
 import {
   createAdminAppGrant,
   fetchAdminApps,
+  fetchAdminCleanup,
   revokeAdminAppGrant,
 } from '../../../lib/admin-client';
 import {
@@ -40,15 +41,25 @@ export default function AdminAppsPage() {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [gatewayRuntime, setGatewayRuntime] = useState<GatewayRuntimeHealthSnapshot | null>(null);
+  const [cleanupStatus, setCleanupStatus] =
+    useState<Awaited<ReturnType<typeof fetchAdminCleanup>> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
-      const health = await fetchGatewayHealth();
+      if (!session) {
+        return;
+      }
+
+      const [health, cleanup] = await Promise.all([
+        fetchGatewayHealth(),
+        fetchAdminCleanup(session.sessionToken),
+      ]);
 
       if (!cancelled) {
         setGatewayRuntime(health?.runtime ?? null);
+        setCleanupStatus(cleanup);
       }
     })();
 
@@ -160,6 +171,38 @@ export default function AdminAppsPage() {
 
       <WorkspaceRuntimeDegradedBanner context="admin" snapshot={gatewayRuntime} />
       <WorkspaceRuntimeHealthCards snapshot={gatewayRuntime} />
+      {cleanupStatus && 'ok' in cleanupStatus && cleanupStatus.ok ? (
+        <div className="admin-stat-grid">
+          <article className="admin-stat-card">
+            <span>Cleanup candidates</span>
+            <strong>{cleanupStatus.data.preview.totalCandidates}</strong>
+            <p>
+              {cleanupStatus.data.preview.archivedConversations} archived conversations ·{' '}
+              {cleanupStatus.data.preview.expiredShares} expired shares
+            </p>
+          </article>
+          <article className="admin-stat-card">
+            <span>Cold timeline events</span>
+            <strong>{cleanupStatus.data.preview.coldTimelineEvents}</strong>
+            <p>
+              Retention {cleanupStatus.data.policy.timelineRetentionDays} days
+            </p>
+          </article>
+          <article className="admin-stat-card">
+            <span>Last cleanup execution</span>
+            <strong>
+              {cleanupStatus.data.lastRun
+                ? new Date(cleanupStatus.data.lastRun.occurredAt).toLocaleString()
+                : 'Never'}
+            </strong>
+            <p>
+              {cleanupStatus.data.lastRun
+                ? `${cleanupStatus.data.lastRun.summary.mode} · removed ${cleanupStatus.data.lastRun.summary.archivedConversationsDeleted} archived conversations`
+                : 'No cleanup execution has been recorded yet.'}
+            </p>
+          </article>
+        </div>
+      ) : null}
 
       {notice ? <div className="notice success">{notice}</div> : null}
       {error ? <div className="notice error">{error}</div> : null}

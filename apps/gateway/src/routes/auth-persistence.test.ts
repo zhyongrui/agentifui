@@ -1,6 +1,7 @@
 import type {
   AdminAppsResponse,
   AdminAuditResponse,
+  AdminCleanupResponse,
   AdminGroupsResponse,
   AdminTenantCreateResponse,
   AdminTenantStatusUpdateResponse,
@@ -24,11 +25,13 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from '../app.js';
+import { createPersistentAuditService } from '../services/persistent-audit-service.js';
 import { createPersistentAuthService } from '../services/persistent-auth-service.js';
 import {
   createWorkspaceRuntimeService,
   type WorkspaceRuntimeService,
 } from '../services/workspace-runtime.js';
+import { runWorkspaceCleanup } from '../services/workspace-cleanup.js';
 import { generateTotpCode } from '../services/totp-service.js';
 import {
   createPersistentTestDatabase,
@@ -2597,6 +2600,213 @@ describe.sequential('persistent auth runtime', () => {
           if (!recoveredAppClosed) {
             await recoveredApp.close();
             recoveredAppClosed = true;
+          }
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'executes workspace cleanup for aged archived conversations and exposes the result through admin cleanup status',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Tenant Admin',
+          },
+        });
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+          user: {
+            id: string;
+          };
+        };
+
+        const workspace = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(workspace.statusCode).toBe(200);
+
+        const workspaceBody = workspace.json() as WorkspaceCatalogResponse;
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_tenant_control',
+            activeGroupId: workspaceBody.data.defaultActiveGroupId,
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+        const conversationId = launchBody.data.conversationId;
+
+        if (!conversationId) {
+          throw new Error('expected launch payload to include a conversation id');
+        }
+
+        const share = await app.inject({
+          method: 'POST',
+          url: `/workspace/conversations/${conversationId}/shares`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            groupId: workspaceBody.data.defaultActiveGroupId,
+          },
+        });
+
+        expect(share.statusCode).toBe(200);
+
+        const archive = await app.inject({
+          method: 'PUT',
+          url: `/workspace/conversations/${conversationId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            status: 'archived',
+          },
+        });
+
+        expect(archive.statusCode).toBe(200);
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          await runtimeDatabase`
+            update conversations
+            set updated_at = '2026-02-01T00:00:00.000Z'::timestamptz
+            where id = ${conversationId}
+          `;
+
+          await runtimeDatabase`
+            update workspace_conversation_shares
+            set created_at = '2026-02-15T00:00:00.000Z'::timestamptz
+            where conversation_id = ${conversationId}
+          `;
+
+          const summary = await runWorkspaceCleanup({
+            auditService: createPersistentAuditService(runtimeDatabase),
+            database: runtimeDatabase,
+            mode: 'execute',
+            tenantId: PERSISTENT_TEST_ENV.defaultTenantId,
+            actorUserId: loginPayload.user.id,
+            now: new Date('2026-03-15T12:00:00.000Z'),
+          });
+
+          expect(summary.archivedConversations).toBe(1);
+          expect(summary.expiredShares).toBe(1);
+          expect(summary.archivedConversationsDeleted).toBe(1);
+          expect(summary.expiredSharesRevoked).toBe(1);
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+        let restartedAppClosed = false;
+
+        try {
+          const conversation = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/conversations/${conversationId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(conversation.statusCode).toBe(404);
+
+          const cleanup = await restartedApp.inject({
+            method: 'GET',
+            url: '/admin/cleanup',
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(cleanup.statusCode).toBe(200);
+          expect((cleanup.json() as AdminCleanupResponse).data).toMatchObject({
+            preview: {
+              totalCandidates: 0,
+            },
+            lastRun: {
+              actorUserId: loginPayload.user.id,
+              summary: {
+                archivedConversationsDeleted: 1,
+                expiredSharesRevoked: 1,
+                mode: 'execute',
+              },
+            },
+          });
+
+          const auditEvents = await restartedApp.inject({
+            method: 'GET',
+            url: '/auth/audit-events?limit=20',
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(auditEvents.statusCode).toBe(200);
+          expect(auditEvents.json().data.events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                action: 'workspace.cleanup.executed',
+                payload: expect.objectContaining({
+                  summary: expect.objectContaining({
+                    archivedConversationsDeleted: 1,
+                  }),
+                }),
+              }),
+              expect.objectContaining({
+                action: 'workspace.conversation_share.expired',
+              }),
+            ]),
+          );
+        } finally {
+          if (!restartedAppClosed) {
+            await restartedApp.close();
+            restartedAppClosed = true;
           }
         }
       } finally {

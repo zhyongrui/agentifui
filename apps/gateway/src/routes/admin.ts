@@ -3,6 +3,7 @@ import type {
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
   AdminAppsResponse,
+  AdminCleanupResponse,
   AdminContextResponse,
   AdminAuditExportFormat,
   AdminAuditExportJsonBundle,
@@ -788,6 +789,44 @@ export async function registerAdminRoutes(
       ipAddress: request.ip,
       resource: '/admin/apps',
       resultCount: response.data.apps.length,
+    });
+
+    return response;
+  });
+
+  app.get('/admin/cleanup', async (request, reply) => {
+    const access = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization,
+    );
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const cleanup = await adminService.getCleanupStatusForUser(access.user);
+    const response: AdminCleanupResponse = {
+      ok: true,
+      data: {
+        generatedAt: new Date().toISOString(),
+        policy: cleanup.policy,
+        preview: cleanup.preview,
+        lastRun: cleanup.lastRun,
+      },
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'admin.workspace.read',
+      entityType: 'tenant',
+      entityId: access.user.tenantId,
+      ipAddress: request.ip,
+      payload: {
+        resource: '/admin/cleanup',
+      },
     });
 
     return response;

@@ -9,6 +9,7 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
+    "cleanup:workspace": "tsx src/scripts/workspace-cleanup.ts",
     "type-check": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'gateway lint is not configured yet'"
   },

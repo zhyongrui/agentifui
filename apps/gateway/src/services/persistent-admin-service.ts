@@ -7,6 +7,9 @@ import type {
   AdminAuditActionCount,
   AdminAuditEventSummary,
   AdminAuditFilters,
+  AdminCleanupLastRun,
+  AdminCleanupPolicy,
+  AdminCleanupPreview,
   AdminAuditPayloadMode,
   AdminAuditTenantCount,
   AdminTenantSummary,
@@ -24,6 +27,11 @@ import {
   WORKSPACE_APPS,
   WORKSPACE_GROUPS,
 } from './workspace-catalog-fixtures.js';
+import {
+  buildWorkspaceCleanupPolicy,
+  getLatestWorkspaceCleanupExecution,
+  previewWorkspaceCleanup,
+} from './workspace-cleanup.js';
 import { buildDefaultQuotaLimitRecords } from './workspace-quota.js';
 
 type UserRow = {
@@ -1291,6 +1299,30 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
     },
     async listAppsForUser(user) {
       return listAppSummariesForTenant(database, user.tenantId);
+    },
+    async getCleanupStatusForUser(user) {
+      const policy: AdminCleanupPolicy = buildWorkspaceCleanupPolicy();
+      const preview: AdminCleanupPreview = await previewWorkspaceCleanup(
+        database,
+        user.tenantId,
+      );
+      const latestRun = await getLatestWorkspaceCleanupExecution(
+        database,
+        user.tenantId,
+      );
+      const lastRun: AdminCleanupLastRun | null = latestRun
+        ? {
+            actorUserId: latestRun.actorUserId,
+            occurredAt: latestRun.occurredAt,
+            summary: latestRun.summary,
+          }
+        : null;
+
+      return {
+        policy,
+        preview,
+        lastRun,
+      };
     },
     async createAppGrantForUser(user, input) {
       const appId = input.appId.trim();

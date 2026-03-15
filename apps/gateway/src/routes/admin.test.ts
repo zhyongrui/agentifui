@@ -3,6 +3,7 @@ import type {
   AdminAppSummary,
   AdminAppUserGrant,
   AdminAuditActionCount,
+  AdminCleanupResponse,
   AdminAuditEventSummary,
   AdminGroupSummary,
   AdminTenantSummary,
@@ -173,6 +174,27 @@ const auditTenantCounts = [
   },
 ];
 
+const cleanupStatus = {
+  policy: {
+    archivedConversationRetentionDays: 30,
+    shareExpiryDays: 14,
+    timelineRetentionDays: 14,
+  },
+  preview: {
+    archivedConversations: 2,
+    expiredShares: 1,
+    orphanedArtifacts: 0,
+    coldTimelineEvents: 8,
+    totalCandidates: 11,
+    cutoffs: {
+      archivedConversationBefore: '2026-02-10T00:00:00.000Z',
+      shareCreatedBefore: '2026-02-26T00:00:00.000Z',
+      timelineCreatedBefore: '2026-02-26T00:00:00.000Z',
+    },
+  },
+  lastRun: null,
+};
+
 function createAdminService(canReadAdmin = true, canReadPlatformAdmin = false) {
   return {
     canReadAdminForUser: vi.fn().mockResolvedValue(canReadAdmin),
@@ -206,6 +228,7 @@ function createAdminService(canReadAdmin = true, canReadPlatformAdmin = false) {
     listUsersForUser: vi.fn().mockResolvedValue(adminUsers),
     listGroupsForUser: vi.fn().mockResolvedValue(adminGroups),
     listAppsForUser: vi.fn().mockResolvedValue(adminApps),
+    getCleanupStatusForUser: vi.fn().mockResolvedValue(cleanupStatus),
     createAppGrantForUser: vi.fn(),
     revokeAppGrantForUser: vi.fn(),
     listAuditForUser: vi.fn().mockResolvedValue({
@@ -218,6 +241,61 @@ function createAdminService(canReadAdmin = true, canReadPlatformAdmin = false) {
 }
 
 describe('admin routes', () => {
+  it('returns cleanup preview status for admin viewers', async () => {
+    const authService = createTestAuthService();
+    const adminService = createAdminService();
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/cleanup',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as AdminCleanupResponse).data).toMatchObject({
+        preview: {
+          totalCandidates: 11,
+          expiredShares: 1,
+        },
+        policy: {
+          shareExpiryDays: 14,
+        },
+      });
+      expect(adminService.getCleanupStatusForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@iflabx.com',
+        })
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('rejects requests without a bearer token', async () => {
     const app = await buildApp(testEnv, {
       logger: false,

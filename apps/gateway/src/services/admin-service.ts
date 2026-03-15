@@ -1,6 +1,9 @@
 import type { AuthAuditEvent, AuthUser } from '@agentifui/shared/auth';
 import type {
   AdminAppGrantCreateRequest,
+  AdminCleanupLastRun,
+  AdminCleanupPolicy,
+  AdminCleanupPreview,
   AdminAppSummary,
   AdminAppUserGrant,
   AdminAuditActionCount,
@@ -23,6 +26,7 @@ import {
   resolveDefaultMemberGroupIds,
   resolveDefaultRoleIds,
 } from './workspace-catalog-fixtures.js';
+import { buildWorkspaceCleanupPolicy } from './workspace-cleanup.js';
 
 type AdminMutationErrorResult = {
   ok: false;
@@ -97,6 +101,17 @@ type AdminService = {
   listUsersForUser(user: AuthUser): AdminUserSummary[] | Promise<AdminUserSummary[]>;
   listGroupsForUser(user: AuthUser): AdminGroupSummary[] | Promise<AdminGroupSummary[]>;
   listAppsForUser(user: AuthUser): AdminAppSummary[] | Promise<AdminAppSummary[]>;
+  getCleanupStatusForUser(
+    user: AuthUser
+  ): Promise<{
+    policy: AdminCleanupPolicy;
+    preview: AdminCleanupPreview;
+    lastRun: AdminCleanupLastRun | null;
+  }> | {
+    policy: AdminCleanupPolicy;
+    preview: AdminCleanupPreview;
+    lastRun: AdminCleanupLastRun | null;
+  };
   createAppGrantForUser(
     user: AuthUser,
     input: CreateAppGrantInput
@@ -639,6 +654,27 @@ export function createAdminService(): AdminService {
         app.id,
         memoryGrants.filter(grant => grant.appId === app.id)
       )!).filter((app): app is AdminAppSummary => Boolean(app));
+    },
+    getCleanupStatusForUser() {
+      const policy = buildWorkspaceCleanupPolicy();
+      const now = new Date().toISOString();
+
+      return {
+        policy,
+        preview: {
+          archivedConversations: 0,
+          expiredShares: 0,
+          orphanedArtifacts: 0,
+          coldTimelineEvents: 0,
+          totalCandidates: 0,
+          cutoffs: {
+            archivedConversationBefore: now,
+            shareCreatedBefore: now,
+            timelineCreatedBefore: now,
+          },
+        },
+        lastRun: null,
+      };
     },
     createAppGrantForUser(user, input) {
       const app = WORKSPACE_APPS.find(candidate => candidate.id === input.appId);
