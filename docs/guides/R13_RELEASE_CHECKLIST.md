@@ -73,6 +73,20 @@ Expected outcome:
 - `/apps` renders
 - `/chat` or a concrete `/chat/:conversationId` route renders
 
+Then run the lightweight perf smoke gate:
+
+```bash
+PERF_BASE_URL=https://agentifui.example.com \
+PERF_ENFORCE_BUDGETS=1 \
+npm run perf:smoke
+```
+
+Expected outcome:
+
+- auth/workspace/chat/admin/share scenarios all complete without errors
+- no scenario breaches its configured p95/error-rate budget
+- a JSON artifact is written under `artifacts/perf/`
+
 ## Rollback
 
 1. `git checkout <last-known-good-tag-or-commit>`

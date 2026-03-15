@@ -123,7 +123,8 @@ Execution status:
 | completed | `P2-D4` | placeholder protocol 已抽成 formal runtime adapter boundary，runtime metadata/health/browser smoke 已闭环 |
 | completed | `P2-D5` | degraded fallback、只读恢复、admin health 和 browser 验证已闭环 |
 | completed | `P2-E1` | cleanup policy、dry-run/execute job、admin preview、audit 和 runbook 已闭环 |
-| active    | `P2-E2` | 下一项，开始 auth/chat/admin/share 的 load/perf smoke |
+| completed | `P2-E2` | perf seed/smoke、JSON artifact、预算门槛和 release gate 已闭环 |
+| active    | `P2-E3` | 下一项，开始 tenant usage analytics 汇总与 admin UI |
 
 ## 5. First Batch Definition
 
@@ -166,7 +167,7 @@ Current batch status:
 - `P2-D2` complete
 - `P2-D3` complete
 - `P2-D4` complete
-- the active follow-on item is `P2-E2`
+- the active follow-on item is `P2-E3`
 
 ## 6. Detailed Execution Notes
 
@@ -648,17 +649,17 @@ Legend:
 
 ### 7.7 Operations Queue: `P2-E2` Load And Performance Smoke
 
-- [ ] `P2-E2-01` Define representative load scenarios for auth, workspace launch, chat, admin, and share reads
-- [ ] `P2-E2-02` Add deterministic seed scripts for performance test data
-- [ ] `P2-E2-03` Add a CLI or `npm` entrypoint for lightweight load smoke execution
-- [ ] `P2-E2-04` Capture p50/p95 latency and basic failure-rate budgets for the main endpoints
-- [ ] `P2-E2-05` Measure chat completion latency with and without persisted artifacts
-- [ ] `P2-E2-06` Measure history and replay latency on long conversations
-- [ ] `P2-E2-07` Measure admin audit export performance on realistic event volume
-- [ ] `P2-E2-08` Add perf summary artifact output so CI or manual runs can retain results
-- [ ] `P2-E2-09` Fix the slowest clear regression found by the first smoke run
-- [ ] `P2-E2-10` Document host-specific caveats for shared Postgres and local browser runtime limits
-- [ ] `P2-E2-11` Add a lightweight regression gate to release or pre-release verification docs
+- [x] `P2-E2-01` Define representative load scenarios for auth, workspace launch, chat, admin, and share reads
+- [x] `P2-E2-02` Add deterministic seed scripts for performance test data
+- [x] `P2-E2-03` Add a CLI or `npm` entrypoint for lightweight load smoke execution
+- [x] `P2-E2-04` Capture p50/p95 latency and basic failure-rate budgets for the main endpoints
+- [x] `P2-E2-05` Measure chat completion latency with and without persisted artifacts
+- [x] `P2-E2-06` Measure history and replay latency on long conversations
+- [x] `P2-E2-07` Measure admin audit export performance on realistic event volume
+- [x] `P2-E2-08` Add perf summary artifact output so CI or manual runs can retain results
+- [x] `P2-E2-09` Fix the slowest clear regression found by the first smoke run
+- [x] `P2-E2-10` Document host-specific caveats for shared Postgres and local browser runtime limits
+- [x] `P2-E2-11` Add a lightweight regression gate to release or pre-release verification docs
 
 ### 7.8 Operations Queue: `P2-E3` Tenant Usage Analytics
 

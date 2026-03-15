@@ -13,3 +13,4 @@ test-results
 .cache/playwright-debs
 .cache/playwright-runtime-libs
 .cache/bin
+artifacts
