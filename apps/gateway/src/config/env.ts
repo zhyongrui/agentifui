@@ -16,6 +16,7 @@ export type GatewayEnv = {
   defaultSsoUserStatus: SsoJitUserStatus;
   authLockoutThreshold: number;
   authLockoutDurationMs: number;
+  degradedRuntimeIds?: string[];
 };
 
 const DEFAULT_GATEWAY_HOST = '0.0.0.0';
@@ -100,6 +101,17 @@ function parseSsoJitUserStatus(value: string | undefined): SsoJitUserStatus {
   throw new Error(`Invalid GATEWAY_SSO_JIT_DEFAULT_STATUS value: ${value}`);
 }
 
+function parseRuntimeIdList(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean);
+}
+
 function parseBetterAuthSecret(
   value: string | undefined,
   nodeEnv: GatewayEnv['nodeEnv']
@@ -148,5 +160,6 @@ export function parseGatewayEnv(source: NodeJS.ProcessEnv): GatewayEnv {
       DEFAULT_AUTH_LOCKOUT_DURATION_MS,
       'GATEWAY_AUTH_LOCKOUT_DURATION_MS'
     ),
+    degradedRuntimeIds: parseRuntimeIdList(source.GATEWAY_DEGRADED_RUNTIMES),
   };
 }

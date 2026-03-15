@@ -1,13 +1,21 @@
 'use client';
 
 import type { AdminAppGrantCreateRequest, AdminAppSummary } from '@agentifui/shared/admin';
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
+import {
+  WorkspaceRuntimeDegradedBanner,
+  WorkspaceRuntimeHealthCards,
+} from '../../../components/workspace-runtime-health';
 import {
   createAdminAppGrant,
   fetchAdminApps,
   revokeAdminAppGrant,
 } from '../../../lib/admin-client';
+import {
+  fetchGatewayHealth,
+  type GatewayRuntimeHealthSnapshot,
+} from '../../../lib/gateway-health-client';
 import { useAdminPageData } from '../../../lib/use-admin-page';
 
 function formatTimestamp(value: string | null) {
@@ -31,6 +39,23 @@ export default function AdminAppsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [gatewayRuntime, setGatewayRuntime] = useState<GatewayRuntimeHealthSnapshot | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const health = await fetchGatewayHealth();
+
+      if (!cancelled) {
+        setGatewayRuntime(health?.runtime ?? null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   function updateDraft(
     appId: string,
@@ -132,6 +157,9 @@ export default function AdminAppsPage() {
           Manage app visibility across groups, roles and direct user allow or deny overrides.
         </p>
       </div>
+
+      <WorkspaceRuntimeDegradedBanner context="admin" snapshot={gatewayRuntime} />
+      <WorkspaceRuntimeHealthCards snapshot={gatewayRuntime} />
 
       {notice ? <div className="notice success">{notice}</div> : null}
       {error ? <div className="notice error">{error}</div> : null}

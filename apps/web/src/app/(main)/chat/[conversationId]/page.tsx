@@ -2,6 +2,7 @@
 
 import {
   getQuotaSeverity,
+  isWorkspaceRunDegraded,
   listQuotaAlerts,
   WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES,
   WORKSPACE_ATTACHMENT_MAX_BYTES,
@@ -13,6 +14,7 @@ import type {
   WorkspaceConversationAttachment,
   WorkspaceHitlStep,
   WorkspaceConversationMessage,
+  WorkspaceErrorResponse,
   WorkspaceMessageFeedbackRating,
   WorkspaceRun,
   WorkspaceRunSummary,
@@ -37,6 +39,9 @@ import { ChatMarkdown } from "../../../../components/chat-markdown";
 import { ConversationSharePanel } from "../../../../components/conversation-share-panel";
 import { WorkspaceArtifactLinkList } from "../../../../components/workspace-artifacts";
 import {
+  WorkspaceRuntimeDegradedBanner,
+} from "../../../../components/workspace-runtime-health";
+import {
   WorkspaceSafetyBanner,
   WorkspaceSafetySignalList,
 } from "../../../../components/workspace-safety";
@@ -56,6 +61,10 @@ import {
   uploadWorkspaceConversationFile,
 } from "../../../../lib/apps-client";
 import { clearAuthSession } from "../../../../lib/auth-session";
+import {
+  fetchGatewayHealth,
+  type GatewayRuntimeHealthSnapshot,
+} from "../../../../lib/gateway-health-client";
 import {
   stopChatCompletion,
   streamChatCompletion,
@@ -89,6 +98,16 @@ function isGatewayErrorResponse(
     error !== null &&
     "error" in error &&
     typeof (error as { error?: unknown }).error === "object"
+  );
+}
+
+function isWorkspaceRuntimeDegradedError(
+  error: WorkspaceErrorResponse["error"],
+): boolean {
+  return (
+    typeof error.details === "object" &&
+    error.details !== null &&
+    (error.details as { reason?: unknown }).reason === "runtime_degraded"
   );
 }
 
@@ -375,6 +394,8 @@ export default function ConversationPage() {
   const [activeConversationAction, setActiveConversationAction] = useState<
     "archive" | "delete" | "pin" | "rename" | "restore" | "unpin" | null
   >(null);
+  const [gatewayRuntime, setGatewayRuntime] =
+    useState<GatewayRuntimeHealthSnapshot | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const copiedMessageResetRef = useRef<number | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
@@ -384,6 +405,11 @@ export default function ConversationPage() {
     typeof params?.conversationId === "string"
       ? params.conversationId.trim()
       : "";
+
+  async function refreshGatewayRuntimeHealth() {
+    const health = await fetchGatewayHealth();
+    setGatewayRuntime(health?.runtime ?? null);
+  }
 
   async function loadRunDetail(sessionToken: string, runId: string) {
     const result = await fetchWorkspaceRun(sessionToken, runId);
@@ -474,10 +500,12 @@ export default function ConversationPage() {
     setConversationError(null);
 
     try {
-      const result = await fetchWorkspaceConversation(
-        sessionToken,
-        conversationId,
-      );
+      const [result, gatewayHealth] = await Promise.all([
+        fetchWorkspaceConversation(sessionToken, conversationId),
+        fetchGatewayHealth(),
+      ]);
+
+      setGatewayRuntime(gatewayHealth?.runtime ?? null);
 
       if (!result.ok) {
         setConversation(null);
@@ -565,6 +593,7 @@ export default function ConversationPage() {
     setActiveConversationAction(null);
     setActiveFeedbackMessageId(null);
     setCopiedMessageId(null);
+    setGatewayRuntime(null);
     activeAssistantMessageIdRef.current = null;
     activeRunIdRef.current = null;
     stopRequestedRef.current = false;
@@ -687,6 +716,7 @@ export default function ConversationPage() {
     if (
       !session ||
       !conversation ||
+      gatewayRuntime?.overallStatus === "degraded" ||
       conversation.status === "archived" ||
       selectedFiles.length === 0
     ) {
@@ -737,6 +767,12 @@ export default function ConversationPage() {
           }
 
           if (result.error.code === "WORKSPACE_FORBIDDEN") {
+            if (isWorkspaceRuntimeDegradedError(result.error)) {
+              setComposerError(result.error.message);
+              await refreshGatewayRuntimeHealth();
+              continue;
+            }
+
             router.replace("/auth/pending");
             return;
           }
@@ -906,6 +942,8 @@ export default function ConversationPage() {
         preferredRunId: activeRunIdRef.current,
       });
     } catch (error) {
+      await refreshGatewayRuntimeHealth();
+
       if (isGatewayErrorResponse(error)) {
         if (error.error.code === "invalid_token") {
           clearAuthSession(window.sessionStorage);
@@ -956,6 +994,7 @@ export default function ConversationPage() {
     if (
       !session ||
       !conversation ||
+      gatewayRuntime?.overallStatus === "degraded" ||
       conversation.status === "archived" ||
       isStreaming ||
       isUploadingAttachments ||
@@ -1054,6 +1093,13 @@ export default function ConversationPage() {
       return;
     }
 
+    if (gatewayRuntime?.overallStatus === "degraded") {
+      setPendingActionError(
+        "Workspace runtime is currently degraded. Pending actions are temporarily read-only.",
+      );
+      return;
+    }
+
     setPendingActionError(null);
     setActivePendingActionId(step.id);
 
@@ -1080,6 +1126,12 @@ export default function ConversationPage() {
         }
 
         if (result.error.code === "WORKSPACE_FORBIDDEN") {
+          if (isWorkspaceRuntimeDegradedError(result.error)) {
+            setPendingActionError(result.error.message);
+            await refreshGatewayRuntimeHealth();
+            return;
+          }
+
           router.replace("/auth/pending");
           return;
         }
@@ -1167,13 +1219,20 @@ export default function ConversationPage() {
   }
 
   function handleSuggestedPrompt(prompt: string) {
+    if (gatewayRuntime?.overallStatus === "degraded") {
+      return;
+    }
+
     setDraft(prompt);
     setComposerError(null);
     composerInputRef.current?.focus();
   }
 
   function handleRetryMessage(message: WorkspaceConversationMessage) {
-    if (message.role !== "user") {
+    if (
+      message.role !== "user" ||
+      gatewayRuntime?.overallStatus === "degraded"
+    ) {
       return;
     }
 
@@ -1184,7 +1243,12 @@ export default function ConversationPage() {
   }
 
   async function handleRegenerateMessage(messageId: string) {
-    if (!conversation || isStreaming || isUploadingAttachments) {
+    if (
+      !conversation ||
+      gatewayRuntime?.overallStatus === "degraded" ||
+      isStreaming ||
+      isUploadingAttachments
+    ) {
       return;
     }
 
@@ -1364,6 +1428,10 @@ export default function ConversationPage() {
       : findLatestSafetySignals(messages);
   const quotaAlerts = listQuotaAlerts(quotaUsages);
   const isConversationArchived = conversation.status === "archived";
+  const isRuntimeDegraded =
+    gatewayRuntime?.overallStatus === "degraded" ||
+    (selectedRun?.id === conversation.run.id && isWorkspaceRunDegraded(selectedRun));
+  const isConversationReadOnly = isConversationArchived || isRuntimeDegraded;
 
   return (
     <div className="chat-surface stack">
@@ -1618,6 +1686,11 @@ export default function ConversationPage() {
           </div>
         ) : null}
 
+        <WorkspaceRuntimeDegradedBanner
+          context="conversation"
+          snapshot={gatewayRuntime}
+        />
+
         {composerError ? (
           <div className="notice error">{composerError}</div>
         ) : null}
@@ -1661,7 +1734,7 @@ export default function ConversationPage() {
                       <button
                         type="button"
                         className="primary"
-                        disabled={isSubmitting || !isPending}
+                        disabled={isSubmitting || !isPending || isRuntimeDegraded}
                         onClick={() =>
                           void handlePendingActionRespond(step, "approve")
                         }
@@ -1671,7 +1744,7 @@ export default function ConversationPage() {
                       <button
                         type="button"
                         className="secondary"
-                        disabled={isSubmitting || !isPending}
+                        disabled={isSubmitting || !isPending || isRuntimeDegraded}
                         onClick={() =>
                           void handlePendingActionRespond(step, "reject")
                         }
@@ -1681,7 +1754,7 @@ export default function ConversationPage() {
                       <button
                         type="button"
                         className="secondary danger"
-                        disabled={isSubmitting || !isPending}
+                        disabled={isSubmitting || !isPending || isRuntimeDegraded}
                         onClick={() =>
                           void handlePendingActionRespond(step, "cancel")
                         }
@@ -1707,7 +1780,7 @@ export default function ConversationPage() {
                                   event.target.value,
                                 )
                               }
-                              disabled={isSubmitting || !isPending}
+                              disabled={isSubmitting || !isPending || isRuntimeDegraded}
                             />
                           ) : field.type === "select" ? (
                             <select
@@ -1720,7 +1793,7 @@ export default function ConversationPage() {
                                   event.target.value,
                                 )
                               }
-                              disabled={isSubmitting || !isPending}
+                              disabled={isSubmitting || !isPending || isRuntimeDegraded}
                             >
                               <option value="">Select an option</option>
                               {field.options?.map((option) => (
@@ -1742,7 +1815,7 @@ export default function ConversationPage() {
                                   event.target.value,
                                 )
                               }
-                              disabled={isSubmitting || !isPending}
+                              disabled={isSubmitting || !isPending || isRuntimeDegraded}
                             />
                           )}
                           {field.helpText ? <small>{field.helpText}</small> : null}
@@ -1752,7 +1825,7 @@ export default function ConversationPage() {
                         <button
                           type="button"
                           className="primary"
-                          disabled={isSubmitting || !isPending}
+                          disabled={isSubmitting || !isPending || isRuntimeDegraded}
                           onClick={() =>
                             void handlePendingActionRespond(step, "submit")
                           }
@@ -1762,7 +1835,7 @@ export default function ConversationPage() {
                         <button
                           type="button"
                           className="secondary danger"
-                          disabled={isSubmitting || !isPending}
+                          disabled={isSubmitting || !isPending || isRuntimeDegraded}
                           onClick={() =>
                             void handlePendingActionRespond(step, "cancel")
                           }
@@ -1792,6 +1865,12 @@ export default function ConversationPage() {
                         ),
                       )}
                     </ul>
+                  ) : null}
+                  {isRuntimeDegraded && isPending ? (
+                    <div className="notice warning">
+                      Runtime recovery is required before this pending action can
+                      be submitted.
+                    </div>
                   ) : null}
                 </article>
               );
@@ -1859,7 +1938,7 @@ export default function ConversationPage() {
                       disabled={
                         isStreaming ||
                         isUploadingAttachments ||
-                        isConversationArchived
+                        isConversationReadOnly
                       }
                     >
                       Retry
@@ -1875,7 +1954,7 @@ export default function ConversationPage() {
                       disabled={
                         isStreaming ||
                         isUploadingAttachments ||
-                        isConversationArchived
+                        isConversationReadOnly
                       }
                     >
                       Regenerate
@@ -1946,7 +2025,7 @@ export default function ConversationPage() {
                           disabled={
                             isStreaming ||
                             isUploadingAttachments ||
-                            isConversationArchived
+                            isConversationReadOnly
                           }
                         >
                           {prompt}
@@ -1989,7 +2068,7 @@ export default function ConversationPage() {
             placeholder={`Ask ${conversation.app.name} to work on something concrete...`}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            disabled={isStreaming || isConversationArchived}
+            disabled={isStreaming || isConversationReadOnly}
           />
           <label className="field" htmlFor="chat-attachment">
             Attachments
@@ -2001,7 +2080,7 @@ export default function ConversationPage() {
             accept={WORKSPACE_ATTACHMENT_ACCEPTED_CONTENT_TYPES.join(",")}
             onChange={(event) => void handleAttachmentSelect(event)}
             disabled={
-              isStreaming || isUploadingAttachments || isConversationArchived
+              isStreaming || isUploadingAttachments || isConversationReadOnly
             }
           />
           <p className="chat-composer-hint">
@@ -2017,7 +2096,7 @@ export default function ConversationPage() {
                     type="button"
                     className="secondary"
                     onClick={() => handleAttachmentRemove(attachment.id)}
-                    disabled={isStreaming || isConversationArchived}
+                    disabled={isStreaming || isConversationReadOnly}
                   >
                     Remove
                   </button>
@@ -2031,7 +2110,7 @@ export default function ConversationPage() {
               type="submit"
               disabled={
                 isStreaming ||
-                isConversationArchived ||
+                isConversationReadOnly ||
                 isUploadingAttachments ||
                 (draft.trim().length === 0 && draftAttachments.length === 0)
               }

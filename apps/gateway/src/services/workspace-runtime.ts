@@ -298,12 +298,13 @@ function buildRuntimeMetadata(input: WorkspaceRuntimeAdapterHealth): WorkspaceRu
 function createPlaceholderAdapter(input: {
   id: WorkspaceRuntimeAdapterId;
   label: string;
+  status?: WorkspaceRuntimeAdapterHealth["status"];
   structured?: boolean;
 }): WorkspaceRuntimeAdapter {
   const health: WorkspaceRuntimeAdapterHealth = {
     id: input.id,
     label: input.label,
-    status: "available",
+    status: input.status ?? "available",
     capabilities: {
       streaming: true,
       citations: true,
@@ -372,16 +373,22 @@ function createPlaceholderAdapter(input: {
 
 export function createWorkspaceRuntimeService(input: {
   adapters?: Partial<Record<WorkspaceRuntimeAdapterId, WorkspaceRuntimeAdapter>>;
+  degradedRuntimeIds?: string[];
   resolveAppRuntimeId?: (appId: string) => WorkspaceRuntimeAdapterId;
 } = {}): WorkspaceRuntimeService {
+  const degradedRuntimeIds = new Set(input.degradedRuntimeIds ?? []);
   const adapters: Record<WorkspaceRuntimeAdapterId, WorkspaceRuntimeAdapter> = {
     placeholder: createPlaceholderAdapter({
       id: "placeholder",
       label: "Placeholder Runtime",
+      status: degradedRuntimeIds.has("placeholder") ? "degraded" : "available",
     }),
     placeholder_structured: createPlaceholderAdapter({
       id: "placeholder_structured",
       label: "Structured Placeholder Runtime",
+      status: degradedRuntimeIds.has("placeholder_structured")
+        ? "degraded"
+        : "available",
       structured: true,
     }),
     ...input.adapters,

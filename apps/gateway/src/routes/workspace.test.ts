@@ -22,6 +22,10 @@ import type { ChatCompletionResponse } from "@agentifui/shared/chat";
 import { buildApp } from "../app.js";
 import { createAuditService } from "../services/audit-service.js";
 import { createAuthService } from "../services/auth-service.js";
+import {
+  createWorkspaceRuntimeService,
+  type WorkspaceRuntimeService,
+} from "../services/workspace-runtime.js";
 import { createWorkspaceService } from "../services/workspace-service.js";
 
 const testEnv: {
@@ -80,6 +84,69 @@ async function createTestApp(
   return {
     app,
     authService,
+  };
+}
+
+function createSwitchableRuntimeService(): {
+  runtimeService: WorkspaceRuntimeService;
+  setDegraded(value: boolean): void;
+} {
+  const availableService = createWorkspaceRuntimeService();
+  let degraded = false;
+
+  const readSnapshot = () => {
+    const snapshot = availableService.getHealthSnapshot();
+
+    if (!degraded) {
+      return snapshot;
+    }
+
+    return {
+      overallStatus: "degraded" as const,
+      runtimes: snapshot.runtimes.map((runtime) => ({
+        ...runtime,
+        status: "degraded" as const,
+      })),
+    };
+  };
+
+  return {
+    runtimeService: {
+      getHealthSnapshot() {
+        return readSnapshot();
+      },
+      async invoke(input) {
+        if (!degraded) {
+          return availableService.invoke(input);
+        }
+
+        const snapshot = readSnapshot();
+        const runtime =
+          snapshot.runtimes.find((entry) => entry.id === "placeholder") ??
+          snapshot.runtimes[0] ??
+          null;
+
+        return {
+          ok: false as const,
+          error: {
+            code: "runtime_unavailable" as const,
+            message: `${runtime?.label ?? "Workspace runtime"} is currently degraded.`,
+            detail:
+              "Wait for the adapter health probe to recover before retrying.",
+            retryable: true,
+            runtime: runtime
+              ? {
+                  ...runtime,
+                  invokedAt: new Date().toISOString(),
+                }
+              : null,
+          },
+        };
+      },
+    },
+    setDegraded(value) {
+      degraded = value;
+    },
   };
 }
 
@@ -1371,6 +1438,95 @@ describe("workspace routes", () => {
     }
   });
 
+  it("keeps conversations readable but blocks uploads while the runtime is degraded", async () => {
+    const authService = createTestAuthService();
+    const { runtimeService, setDegraded } = createSwitchableRuntimeService();
+    const { app } = await createTestApp(authService, {}, { runtimeService });
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include a conversation id");
+      }
+
+      setDegraded(true);
+
+      const conversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversation.statusCode).toBe(200);
+      expect((conversation.json() as WorkspaceConversationResponse).data.id).toBe(
+        conversationId,
+      );
+
+      const uploadResponse = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/uploads`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          fileName: "brief.txt",
+          contentType: "text/plain",
+          base64Data: Buffer.from("Policy changes for research.").toString(
+            "base64",
+          ),
+        },
+      });
+
+      expect(uploadResponse.statusCode).toBe(403);
+      expect(uploadResponse.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_FORBIDDEN",
+          details: {
+            reason: "runtime_degraded",
+            runtime: {
+              overallStatus: "degraded",
+            },
+          },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("lists recent conversations and exposes persisted run timeline events", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
@@ -2061,6 +2217,136 @@ describe("workspace routes", () => {
         ok: false,
         error: {
           code: "WORKSPACE_ACTION_CONFLICT",
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("keeps pending actions readable but blocks responses while the runtime is degraded", async () => {
+    const authService = createTestAuthService();
+    const { runtimeService, setDegraded } = createSwitchableRuntimeService();
+    const { app } = await createTestApp(authService, {}, { runtimeService });
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+
+    const login = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected owner login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_tenant_control",
+          activeGroupId: "grp_product",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include a conversation id");
+      }
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_tenant_control",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Approve this tenant access change.",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const pendingActions = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/pending-actions`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(pendingActions.statusCode).toBe(200);
+
+      const pendingActionId = (
+        pendingActions.json() as WorkspacePendingActionsResponse
+      ).data.items[0]?.id;
+
+      if (!pendingActionId) {
+        throw new Error("expected a pending action id");
+      }
+
+      setDegraded(true);
+
+      const refreshedPendingActions = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/pending-actions`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(refreshedPendingActions.statusCode).toBe(200);
+      expect(
+        (refreshedPendingActions.json() as WorkspacePendingActionsResponse).data
+          .items[0],
+      ).toMatchObject({
+        id: pendingActionId,
+        status: "pending",
+      });
+
+      const respond = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/pending-actions/${pendingActionId}/respond`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          action: "approve",
+        },
+      });
+
+      expect(respond.statusCode).toBe(403);
+      expect(respond.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_FORBIDDEN",
+          details: {
+            reason: "runtime_degraded",
+            runtime: {
+              overallStatus: "degraded",
+            },
+          },
         },
       });
     } finally {

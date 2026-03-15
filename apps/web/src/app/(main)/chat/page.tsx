@@ -13,12 +13,17 @@ import { useRouter } from 'next/navigation';
 import { startTransition, useEffect, useState } from 'react';
 
 import { MainSectionNav } from '../../../components/main-section-nav';
+import { WorkspaceRuntimeDegradedBanner } from '../../../components/workspace-runtime-health';
 import {
   fetchWorkspaceCatalog,
   fetchWorkspaceConversationList,
   updateWorkspaceConversation,
 } from '../../../lib/apps-client';
 import { clearAuthSession } from '../../../lib/auth-session';
+import {
+  fetchGatewayHealth,
+  type GatewayRuntimeHealthSnapshot,
+} from '../../../lib/gateway-health-client';
 import { useProtectedSession } from '../../../lib/use-protected-session';
 
 function formatConversationTimestamp(value: string) {
@@ -77,6 +82,7 @@ export default function ChatHistoryPage() {
     action: ConversationAction;
     conversationId: string;
   } | null>(null);
+  const [gatewayRuntime, setGatewayRuntime] = useState<GatewayRuntimeHealthSnapshot | null>(null);
 
   useEffect(() => {
     if (!session) {
@@ -91,7 +97,7 @@ export default function ChatHistoryPage() {
         setError(null);
 
         try {
-          const [catalogResult, listResult] = await Promise.all([
+          const [catalogResult, listResult, healthResult] = await Promise.all([
             fetchWorkspaceCatalog(session.sessionToken),
             fetchWorkspaceConversationList(session.sessionToken, {
               attachment: filters.attachment || null,
@@ -103,6 +109,7 @@ export default function ChatHistoryPage() {
               status: filters.status || null,
               tag: filters.tag || null,
             }),
+            fetchGatewayHealth(),
           ]);
 
           if (cancelled) {
@@ -134,6 +141,7 @@ export default function ChatHistoryPage() {
           setApps(catalogResult.data.apps);
           setGroups(catalogResult.data.groups);
           setItems(listResult.data.items);
+          setGatewayRuntime(healthResult?.runtime ?? null);
         } catch {
           if (!cancelled) {
             setError('The conversation history could not be loaded. Please retry.');
@@ -262,6 +270,8 @@ export default function ChatHistoryPage() {
           </p>
         </div>
       </header>
+
+      <WorkspaceRuntimeDegradedBanner context="history" snapshot={gatewayRuntime} />
 
       <section className="chat-panel">
         <div className="chat-panel-header">

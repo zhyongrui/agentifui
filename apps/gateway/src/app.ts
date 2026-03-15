@@ -136,7 +136,10 @@ export async function buildApp(
           fileStorage: workspaceFileStorage,
         }));
   const runtimeService =
-    options.runtimeService ?? createWorkspaceRuntimeService();
+    options.runtimeService ??
+    createWorkspaceRuntimeService({
+      degradedRuntimeIds: env.degradedRuntimeIds,
+    });
 
   if (ownsDatabase && database) {
     app.addHook('onClose', async () => {
@@ -198,7 +201,13 @@ export async function buildApp(
   await registerRootRoutes(app, env, observabilityService, runtimeService);
   await registerAuthRoutes(app, env, authService, auditService);
   await registerAdminRoutes(app, authService, adminService, auditService);
-  await registerWorkspaceRoutes(app, authService, workspaceService, auditService);
+  await registerWorkspaceRoutes(
+    app,
+    authService,
+    workspaceService,
+    auditService,
+    runtimeService,
+  );
   await registerChatRoutes(
     app,
     authService,

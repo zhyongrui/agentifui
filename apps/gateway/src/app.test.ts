@@ -78,4 +78,36 @@ describe('gateway app', () => {
     expect(response.body).toContain('agentifui_gateway_request_count_by_route_total');
     expect(response.body).toContain('route="/health"');
   });
+
+  it('surfaces degraded runtime health when configured through the gateway env', async () => {
+    const degradedApp = await buildApp(
+      {
+        ...env,
+        degradedRuntimeIds: ['placeholder'],
+      },
+      { logger: false }
+    );
+
+    try {
+      const response = await degradedApp.inject({
+        method: 'GET',
+        url: '/health',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        runtime: {
+          overallStatus: 'degraded',
+          runtimes: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'placeholder',
+              status: 'degraded',
+            }),
+          ]),
+        },
+      });
+    } finally {
+      await degradedApp.close();
+    }
+  });
 });

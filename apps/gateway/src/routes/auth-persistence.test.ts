@@ -25,6 +25,10 @@ import { describe, expect, it } from 'vitest';
 
 import { buildApp } from '../app.js';
 import { createPersistentAuthService } from '../services/persistent-auth-service.js';
+import {
+  createWorkspaceRuntimeService,
+  type WorkspaceRuntimeService,
+} from '../services/workspace-runtime.js';
 import { generateTotpCode } from '../services/totp-service.js';
 import {
   createPersistentTestDatabase,
@@ -32,10 +36,70 @@ import {
   resetPersistentTestDatabase,
 } from '../test/persistent-db.js';
 
-async function createPersistentApp() {
+async function createPersistentApp(overrides: Record<string, unknown> = {}) {
   return buildApp(PERSISTENT_TEST_ENV, {
     logger: false,
+    ...overrides,
   });
+}
+
+function createSwitchableRuntimeService(): {
+  runtimeService: WorkspaceRuntimeService;
+  setDegraded(value: boolean): void;
+} {
+  const availableService = createWorkspaceRuntimeService();
+  let degraded = false;
+
+  const readSnapshot = () => {
+    const snapshot = availableService.getHealthSnapshot();
+
+    if (!degraded) {
+      return snapshot;
+    }
+
+    return {
+      overallStatus: 'degraded' as const,
+      runtimes: snapshot.runtimes.map(runtime => ({
+        ...runtime,
+        status: 'degraded' as const,
+      })),
+    };
+  };
+
+  return {
+    runtimeService: {
+      getHealthSnapshot() {
+        return readSnapshot();
+      },
+      async invoke(input) {
+        if (!degraded) {
+          return availableService.invoke(input);
+        }
+
+        const snapshot = readSnapshot();
+        const runtime = snapshot.runtimes.find(entry => entry.id === 'placeholder') ?? snapshot.runtimes[0] ?? null;
+
+        return {
+          ok: false as const,
+          error: {
+            code: 'runtime_unavailable' as const,
+            message: `${runtime?.label ?? 'Workspace runtime'} is currently degraded.`,
+            detail: 'Wait for the adapter health probe to recover before retrying.',
+            retryable: true,
+            runtime: runtime
+              ? {
+                  ...runtime,
+                  invokedAt: new Date().toISOString(),
+                }
+              : null,
+          },
+        };
+      },
+    },
+    setDegraded(value) {
+      degraded = value;
+    },
+  };
 }
 
 function normalizeStringArray(value: string[] | string) {
@@ -2283,6 +2347,256 @@ describe.sequential('persistent auth runtime', () => {
           if (!restartedAppClosed) {
             await restartedApp.close();
             restartedAppClosed = true;
+          }
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'keeps degraded workspace reads available across restarts and recovers writes after the runtime returns',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const availableRuntime = createSwitchableRuntimeService();
+      const app = await createPersistentApp({
+        runtimeService: availableRuntime.runtimeService,
+      });
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Tenant Admin',
+          },
+        });
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+        };
+
+        const workspace = await app.inject({
+          method: 'GET',
+          url: '/workspace/apps',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(workspace.statusCode).toBe(200);
+
+        const workspaceBody = workspace.json() as WorkspaceCatalogResponse;
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_tenant_control',
+            activeGroupId: workspaceBody.data.defaultActiveGroupId,
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+        const conversationId = launchBody.data.conversationId;
+
+        if (!conversationId) {
+          throw new Error('expected launch payload to include a conversation id');
+        }
+
+        const completion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            app_id: 'app_tenant_control',
+            conversation_id: conversationId,
+            messages: [
+              {
+                role: 'user',
+                content: 'Approve this tenant access change.',
+              },
+            ],
+          },
+        });
+
+        expect(completion.statusCode).toBe(200);
+
+        const pendingActions = await app.inject({
+          method: 'GET',
+          url: `/workspace/conversations/${conversationId}/pending-actions`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(pendingActions.statusCode).toBe(200);
+
+        const stepId = (
+          pendingActions.json() as WorkspacePendingActionsResponse
+        ).data.items[0]?.id;
+
+        if (!stepId) {
+          throw new Error('expected a pending action id');
+        }
+
+        await app.close();
+        appClosed = true;
+
+        const degradedRuntime = createSwitchableRuntimeService();
+        degradedRuntime.setDegraded(true);
+        const degradedApp = await createPersistentApp({
+          runtimeService: degradedRuntime.runtimeService,
+        });
+        let degradedAppClosed = false;
+
+        try {
+          const health = await degradedApp.inject({
+            method: 'GET',
+            url: '/health',
+          });
+
+          expect(health.statusCode).toBe(200);
+          expect(health.json()).toMatchObject({
+            runtime: {
+              overallStatus: 'degraded',
+            },
+          });
+
+          const conversation = await degradedApp.inject({
+            method: 'GET',
+            url: `/workspace/conversations/${conversationId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(conversation.statusCode).toBe(200);
+
+          const readPendingActions = await degradedApp.inject({
+            method: 'GET',
+            url: `/workspace/conversations/${conversationId}/pending-actions`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(readPendingActions.statusCode).toBe(200);
+          expect((readPendingActions.json() as WorkspacePendingActionsResponse).data.items[0]).toMatchObject({
+            id: stepId,
+            status: 'pending',
+          });
+
+          const uploadWhileDegraded = await degradedApp.inject({
+            method: 'POST',
+            url: `/workspace/conversations/${conversationId}/uploads`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+            payload: {
+              fileName: 'brief.txt',
+              contentType: 'text/plain',
+              base64Data: Buffer.from('read only').toString('base64'),
+            },
+          });
+
+          expect(uploadWhileDegraded.statusCode).toBe(403);
+          expect(uploadWhileDegraded.json()).toMatchObject({
+            ok: false,
+            error: {
+              code: 'WORKSPACE_FORBIDDEN',
+              details: {
+                reason: 'runtime_degraded',
+              },
+            },
+          });
+
+          const respondWhileDegraded = await degradedApp.inject({
+            method: 'POST',
+            url: `/workspace/conversations/${conversationId}/pending-actions/${stepId}/respond`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+            payload: {
+              action: 'approve',
+            },
+          });
+
+          expect(respondWhileDegraded.statusCode).toBe(403);
+          expect(respondWhileDegraded.json()).toMatchObject({
+            ok: false,
+            error: {
+              code: 'WORKSPACE_FORBIDDEN',
+              details: {
+                reason: 'runtime_degraded',
+              },
+            },
+          });
+        } finally {
+          if (!degradedAppClosed) {
+            await degradedApp.close();
+            degradedAppClosed = true;
+          }
+        }
+
+        const recoveredRuntime = createSwitchableRuntimeService();
+        const recoveredApp = await createPersistentApp({
+          runtimeService: recoveredRuntime.runtimeService,
+        });
+        let recoveredAppClosed = false;
+
+        try {
+          const respondAfterRecovery = await recoveredApp.inject({
+            method: 'POST',
+            url: `/workspace/conversations/${conversationId}/pending-actions/${stepId}/respond`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+            payload: {
+              action: 'approve',
+              note: 'Recovered after runtime maintenance.',
+            },
+          });
+
+          expect(respondAfterRecovery.statusCode).toBe(200);
+          expect((respondAfterRecovery.json() as WorkspacePendingActionRespondResponse).data.item).toMatchObject({
+            id: stepId,
+            status: 'approved',
+            response: {
+              action: 'approve',
+              note: 'Recovered after runtime maintenance.',
+            },
+          });
+        } finally {
+          if (!recoveredAppClosed) {
+            await recoveredApp.close();
+            recoveredAppClosed = true;
           }
         }
       } finally {

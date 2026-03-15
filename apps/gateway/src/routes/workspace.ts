@@ -38,6 +38,7 @@ import type { FastifyInstance } from 'fastify';
 
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
+import type { WorkspaceRuntimeService } from '../services/workspace-runtime.js';
 import type { WorkspaceService } from '../services/workspace-service.js';
 
 function buildErrorResponse(
@@ -355,8 +356,26 @@ export async function registerWorkspaceRoutes(
   app: FastifyInstance,
   authService: AuthService,
   workspaceService: WorkspaceService,
-  auditService: AuditService
+  auditService: AuditService,
+  runtimeService: WorkspaceRuntimeService
 ) {
+  function readRuntimeDegradedError() {
+    const snapshot = runtimeService.getHealthSnapshot();
+
+    if (snapshot.overallStatus !== 'degraded') {
+      return null;
+    }
+
+    return buildErrorResponse(
+      'WORKSPACE_FORBIDDEN',
+      'Workspace runtime is currently degraded. Conversation history remains readable, but new uploads and pending-action responses are temporarily disabled until the runtime recovers.',
+      {
+        reason: 'runtime_degraded',
+        runtime: snapshot,
+      }
+    );
+  }
+
   app.get('/workspace/apps', async (request, reply) => {
     const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
 
@@ -805,6 +824,13 @@ export async function registerWorkspaceRoutes(
       );
     }
 
+    const runtimeDegradedError = readRuntimeDegradedError();
+
+    if (runtimeDegradedError) {
+      reply.code(403);
+      return runtimeDegradedError;
+    }
+
     const result = await workspaceService.respondToPendingActionForUser(access.user, {
       conversationId,
       stepId,
@@ -962,6 +988,13 @@ export async function registerWorkspaceRoutes(
           sizeBytes: bytes.byteLength,
         }
       );
+    }
+
+    const runtimeDegradedError = readRuntimeDegradedError();
+
+    if (runtimeDegradedError) {
+      reply.code(403);
+      return runtimeDegradedError;
     }
 
     const result = await workspaceService.uploadConversationFileForUser(access.user, {

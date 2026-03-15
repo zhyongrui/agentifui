@@ -4,6 +4,8 @@ import type {
   QuotaSeverity,
   QuotaUsage,
   WorkspaceApp,
+  WorkspaceRunFailure,
+  WorkspaceRunRuntime,
   WorkspaceSections,
 } from './contracts.js';
 
@@ -21,6 +23,11 @@ type EvaluateAppLaunchArgs = {
   memberGroupIds: string[];
   quotas: QuotaUsage[];
   quotaServiceState: QuotaServiceState;
+};
+
+type WorkspaceRunDegradedCandidate = {
+  failure?: WorkspaceRunFailure | null;
+  runtime?: WorkspaceRunRuntime | null;
 };
 
 function normalizeSearchQuery(value: string): string {
@@ -173,4 +180,14 @@ export function evaluateAppLaunch({
     eligibleGroupIds,
     blockingScopes: [],
   };
+}
+
+export function isWorkspaceRunDegraded(
+  run: WorkspaceRunDegradedCandidate | null | undefined
+): boolean {
+  if (!run) {
+    return false;
+  }
+
+  return run.runtime?.status === 'degraded' || run.failure?.code === 'runtime_unavailable';
 }

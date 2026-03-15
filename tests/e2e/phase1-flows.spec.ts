@@ -8,6 +8,7 @@ const DATABASE_URL =
 const DEFAULT_PASSWORD = "Secure123";
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const TOTP_STEP_MS = 30_000;
+const EXPECT_DEGRADED_RUNTIME = process.env.PLAYWRIGHT_EXPECT_DEGRADED_RUNTIME === "1";
 
 function uniqueEmail(prefix: string, domain = "example.com") {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@${domain}`;
@@ -186,7 +187,13 @@ async function expectAppsWorkspace(page: Page) {
   });
 }
 
-async function expectConversationSurface(page: Page, appName: string) {
+async function expectConversationSurface(
+  page: Page,
+  appName: string,
+  options: {
+    expectComposerEnabled?: boolean;
+  } = {},
+) {
   await expect(page).toHaveURL(/\/chat\/conv_/, {
     timeout: 60_000,
   });
@@ -197,7 +204,10 @@ async function expectConversationSurface(page: Page, appName: string) {
   await expect(
     page.getByRole("heading", { name: "Quota context" }),
   ).toBeVisible();
-  await expect(page.getByLabel("Message")).toBeEnabled();
+
+  if (options.expectComposerEnabled ?? true) {
+    await expect(page.getByLabel("Message")).toBeEnabled();
+  }
 }
 
 async function seedInvitation(email: string) {
@@ -1016,7 +1026,9 @@ test("runbook mentor browser flow uses the structured runtime path", async ({
       .getByRole("button", { name: "打开应用" })
       .click(),
   ]);
-  await expectConversationSurface(page, "Runbook Mentor");
+  await expectConversationSurface(page, "Runbook Mentor", {
+    expectComposerEnabled: false,
+  });
 
   await page
     .getByLabel("Message")
@@ -1043,6 +1055,49 @@ test("runbook mentor browser flow uses the structured runtime path", async ({
   await expect(
     runHistoryPanel.getByText("placeholder_structured").first(),
   ).toBeVisible();
+});
+
+test("degraded runtime keeps history readable and the composer disabled", async ({
+  page,
+}) => {
+  test.skip(
+    !EXPECT_DEGRADED_RUNTIME,
+    "This browser check requires a gateway started with degraded runtimes.",
+  );
+
+  const email = uniqueEmail("degraded-runtime");
+
+  await register(page, {
+    email,
+    displayName: "Degraded Runtime User",
+  });
+  await expect(page).toHaveURL(/\/login\?registered=1$/);
+
+  await login(page, {
+    email,
+  });
+  await expectAppsWorkspace(page);
+
+  await page.goto("/chat");
+  await expect(page.getByRole("heading", { name: "Conversation history" })).toBeVisible();
+  await expect(page.getByText("Workspace runtime is degraded.")).toBeVisible();
+
+  await page.goto("/apps");
+  await expect(appCard(page, "Runbook Mentor")).toBeVisible();
+
+  await Promise.all([
+    waitForGatewayPost(page, "/workspace/apps/launch"),
+    appCard(page, "Runbook Mentor")
+      .getByRole("button", { name: "打开应用" })
+      .click(),
+  ]);
+  await expectConversationSurface(page, "Runbook Mentor", {
+    expectComposerEnabled: false,
+  });
+  await expect(page.getByText("Workspace runtime is degraded.")).toBeVisible();
+  await expect(page.getByLabel("Message")).toBeDisabled();
+  await expect(page.getByLabel("Attachments")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
 });
 
 test("flagged prompts render safety banners and replay panels", async ({

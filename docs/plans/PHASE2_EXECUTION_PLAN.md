@@ -121,7 +121,8 @@ Execution status:
 | completed | `P2-D2` | citation/source block 已接到 blocking/streaming、transcript、replay 和 shared transcript |
 | completed | `P2-D3` | safety signal 已接到 blocking/streaming、run replay、shared transcript 和 audit |
 | completed | `P2-D4` | placeholder protocol 已抽成 formal runtime adapter boundary，runtime metadata/health/browser smoke 已闭环 |
-| active    | `P2-D5` | 下一项，补 degraded fallback 和只读恢复体验 |
+| completed | `P2-D5` | degraded fallback、只读恢复、admin health 和 browser 验证已闭环 |
+| active    | `P2-E1` | 下一项，开始 session/archive cleanup job 和保留策略 |
 
 ## 5. First Batch Definition
 
@@ -164,7 +165,7 @@ Current batch status:
 - `P2-D2` complete
 - `P2-D3` complete
 - `P2-D4` complete
-- the active follow-on item is `P2-D5`
+- the active follow-on item is `P2-E1`
 
 ## 6. Detailed Execution Notes
 
@@ -620,16 +621,16 @@ Legend:
 
 ### 7.5 Resilience Queue: `P2-D5` Degraded Fallback
 
-- [ ] `P2-D5-01` Detect runtime-unavailable states at the gateway boundary
-- [ ] `P2-D5-02` Keep conversation history, run replay, and artifact preview readable in degraded mode
-- [ ] `P2-D5-03` Disable send/regenerate/upload controls while degraded mode is active
-- [ ] `P2-D5-04` Show a clear degraded banner with recovery guidance on `/chat` and `/chat/[conversationId]`
-- [ ] `P2-D5-05` Preserve pending HITL cards as read-only while runtime execution is unavailable
-- [ ] `P2-D5-06` Expose degraded status to admin health surfaces
-- [ ] `P2-D5-07` Add route coverage for degraded reads vs blocked writes
-- [ ] `P2-D5-08` Add persistence coverage for degraded-mode recovery after restart
-- [ ] `P2-D5-09` Add browser verification covering banner display and disabled composer behavior
-- [ ] `P2-D5-10` Document degraded-mode QA expectations and recovery procedures
+- [x] `P2-D5-01` Detect runtime-unavailable states at the gateway boundary
+- [x] `P2-D5-02` Keep conversation history, run replay, and artifact preview readable in degraded mode
+- [x] `P2-D5-03` Disable send/regenerate/upload controls while degraded mode is active
+- [x] `P2-D5-04` Show a clear degraded banner with recovery guidance on `/chat` and `/chat/[conversationId]`
+- [x] `P2-D5-05` Preserve pending HITL cards as read-only while runtime execution is unavailable
+- [x] `P2-D5-06` Expose degraded status to admin health surfaces
+- [x] `P2-D5-07` Add route coverage for degraded reads vs blocked writes
+- [x] `P2-D5-08` Add persistence coverage for degraded-mode recovery after restart
+- [x] `P2-D5-09` Add browser verification covering banner display and disabled composer behavior
+- [x] `P2-D5-10` Document degraded-mode QA expectations and recovery procedures
 
 ### 7.6 Operations Queue: `P2-E1` Session And Archive Cleanup
 
