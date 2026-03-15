@@ -791,6 +791,141 @@ Legend:
 - [ ] `P3-H-09` Add tests or scripted drills for replaying production-like data into a staging environment
 - [ ] `P3-H-10` Document what operational context must always be copied into the dev log for new sessions
 
+### 7.18 Future Platform Queue: `P4-A` Multi-Provider Runtime And Model Routing
+
+- [ ] `P4-A-01` Define provider-agnostic request and response envelopes for chat, tools, files, and safety
+- [ ] `P4-A-02` Add provider capability discovery so adapters can advertise supported features at startup
+- [ ] `P4-A-03` Add provider selection policy per app, tenant, and request type
+- [ ] `P4-A-04` Add weighted fallback routing when the primary provider is degraded or unavailable
+- [ ] `P4-A-05` Persist provider metadata on each run for replay, analytics, and incident review
+- [ ] `P4-A-06` Add pricing metadata per provider/model for cost analysis and quota policy work
+- [ ] `P4-A-07` Add provider-specific retry backoff and idempotency strategies
+- [ ] `P4-A-08` Add provider circuit-breaker state and expose it through health/admin views
+- [ ] `P4-A-09` Add route coverage proving the same conversation can replay runs from mixed providers
+- [ ] `P4-A-10` Add persistence coverage for provider metadata, retry state, and fallback outcomes
+- [ ] `P4-A-11` Add browser smoke coverage for provider-switched runs in the same transcript
+- [ ] `P4-A-12` Document how to onboard, benchmark, and safely disable a provider
+
+### 7.19 Future Platform Queue: `P4-B` Connectors, Sync, And External Knowledge Sources
+
+- [ ] `P4-B-01` Define a connector contract for source auth, sync cadence, and incremental checkpoints
+- [ ] `P4-B-02` Add connector records for web, Google Drive, Notion, Confluence, and generic file-drop inputs
+- [ ] `P4-B-03` Add OAuth or token storage abstractions for connector credentials
+- [ ] `P4-B-04` Add sync-job tables for queued, running, succeeded, partially failed, and cancelled states
+- [ ] `P4-B-05` Add per-document sync provenance linking runs, artifacts, and retrieval hits back to source records
+- [ ] `P4-B-06` Add incremental re-sync support based on updated timestamp or cursor checkpoints
+- [ ] `P4-B-07` Add connector health surfaces and failure summaries to admin views
+- [ ] `P4-B-08` Add user-facing source status surfaces for stale, revoked, or paused connectors
+- [ ] `P4-B-09` Add audit coverage for connector create, rotate, revoke, pause, and delete actions
+- [ ] `P4-B-10` Add tests for sync resume, revoked auth, duplicate documents, and partial failure recovery
+- [ ] `P4-B-11` Add browser coverage for connector setup, first sync, and stale-source warnings
+- [ ] `P4-B-12` Document local dev setup for connector mocks and safe credential handling
+
+### 7.20 Future Platform Queue: `P4-C` Agent Planning, Branching, And Workflow Memory
+
+- [ ] `P4-C-01` Define a plan-step contract for runtime-generated task plans inside a run
+- [ ] `P4-C-02` Add branchable run state so an operator can fork a conversation from an earlier run
+- [ ] `P4-C-03` Add plan progress tracking with pending, in-progress, blocked, and completed states
+- [ ] `P4-C-04` Persist intermediate agent thoughts or summaries in a redacted/internal-only channel
+- [ ] `P4-C-05` Add step-level artifacts and citations so each plan step can emit its own outputs
+- [ ] `P4-C-06` Add resumable workflow state for long-running tasks spanning multiple sessions
+- [ ] `P4-C-07` Add operator controls to pause, resume, skip, or restart individual plan steps
+- [ ] `P4-C-08` Add run replay views for branch lineage, parent-child runs, and resumed workflow state
+- [ ] `P4-C-09` Add audit coverage for branch creation, step override, and workflow resumption
+- [ ] `P4-C-10` Add tests for branch correctness, plan mutation safety, and resumed execution after restart
+- [ ] `P4-C-11` Add browser coverage for branch navigation and workflow step control surfaces
+- [ ] `P4-C-12` Document plan-state retention rules and which internal fields stay hidden from shared views
+
+### 7.21 Future Platform Queue: `P4-D` Workflow Builder And Operator Authoring
+
+- [ ] `P4-D-01` Define a stored workflow definition format with nodes, edges, variables, and approvals
+- [ ] `P4-D-02` Add workflow versioning with draft, published, archived, and rolled-back states
+- [ ] `P4-D-03` Add node types for prompt, retrieval, tool call, approval, transform, and export
+- [ ] `P4-D-04` Add schema validation for workflow definitions before publish
+- [ ] `P4-D-05` Add dry-run validation mode that executes a workflow against fixtures without persisting a real run
+- [ ] `P4-D-06` Add workflow-level permissions for author, reviewer, publisher, and runner roles
+- [ ] `P4-D-07` Add import/export for workflow definitions across environments
+- [ ] `P4-D-08` Add tests for workflow migration between definition versions
+- [ ] `P4-D-09` Add browser authoring UX for node editing, edge linking, validation, and publish
+- [ ] `P4-D-10` Add replay support showing which workflow version generated a given run
+- [ ] `P4-D-11` Add audit coverage for workflow publish, rollback, and permission changes
+- [ ] `P4-D-12` Document workflow-authoring conventions and safe rollout steps
+
+### 7.22 Future Platform Queue: `P4-E` Cost Control, Billing, And Commercial Boundaries
+
+- [ ] `P4-E-01` Define billable usage records for launch, completion, retrieval, storage, and export actions
+- [ ] `P4-E-02` Add tenant billing plans with feature flags, quotas, soft limits, and hard-stop behavior
+- [ ] `P4-E-03` Add metering reconciliation jobs that compare provider-side usage with local run records
+- [ ] `P4-E-04` Add invoice/export-ready cost summaries by tenant, app, group, and provider
+- [ ] `P4-E-05` Add admin override controls for grace periods, credit grants, and temporary limit raises
+- [ ] `P4-E-06` Add end-user warning banners for approaching cost thresholds
+- [ ] `P4-E-07` Add audit coverage for billing-plan changes, overrides, and meter adjustments
+- [ ] `P4-E-08` Add tests for overage behavior, grace windows, and corrected billing entries
+- [ ] `P4-E-09` Add browser coverage for quota/cost warning states and admin override flows
+- [ ] `P4-E-10` Add retention and masking rules for billing payloads that contain user or run references
+- [ ] `P4-E-11` Add data export surfaces for finance/ops review without leaking raw prompts
+- [ ] `P4-E-12` Document the pricing model, reconciliation workflow, and incident playbook for bad metering
+
+### 7.23 Future Platform Queue: `P4-F` Enterprise Security, Compliance, And Policy Packs
+
+- [ ] `P4-F-01` Define tenant-scoped policy packs for runtime, retrieval, sharing, export, and retention controls
+- [ ] `P4-F-02` Add per-policy evaluation traces so operators can see why a request was blocked or flagged
+- [ ] `P4-F-03` Add DLP-style detectors for secrets, PII, regulated terms, and exfiltration patterns
+- [ ] `P4-F-04` Add allowlist and exception workflows with review history and expiry timestamps
+- [ ] `P4-F-05` Add admin policy simulation mode to test a policy against historical runs before rollout
+- [ ] `P4-F-06` Add evidence export bundles for audit/compliance review
+- [ ] `P4-F-07` Add legal-hold interaction rules for conversation deletion, artifact pruning, and backup restore
+- [ ] `P4-F-08` Add tests for policy precedence across tenant, group, app, and runtime scopes
+- [ ] `P4-F-09` Add browser coverage for blocked-run explanation surfaces and policy simulation summaries
+- [ ] `P4-F-10` Add admin filters for safety/policy audit events, including severity and detector type
+- [ ] `P4-F-11` Add masking standards for screenshots, shared links, and export payloads
+- [ ] `P4-F-12` Document compliance operating procedures and exception-review governance
+
+### 7.24 Future Platform Queue: `P4-G` Observability, Incident Response, And SLO Management
+
+- [ ] `P4-G-01` Define service-level indicators for auth latency, launch latency, chat latency, and run completion success
+- [ ] `P4-G-02` Add request tracing that links web requests, gateway work, provider calls, and DB writes
+- [ ] `P4-G-03` Add structured logs for every run lifecycle transition with trace and tenant context
+- [ ] `P4-G-04` Add dashboards for queue depth, degraded mode frequency, and stop-request rates
+- [ ] `P4-G-05` Add incident timelines that stitch together audit events, run events, and provider failures
+- [ ] `P4-G-06` Add alert routing for on-call, admin owners, and tenant-specific escalation
+- [ ] `P4-G-07` Add operator annotations so incidents can be correlated with deploys and config changes
+- [ ] `P4-G-08` Add error budget reporting and monthly SLO review summaries
+- [ ] `P4-G-09` Add tests for observability payload completeness on core request paths
+- [ ] `P4-G-10` Add synthetic smoke probes for login, launch, completion, artifact preview, and admin audit
+- [ ] `P4-G-11` Add runbook links directly into alert payloads and admin health surfaces
+- [ ] `P4-G-12` Document incident command flow, trace collection, and postmortem expectations
+
+### 7.25 Future Platform Queue: `P4-H` Automated QA, Test Infrastructure, And Release Certification
+
+- [ ] `P4-H-01` Split browser suites into smoke, regression, long-run, and production-like certification lanes
+- [ ] `P4-H-02` Add deterministic seeded runtime fixtures for chat, retrieval, safety, and HITL scenarios
+- [ ] `P4-H-03` Add snapshot baselines for admin tables, transcript panels, and artifact previews
+- [ ] `P4-H-04` Add flaky-test detection and quarantine flow with owner tracking
+- [ ] `P4-H-05` Add host-capability checks so browser suites can skip safely when runtime libs are missing
+- [ ] `P4-H-06` Add ephemeral environment provisioning for branch-based QA
+- [ ] `P4-H-07` Add scripted public-access QA fallback using `cloudflared` when stable ingress is unavailable
+- [ ] `P4-H-08` Add scripted `80/443` smoke checks for same-origin proxy correctness and export headers
+- [ ] `P4-H-09` Add pre-release certification scripts that run auth, workspace, admin, safety, and backup drills
+- [ ] `P4-H-10` Add release checklists that force plan/doc/dev-log updates before merge
+- [ ] `P4-H-11` Add artifact retention and pruning for CI logs, traces, screenshots, and replay fixtures
+- [ ] `P4-H-12` Document the exact QA matrix that a fresh AI session should rerun before claiming readiness
+
+### 7.26 Future Platform Queue: `P4-I` Documentation, Onboarding, And AI-Session Continuity
+
+- [ ] `P4-I-01` Define a required dev-log template for code, test, infra, and browser-validation continuity
+- [ ] `P4-I-02` Add a rolling environment-status document with active ports, ingress rules, and known host caveats
+- [ ] `P4-I-03` Add architecture diagrams for auth, chat runtime, persistence, and admin governance flows
+- [ ] `P4-I-04` Add a “new AI session bootstrap” guide that explains where to read first and what to verify
+- [ ] `P4-I-05` Add a release-state document mapping completed plan items to shipped user-facing behavior
+- [ ] `P4-I-06` Add a “known flaky host behaviors” appendix with mitigation commands and recovery steps
+- [ ] `P4-I-07` Add onboarding checklists for local dev, browser QA, staging deploy, and production diagnostics
+- [ ] `P4-I-08` Add naming/versioning rules for plans, migrations, fixtures, and seeded app data
+- [ ] `P4-I-09` Add ownership fields to long-range plan items so future sessions can group work coherently
+- [ ] `P4-I-10` Add archival rules for old dev logs, stale plans, and superseded deployment guides
+- [ ] `P4-I-11` Add documentation coverage checks into CI so critical guides cannot silently drift
+- [ ] `P4-I-12` Document what must be pushed to git before ending any long-running implementation round
+
 ## 8. References
 
 - [PHASE1_DEVELOPMENT_PLAN](./PHASE1_DEVELOPMENT_PLAN.md)
