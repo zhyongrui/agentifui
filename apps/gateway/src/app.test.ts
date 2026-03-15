@@ -36,6 +36,15 @@ describe('gateway app', () => {
       startedAt: expect.any(String),
       uptimeSeconds: expect.any(Number),
       inflightRequests: expect.any(Number),
+      runtime: {
+        overallStatus: 'available',
+        runtimes: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'placeholder',
+            status: 'available',
+          }),
+        ]),
+      },
     });
   });
 

@@ -120,7 +120,8 @@ Execution status:
 | completed | `P2-D1` | failed run 已带结构化 failure taxonomy，run detail 和 UI 已可读      |
 | completed | `P2-D2` | citation/source block 已接到 blocking/streaming、transcript、replay 和 shared transcript |
 | completed | `P2-D3` | safety signal 已接到 blocking/streaming、run replay、shared transcript 和 audit |
-| active    | `P2-D4` | 下一项，把 placeholder protocol 抽成 formal runtime adapter boundary |
+| completed | `P2-D4` | placeholder protocol 已抽成 formal runtime adapter boundary，runtime metadata/health/browser smoke 已闭环 |
+| active    | `P2-D5` | 下一项，补 degraded fallback 和只读恢复体验 |
 
 ## 5. First Batch Definition
 
@@ -160,8 +161,10 @@ Current batch status:
 - `P2-C4` complete
 - `P2-C5` complete
 - `P2-D1` complete
+- `P2-D2` complete
 - `P2-D3` complete
-- the active follow-on item is `P2-D4`
+- `P2-D4` complete
+- the active follow-on item is `P2-D5`
 
 ## 6. Detailed Execution Notes
 
@@ -602,18 +605,18 @@ Legend:
 
 ### 7.4 Runtime Queue: `P2-D4` App Runtime Abstraction
 
-- [ ] `P2-D4-01` Extract a formal runtime adapter interface from the current placeholder protocol path
-- [ ] `P2-D4-02` Keep the existing placeholder adapter as the default compatibility backend
-- [ ] `P2-D4-03` Define adapter capabilities for streaming, citations, artifacts, safety, and HITL emission
-- [ ] `P2-D4-04` Normalize blocking and streaming completion entrypoints through the same adapter boundary
-- [ ] `P2-D4-05` Thread `conversationId`, `runId`, and `traceId` through every adapter invocation
-- [ ] `P2-D4-06` Normalize adapter failure shapes into the structured run failure taxonomy
-- [ ] `P2-D4-07` Add app-level runtime selection config so different apps can choose different adapters
-- [ ] `P2-D4-08` Add runtime health/readiness probes surfaced to the gateway service layer
-- [ ] `P2-D4-09` Add adapter test doubles for unit and route coverage
-- [ ] `P2-D4-10` Add persistence coverage proving runtime-specific metadata survives restarts
-- [ ] `P2-D4-11` Add browser smoke coverage that exercises the non-placeholder adapter path once available
-- [ ] `P2-D4-12` Write a developer guide for adding a new runtime adapter safely
+- [x] `P2-D4-01` Extract a formal runtime adapter interface from the current placeholder protocol path
+- [x] `P2-D4-02` Keep the existing placeholder adapter as the default compatibility backend
+- [x] `P2-D4-03` Define adapter capabilities for streaming, citations, artifacts, safety, and HITL emission
+- [x] `P2-D4-04` Normalize blocking and streaming completion entrypoints through the same adapter boundary
+- [x] `P2-D4-05` Thread `conversationId`, `runId`, and `traceId` through every adapter invocation
+- [x] `P2-D4-06` Normalize adapter failure shapes into the structured run failure taxonomy
+- [x] `P2-D4-07` Add app-level runtime selection config so different apps can choose different adapters
+- [x] `P2-D4-08` Add runtime health/readiness probes surfaced to the gateway service layer
+- [x] `P2-D4-09` Add adapter test doubles for unit and route coverage
+- [x] `P2-D4-10` Add persistence coverage proving runtime-specific metadata survives restarts
+- [x] `P2-D4-11` Add browser smoke coverage that exercises the non-placeholder adapter path once available
+- [x] `P2-D4-12` Write a developer guide for adding a new runtime adapter safely
 
 ### 7.5 Resilience Queue: `P2-D5` Degraded Fallback
 

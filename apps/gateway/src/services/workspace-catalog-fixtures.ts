@@ -24,6 +24,7 @@ type WorkspaceRoleSeed = {
 
 type WorkspaceAppFixture = WorkspaceApp & {
   grantedRoleIds: string[];
+  runtimeId: 'placeholder' | 'placeholder_structured';
   sortOrder: number;
 };
 
@@ -76,6 +77,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   {
     id: 'app_market_brief',
     grantedRoleIds: [],
+    runtimeId: 'placeholder',
     sortOrder: 10,
     slug: 'market-brief',
     name: 'Market Brief',
@@ -90,6 +92,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   {
     id: 'app_service_copilot',
     grantedRoleIds: [],
+    runtimeId: 'placeholder',
     sortOrder: 20,
     slug: 'service-copilot',
     name: 'Service Copilot',
@@ -104,6 +107,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   {
     id: 'app_release_radar',
     grantedRoleIds: [],
+    runtimeId: 'placeholder',
     sortOrder: 30,
     slug: 'release-radar',
     name: 'Release Radar',
@@ -118,6 +122,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   {
     id: 'app_policy_watch',
     grantedRoleIds: [],
+    runtimeId: 'placeholder',
     sortOrder: 40,
     slug: 'policy-watch',
     name: 'Policy Watch',
@@ -132,6 +137,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   {
     id: 'app_runbook_mentor',
     grantedRoleIds: [],
+    runtimeId: 'placeholder_structured',
     sortOrder: 50,
     slug: 'runbook-mentor',
     name: 'Runbook Mentor',
@@ -146,6 +152,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   {
     id: 'app_audit_lens',
     grantedRoleIds: [],
+    runtimeId: 'placeholder',
     sortOrder: 60,
     slug: 'audit-lens',
     name: 'Audit Lens',
@@ -160,6 +167,7 @@ const WORKSPACE_APPS: WorkspaceAppFixture[] = [
   {
     id: 'app_tenant_control',
     grantedRoleIds: ['tenant_admin'],
+    runtimeId: 'placeholder',
     sortOrder: 70,
     slug: 'tenant-control',
     name: 'Tenant Control',
@@ -228,6 +236,10 @@ function resolveSeededWorkspaceAppsForUser(user: AuthUser): WorkspaceApp[] {
   }).map(app => toWorkspaceAppFixture(app, memberGroupIds));
 }
 
+function resolveWorkspaceAppRuntimeId(appId: string) {
+  return WORKSPACE_APPS.find(app => app.id === appId)?.runtimeId ?? 'placeholder';
+}
+
 function buildWorkspaceCatalog(
   user: AuthUser,
   input: {
@@ -279,5 +291,6 @@ export {
   buildWorkspaceCatalog,
   resolveDefaultRoleIds,
   resolveDefaultMemberGroupIds,
+  resolveWorkspaceAppRuntimeId,
   resolveSeededWorkspaceAppsForUser,
 };

@@ -24,6 +24,7 @@ import type {
   WorkspacePreferencesUpdateRequest,
   WorkspaceRun,
   WorkspaceRunFailure,
+  WorkspaceRunRuntime,
   WorkspaceRunStatus,
   WorkspaceRunSummary,
   WorkspaceSafetySignal,
@@ -523,6 +524,53 @@ function buildUsageFromOutputs(run: WorkspaceRunRecord): WorkspaceRun['usage'] {
   };
 }
 
+function buildRuntimeFromOutputs(
+  outputs: Record<string, unknown>
+): WorkspaceRunRuntime | null {
+  const candidate = outputs.runtime;
+
+  if (typeof candidate !== 'object' || candidate === null) {
+    return null;
+  }
+
+  const runtime = candidate as Record<string, unknown>;
+  const capabilities =
+    typeof runtime.capabilities === 'object' && runtime.capabilities !== null
+      ? (runtime.capabilities as Record<string, unknown>)
+      : null;
+
+  if (
+    typeof runtime.id !== 'string' ||
+    typeof runtime.label !== 'string' ||
+    (runtime.status !== 'available' && runtime.status !== 'degraded') ||
+    typeof runtime.invokedAt !== 'string' ||
+    !capabilities ||
+    typeof capabilities.streaming !== 'boolean' ||
+    typeof capabilities.citations !== 'boolean' ||
+    typeof capabilities.artifacts !== 'boolean' ||
+    typeof capabilities.safety !== 'boolean' ||
+    typeof capabilities.pendingActions !== 'boolean' ||
+    typeof capabilities.files !== 'boolean'
+  ) {
+    return null;
+  }
+
+  return {
+    id: runtime.id,
+    label: runtime.label,
+    status: runtime.status,
+    invokedAt: runtime.invokedAt,
+    capabilities: {
+      streaming: capabilities.streaming,
+      citations: capabilities.citations,
+      artifacts: capabilities.artifacts,
+      safety: capabilities.safety,
+      pendingActions: capabilities.pendingActions,
+      files: capabilities.files,
+    },
+  };
+}
+
 function readPendingActionsFromOutputs(outputs: Record<string, unknown>): WorkspaceHitlStep[] {
   return parseWorkspaceHitlSteps(outputs.pendingActions);
 }
@@ -1012,6 +1060,7 @@ function createRunRecord(input: {
     activeGroup: input.conversation.activeGroup,
     error: null,
     failure: null,
+    runtime: null,
     inputs: {},
     outputs: {},
     artifacts: [],
@@ -2213,6 +2262,7 @@ export function createWorkspaceService(options: {
           ...run.outputs,
           ...input.outputs,
         };
+        run.runtime = buildRuntimeFromOutputs(run.outputs);
         run.artifacts = buildArtifactsFromOutputs(run.outputs);
         run.citations = buildCitationsFromOutputs(run.outputs);
         run.safetySignals = buildSafetySignalsFromOutputs(run.outputs);
@@ -2267,6 +2317,7 @@ export function createWorkspaceService(options: {
       run.citations = buildCitationsFromOutputs(run.outputs);
       run.safetySignals = buildSafetySignalsFromOutputs(run.outputs);
       run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
+      run.runtime = buildRuntimeFromOutputs(run.outputs);
       syncRunArtifacts(run, user.id);
       run.usage = buildUsageFromOutputs(run);
 

@@ -428,6 +428,25 @@ export type WorkspaceRunFailure = {
   recordedAt: string;
 };
 
+export type WorkspaceRuntimeHealthState = "available" | "degraded";
+
+export type WorkspaceRuntimeCapabilities = {
+  streaming: boolean;
+  citations: boolean;
+  artifacts: boolean;
+  safety: boolean;
+  pendingActions: boolean;
+  files: boolean;
+};
+
+export type WorkspaceRunRuntime = {
+  id: string;
+  label: string;
+  status: WorkspaceRuntimeHealthState;
+  capabilities: WorkspaceRuntimeCapabilities;
+  invokedAt: string;
+};
+
 export type WorkspaceRun = WorkspaceRunSummary & {
   conversationId: string;
   app: Pick<
@@ -437,6 +456,7 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   activeGroup: WorkspaceGroup;
   error: string | null;
   failure: WorkspaceRunFailure | null;
+  runtime: WorkspaceRunRuntime | null;
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
   artifacts: WorkspaceArtifact[];

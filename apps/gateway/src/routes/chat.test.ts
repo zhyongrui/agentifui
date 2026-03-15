@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../app.js";
 import { createAuditService } from "../services/audit-service.js";
 import { createAuthService } from "../services/auth-service.js";
+import type { WorkspaceRuntimeService } from "../services/workspace-runtime.js";
 
 const testEnv: {
   nodeEnv: "test";
@@ -155,6 +156,227 @@ describe("chat routes", () => {
           }),
         ]),
       } satisfies ChatModelsResponse);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("routes runbook mentor through the structured runtime adapter", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+          "x-active-group-id": "grp_research",
+        },
+        payload: {
+          app_id: "app_runbook_mentor",
+          messages: [
+            {
+              role: "user",
+              content: "Turn this SOP into ordered steps.",
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        model: "runbook-mentor",
+        metadata: {
+          app_id: "app_runbook_mentor",
+          run_id: expect.any(String),
+          active_group_id: "grp_research",
+          runtime_id: "placeholder_structured",
+        },
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: expect.stringContaining(
+                "structured execution outline",
+              ),
+            },
+            finish_reason: "stop",
+          },
+        ],
+      } satisfies Partial<ChatCompletionResponse>);
+
+      const body = response.json() as ChatCompletionResponse;
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${body.id}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect(
+        (runResponse.json() as WorkspaceRunResponse).data.runtime,
+      ).toMatchObject({
+        id: "placeholder_structured",
+        label: "Structured Placeholder Runtime",
+        status: "available",
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("normalizes runtime adapter outages into structured run failures", async () => {
+    const authService = createTestAuthService();
+    const runtimeService: WorkspaceRuntimeService = {
+      getHealthSnapshot() {
+        return {
+          overallStatus: "degraded",
+          runtimes: [
+            {
+              id: "placeholder",
+              label: "Placeholder Runtime",
+              status: "degraded",
+              capabilities: {
+                streaming: true,
+                citations: true,
+                artifacts: true,
+                safety: true,
+                pendingActions: true,
+                files: true,
+              },
+            },
+          ],
+        };
+      },
+      async invoke() {
+        return {
+          ok: false,
+          error: {
+            code: "runtime_unavailable",
+            message: "Placeholder Runtime is currently degraded.",
+            detail: "Wait for the runtime health probe to recover.",
+            retryable: true,
+            runtime: {
+              id: "placeholder",
+              label: "Placeholder Runtime",
+              status: "degraded",
+              invokedAt: new Date().toISOString(),
+              capabilities: {
+                streaming: true,
+                citations: true,
+                artifacts: true,
+                safety: true,
+                pendingActions: true,
+                files: true,
+              },
+            },
+          },
+        };
+      },
+    };
+    const { app } = await createTestApp(authService, {}, { runtimeService });
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          conversation_id: launchBody.data.conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Summarize the current policy changes for my group.",
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({
+        error: {
+          message: "Placeholder Runtime is currently degraded.",
+          type: "service_unavailable",
+          code: "provider_unavailable",
+          trace_id: expect.any(String),
+        },
+      });
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${launchBody.data.runId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data).toMatchObject({
+        status: "failed",
+        failure: {
+          code: "runtime_unavailable",
+          stage: "execution",
+          retryable: true,
+        },
+        runtime: {
+          id: "placeholder",
+          status: "degraded",
+        },
+      });
     } finally {
       await app.close();
     }

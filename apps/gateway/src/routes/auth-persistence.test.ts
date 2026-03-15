@@ -1295,6 +1295,7 @@ describe.sequential('persistent auth runtime', () => {
             app_id: 'app_policy_watch',
             run_id: launchBody.data.runId,
             active_group_id: 'grp_research',
+            runtime_id: 'placeholder',
           },
         });
 
@@ -1359,6 +1360,11 @@ describe.sequential('persistent auth runtime', () => {
                 title: 'Policy Watch workspace context',
               }),
             ]),
+            runtime: expect.objectContaining({
+              id: 'placeholder',
+              label: 'Placeholder Runtime',
+              status: 'available',
+            }),
           });
           expect(artifactId).toEqual(expect.stringMatching(/^artifact_/));
 
@@ -1463,6 +1469,11 @@ describe.sequential('persistent auth runtime', () => {
 
         expect(run.statusCode).toBe(200);
         expect((run.json() as WorkspaceRunResponse).data).toMatchObject({
+          runtime: {
+            id: 'placeholder',
+            label: 'Placeholder Runtime',
+            status: 'available',
+          },
           artifacts: [
             expect.objectContaining({
               kind: 'markdown',

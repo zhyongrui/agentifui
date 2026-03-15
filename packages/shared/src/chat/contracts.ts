@@ -84,6 +84,7 @@ export type ChatCompletionResponse = {
     app_id: string;
     run_id: string;
     active_group_id: string;
+    runtime_id?: string;
   };
 };
 

@@ -2125,6 +2125,15 @@ export default function ConversationPage() {
                     <strong>{selectedRun.elapsedTime} ms</strong>
                     <p>{selectedRun.finishedAt ?? "in progress"}</p>
                   </article>
+                  {selectedRun.runtime ? (
+                    <article className="chat-meta-card">
+                      <span>Runtime</span>
+                      <strong>{selectedRun.runtime.label}</strong>
+                      <p>
+                        {selectedRun.runtime.id} · {selectedRun.runtime.status}
+                      </p>
+                    </article>
+                  ) : null}
                   {selectedRun.failure ? (
                     <article className="chat-meta-card">
                       <span>Failure</span>
@@ -2188,6 +2197,34 @@ export default function ConversationPage() {
                 </div>
 
                 <div className="run-replay-stack">
+                  {selectedRun.runtime ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Runtime</span>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <p>
+                        <strong>{selectedRun.runtime.label}</strong> ·{" "}
+                        {selectedRun.runtime.id}
+                      </p>
+                      <p>
+                        {selectedRun.runtime.status} · invoked{" "}
+                        {new Date(selectedRun.runtime.invokedAt).toLocaleString()}
+                      </p>
+                      <p>
+                        streaming{" "}
+                        {selectedRun.runtime.capabilities.streaming ? "on" : "off"}
+                        {" · "}citations{" "}
+                        {selectedRun.runtime.capabilities.citations ? "on" : "off"}
+                        {" · "}artifacts{" "}
+                        {selectedRun.runtime.capabilities.artifacts ? "on" : "off"}
+                      </p>
+                    </article>
+                  ) : null}
                   {selectedRun.safetySignals.length > 0 ? (
                     <article className="chat-bubble assistant">
                       <div className="chat-bubble-meta">

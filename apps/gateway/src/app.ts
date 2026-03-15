@@ -39,6 +39,10 @@ import {
   createWorkspaceService,
   type WorkspaceService,
 } from './services/workspace-service.js';
+import {
+  createWorkspaceRuntimeService,
+  type WorkspaceRuntimeService,
+} from './services/workspace-runtime.js';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -47,6 +51,7 @@ type BuildAppOptions = {
   auditService?: AuditService;
   adminService?: AdminService;
   workspaceService?: WorkspaceService;
+  runtimeService?: WorkspaceRuntimeService;
 };
 
 const DEFAULT_BETTER_AUTH_SECRET = 'agentifui-dev-secret-change-me';
@@ -130,6 +135,8 @@ export async function buildApp(
       : createWorkspaceService({
           fileStorage: workspaceFileStorage,
         }));
+  const runtimeService =
+    options.runtimeService ?? createWorkspaceRuntimeService();
 
   if (ownsDatabase && database) {
     app.addHook('onClose', async () => {
@@ -188,11 +195,17 @@ export async function buildApp(
     );
   });
 
-  await registerRootRoutes(app, env, observabilityService);
+  await registerRootRoutes(app, env, observabilityService, runtimeService);
   await registerAuthRoutes(app, env, authService, auditService);
   await registerAdminRoutes(app, authService, adminService, auditService);
   await registerWorkspaceRoutes(app, authService, workspaceService, auditService);
-  await registerChatRoutes(app, authService, workspaceService, auditService);
+  await registerChatRoutes(
+    app,
+    authService,
+    workspaceService,
+    auditService,
+    runtimeService,
+  );
 
   return app;
 }

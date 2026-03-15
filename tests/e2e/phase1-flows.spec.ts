@@ -993,6 +993,58 @@ $$x^2 + y^2 = z^2$$`);
   ).toBeVisible();
 });
 
+test("runbook mentor browser flow uses the structured runtime path", async ({
+  page,
+}) => {
+  const email = uniqueEmail("runbook-runtime");
+
+  await register(page, {
+    email,
+    displayName: "Runbook Runtime User",
+  });
+  await expect(page).toHaveURL(/\/login\?registered=1$/);
+
+  await login(page, {
+    email,
+  });
+  await expectAppsWorkspace(page);
+  await expect(appCard(page, "Runbook Mentor")).toBeVisible();
+
+  await Promise.all([
+    waitForGatewayPost(page, "/workspace/apps/launch"),
+    appCard(page, "Runbook Mentor")
+      .getByRole("button", { name: "打开应用" })
+      .click(),
+  ]);
+  await expectConversationSurface(page, "Runbook Mentor");
+
+  await page
+    .getByLabel("Message")
+    .fill("Turn this SOP into ordered execution steps.");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  const conversationPanel = page.locator("section.chat-panel").filter({
+    has: page.getByRole("heading", { name: "Conversation" }),
+  });
+  await expect(
+    conversationPanel.getByText(
+      "Runbook Mentor translated the request into a structured execution outline.",
+    ),
+  ).toBeVisible({
+    timeout: 60_000,
+  });
+
+  const runHistoryPanel = page.locator("section.chat-panel").filter({
+    has: page.getByRole("heading", { name: "Run history" }),
+  });
+  await expect(
+    runHistoryPanel.getByText("Structured Placeholder Runtime").first(),
+  ).toBeVisible();
+  await expect(
+    runHistoryPanel.getByText("placeholder_structured").first(),
+  ).toBeVisible();
+});
+
 test("flagged prompts render safety banners and replay panels", async ({
   page,
 }) => {

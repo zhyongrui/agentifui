@@ -20,6 +20,7 @@ import {
   type WorkspacePreferences,
   type WorkspacePreferencesUpdateRequest,
   type WorkspaceRun,
+  type WorkspaceRunRuntime,
   type WorkspaceRunSummary,
   type WorkspaceSafetySignal,
   type WorkspaceRunTimelineEvent,
@@ -1294,6 +1295,49 @@ function toWorkspaceRunUsage(
   };
 }
 
+function toWorkspaceRunRuntime(value: unknown): WorkspaceRunRuntime | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const runtime = value as Record<string, unknown>;
+  const capabilities =
+    typeof runtime.capabilities === "object" && runtime.capabilities !== null
+      ? (runtime.capabilities as Record<string, unknown>)
+      : null;
+
+  if (
+    typeof runtime.id !== "string" ||
+    typeof runtime.label !== "string" ||
+    (runtime.status !== "available" && runtime.status !== "degraded") ||
+    typeof runtime.invokedAt !== "string" ||
+    !capabilities ||
+    typeof capabilities.streaming !== "boolean" ||
+    typeof capabilities.citations !== "boolean" ||
+    typeof capabilities.artifacts !== "boolean" ||
+    typeof capabilities.safety !== "boolean" ||
+    typeof capabilities.pendingActions !== "boolean" ||
+    typeof capabilities.files !== "boolean"
+  ) {
+    return null;
+  }
+
+  return {
+    id: runtime.id,
+    label: runtime.label,
+    status: runtime.status,
+    invokedAt: runtime.invokedAt,
+    capabilities: {
+      streaming: capabilities.streaming,
+      citations: capabilities.citations,
+      artifacts: capabilities.artifacts,
+      safety: capabilities.safety,
+      pendingActions: capabilities.pendingActions,
+      files: capabilities.files,
+    },
+  };
+}
+
 function toWorkspaceConversation(row: ConversationRow): WorkspaceConversation {
   return {
     id: row.id,
@@ -1351,6 +1395,7 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
       error: row.error,
       recordedAt: toIso(row.finished_at) ?? toIso(row.created_at),
     }),
+    runtime: toWorkspaceRunRuntime(outputs.runtime),
     inputs: normalizeJsonRecord(row.inputs),
     outputs,
     artifacts: toWorkspaceArtifacts(outputs.artifacts),

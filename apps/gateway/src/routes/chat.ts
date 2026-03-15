@@ -7,6 +7,7 @@ import type {
   WorkspaceHitlStep,
   WorkspaceConversationMessage,
   WorkspaceConversationMessageStatus,
+  WorkspaceRunRuntime,
   WorkspaceSafetySignal,
   WorkspaceSourceBlock,
 } from "@agentifui/shared/apps";
@@ -35,6 +36,12 @@ import {
   hasCriticalSafetySignal,
   resolveSafetySignals,
 } from "../services/workspace-safety.js";
+import {
+  estimateRuntimeCompletionTokens,
+  estimateRuntimePromptTokens,
+  summarizeRuntimePrompt,
+  type WorkspaceRuntimeService,
+} from "../services/workspace-runtime.js";
 import { buildWorkspaceRunFailure } from "../services/workspace-run-failure.js";
 import { calculateCompletionQuotaCost } from "../services/workspace-quota.js";
 import type { WorkspaceService } from "../services/workspace-service.js";
@@ -922,11 +929,13 @@ async function resolveConversationAttachments(
 
 function buildMetadataEvent(input: {
   conversation: WorkspaceConversation;
+  runtimeId?: string;
 }): string {
   return `event: agentif.metadata\ndata: ${JSON.stringify({
     conversation_id: input.conversation.id,
     run_id: input.conversation.run.id,
     trace_id: input.conversation.run.traceId,
+    ...(input.runtimeId ? { runtime_id: input.runtimeId } : {}),
   })}\n\n`;
 }
 
@@ -1003,6 +1012,7 @@ function buildBlockingResponse(input: {
   safetySignals: WorkspaceSafetySignal[];
   sourceBlocks: WorkspaceSourceBlock[];
   suggestedPrompts: string[];
+  runtimeId?: string;
 }): ChatCompletionResponse {
   return {
     id: input.conversation.run.id,
@@ -1044,13 +1054,16 @@ function buildBlockingResponse(input: {
       app_id: input.conversation.app.id,
       run_id: input.conversation.run.id,
       active_group_id: input.conversation.activeGroup.id,
+      ...(input.runtimeId ? { runtime_id: input.runtimeId } : {}),
     },
   };
 }
 
 async function* streamCompletionEvents(input: {
   attachments: WorkspaceConversationAttachment[];
+  artifacts: WorkspaceArtifact[];
   auditService: AuditService;
+  citations: WorkspaceCitation[];
   conversation: WorkspaceConversation;
   created: number;
   ipAddress: string;
@@ -1058,7 +1071,9 @@ async function* streamCompletionEvents(input: {
   promptTokens: number;
   assistantText: string;
   pendingActions: WorkspaceHitlStep[];
+  runtime: WorkspaceRunRuntime | null;
   safetySignals: WorkspaceSafetySignal[];
+  sourceBlocks: WorkspaceSourceBlock[];
   suggestedPrompts: string[];
   messages: ChatCompletionMessage[];
   startedAt: number;
@@ -1068,10 +1083,12 @@ async function* streamCompletionEvents(input: {
   const streamState = activeStreams.get(input.conversation.run.id);
   let assistantContent = "";
   let finalized = false;
+  const latestPrompt = extractLatestUserPrompt(input.messages);
 
   try {
     yield buildMetadataEvent({
       conversation: input.conversation,
+      runtimeId: input.runtime?.id,
     });
     yield buildChunkEvent(
       buildStreamingChunk({
@@ -1105,18 +1122,27 @@ async function* streamCompletionEvents(input: {
     }
 
     const wasStopped = Boolean(streamState?.stopRequested);
-    const completionTokens = estimateTokens(assistantContent);
-    const artifacts = buildAssistantArtifacts({
-      appName: input.conversation.app.name,
-      assistantText: assistantContent,
-      createdAt: new Date().toISOString(),
-      latestPrompt: extractLatestUserPrompt(input.messages),
-    });
-    const { citations, sourceBlocks } = buildAssistantSources({
+    const completionTokens = estimateRuntimeCompletionTokens(assistantContent);
+    const artifacts =
+      !wasStopped && input.artifacts.length > 0
+        ? input.artifacts
+        : buildAssistantArtifacts({
+            appName: input.conversation.app.name,
+            assistantText: assistantContent,
+            createdAt: new Date().toISOString(),
+            latestPrompt,
+          });
+    const fallbackSources = buildAssistantSources({
       attachments: input.attachments,
       conversation: input.conversation,
-      latestPrompt: extractLatestUserPrompt(input.messages),
+      latestPrompt,
     });
+    const citations =
+      input.citations.length > 0 ? input.citations : fallbackSources.citations;
+    const sourceBlocks =
+      input.sourceBlocks.length > 0
+        ? input.sourceBlocks
+        : fallbackSources.sourceBlocks;
     const pendingActions =
       !wasStopped && assistantContent.trim().length > 0 ? input.pendingActions : [];
     const updateResult =
@@ -1147,6 +1173,7 @@ async function* streamCompletionEvents(input: {
           artifacts,
           citations,
           pendingActions,
+          ...(input.runtime ? { runtime: input.runtime } : {}),
           safetySignals: input.safetySignals,
           sourceBlocks,
           usage: {
@@ -1226,19 +1253,25 @@ async function* streamCompletionEvents(input: {
     activeStreams.delete(input.conversation.run.id);
 
     if (!finalized) {
-      const completionTokens = estimateTokens(assistantContent);
+      const completionTokens = estimateRuntimeCompletionTokens(assistantContent);
       const finishedAt = new Date().toISOString();
       const artifacts = buildAssistantArtifacts({
         appName: input.conversation.app.name,
         assistantText: assistantContent,
-        createdAt: new Date().toISOString(),
-        latestPrompt: extractLatestUserPrompt(input.messages),
+        createdAt: finishedAt,
+        latestPrompt,
       });
-      const { citations, sourceBlocks } = buildAssistantSources({
+      const fallbackSources = buildAssistantSources({
         attachments: input.attachments,
         conversation: input.conversation,
-        latestPrompt: extractLatestUserPrompt(input.messages),
+        latestPrompt,
       });
+      const citations =
+        input.citations.length > 0 ? input.citations : fallbackSources.citations;
+      const sourceBlocks =
+        input.sourceBlocks.length > 0
+          ? input.sourceBlocks
+          : fallbackSources.sourceBlocks;
       const fallbackResult =
         await input.workspaceService.updateConversationRunForUser(input.user, {
           conversationId: input.conversation.id,
@@ -1267,6 +1300,7 @@ async function* streamCompletionEvents(input: {
             artifacts,
             citations,
             pendingActions: [],
+            ...(input.runtime ? { runtime: input.runtime } : {}),
             safetySignals: input.safetySignals,
             sourceBlocks,
             usage: {
@@ -1292,7 +1326,7 @@ async function* streamCompletionEvents(input: {
             ? undefined
             : "The streaming response ended unexpectedly.",
           elapsedTime: Date.now() - input.startedAt,
-          totalTokens: input.promptTokens + estimateTokens(assistantContent),
+          totalTokens: input.promptTokens + completionTokens,
           totalSteps: 1,
           finishedAt,
         });
@@ -1340,6 +1374,7 @@ export async function registerChatRoutes(
   authService: AuthService,
   workspaceService: WorkspaceService,
   auditService: AuditService,
+  runtimeService: WorkspaceRuntimeService,
 ) {
   app.get("/v1/models", async (request, reply) => {
     const traceId =
@@ -1524,21 +1559,11 @@ export async function registerChatRoutes(
 
     const traceId = conversation.run.traceId || fallbackTraceId;
     const startedAt = Date.now();
-    const latestPrompt = extractLatestUserPrompt(body.messages);
-    const assistantText = buildAssistantText(
-      conversation,
-      body.messages,
-      attachmentResult.attachments,
-    );
-    const suggestedPrompts = buildSuggestedPrompts(latestPrompt);
-    const safetySignals = resolveSafetySignals({
-      latestPrompt,
-      recordedAt: new Date().toISOString(),
-      runtimeInput:
-        body.inputs && typeof body.inputs === "object"
-          ? (body.inputs as Record<string, unknown>)
-          : null,
-    });
+    const latestPrompt = summarizeRuntimePrompt(body.messages);
+    const runtimeInput =
+      body.inputs && typeof body.inputs === "object"
+        ? (body.inputs as Record<string, unknown>)
+        : null;
     const model = resolveModelName(
       {
         app_id: appId,
@@ -1556,18 +1581,7 @@ export async function registerChatRoutes(
       },
       conversation,
     );
-    const pendingActions = buildPlaceholderHitlSteps({
-      appId,
-      conversationId: conversation.id,
-      createdAt: new Date().toISOString(),
-      latestPrompt,
-      runId: conversation.run.id,
-    });
-    const promptTokens = body.messages.reduce(
-      (total, message) => total + estimateTokens(extractMessageText(message)),
-      0,
-    );
-    const completionTokens = estimateTokens(assistantText);
+    const promptTokens = estimateRuntimePromptTokens(body.messages);
     const created = Math.floor(Date.now() / 1000);
 
     reply.header("X-Trace-ID", traceId);
@@ -1599,6 +1613,71 @@ export async function registerChatRoutes(
       });
     }
 
+    const runtimeResult = await runtimeService.invoke({
+      appId,
+      attachments: attachmentResult.attachments,
+      conversation: runningResult.data,
+      latestPrompt,
+      messages: body.messages,
+      requestedModel: model,
+      runtimeInput,
+    });
+
+    if (!runtimeResult.ok) {
+      const finishedAt = new Date().toISOString();
+
+      await workspaceService.updateConversationRunForUser(access.user, {
+        conversationId: conversation.id,
+        runId: conversation.run.id,
+        status: "failed",
+        messageHistory: buildPersistedHistory(body.messages, {
+          latestUserAttachments: attachmentResult.attachments,
+        }),
+        outputs: {
+          ...(runtimeResult.error.runtime
+            ? { runtime: runtimeResult.error.runtime }
+            : {}),
+          failure: buildWorkspaceRunFailure({
+            code: runtimeResult.error.code,
+            stage: "execution",
+            message: runtimeResult.error.message,
+            retryable: runtimeResult.error.retryable,
+            detail: runtimeResult.error.detail,
+            recordedAt: finishedAt,
+          }),
+        },
+        error: runtimeResult.error.message,
+        elapsedTime: Date.now() - startedAt,
+        totalTokens: promptTokens,
+        totalSteps: 1,
+        finishedAt,
+      });
+
+      reply.code(runtimeResult.error.code === "runtime_unavailable" ? 503 : 500);
+      return buildErrorResponse(traceId, {
+        type:
+          runtimeResult.error.code === "runtime_unavailable"
+            ? "service_unavailable"
+            : "internal_error",
+        code:
+          runtimeResult.error.code === "runtime_unavailable"
+            ? "provider_unavailable"
+            : "provider_error",
+        message: runtimeResult.error.message,
+      });
+    }
+
+    const assistantText = runtimeResult.data.assistantText;
+    const completionTokens = estimateRuntimeCompletionTokens(assistantText);
+    const artifacts = runtimeResult.data.artifacts ?? [];
+    const citations = runtimeResult.data.citations ?? [];
+    const pendingActions = runtimeResult.data.pendingActions ?? [];
+    const safetySignals = runtimeResult.data.safetySignals ?? [];
+    const sourceBlocks = runtimeResult.data.sourceBlocks ?? [];
+    const suggestedPrompts = runtimeResult.data.suggestedPrompts ?? [];
+    const runtime = runtimeResult.data.runtime;
+    const resolvedModel = runtimeResult.data.model ?? model;
+
     if (body.stream) {
       activeStreams.set(runningResult.data.run.id, {
         stopRequested: false,
@@ -1616,11 +1695,15 @@ export async function registerChatRoutes(
             conversation: runningResult.data,
             created,
             ipAddress: request.ip,
-            model,
+            model: resolvedModel,
             promptTokens,
             assistantText,
+            artifacts,
+            citations,
             pendingActions,
+            runtime,
             safetySignals,
+            sourceBlocks,
             suggestedPrompts,
             messages: body.messages,
             startedAt,
@@ -1631,17 +1714,6 @@ export async function registerChatRoutes(
       );
     }
 
-    const artifacts = buildAssistantArtifacts({
-      appName: conversation.app.name,
-      assistantText,
-      createdAt: new Date().toISOString(),
-      latestPrompt,
-    });
-    const { citations, sourceBlocks } = buildAssistantSources({
-      attachments: attachmentResult.attachments,
-      conversation,
-      latestPrompt,
-    });
     const updateResult = await workspaceService.updateConversationRunForUser(
       access.user,
       {
@@ -1671,6 +1743,7 @@ export async function registerChatRoutes(
           artifacts,
           citations,
           pendingActions,
+          runtime,
           safetySignals,
           sourceBlocks,
           usage: {
@@ -1732,7 +1805,7 @@ export async function registerChatRoutes(
     return buildBlockingResponse({
       conversation: updateResult.data,
       created,
-      model,
+      model: resolvedModel,
       promptTokens,
       completionTokens,
       assistantText,
@@ -1742,6 +1815,7 @@ export async function registerChatRoutes(
       safetySignals,
       sourceBlocks,
       suggestedPrompts,
+      runtimeId: runtime.id,
     });
   });
 

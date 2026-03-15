@@ -2,14 +2,17 @@ import type { FastifyInstance } from 'fastify';
 
 import type { GatewayEnv } from '../config/env.js';
 import type { ObservabilityService } from '../services/observability-service.js';
+import type { WorkspaceRuntimeService } from '../services/workspace-runtime.js';
 
 export async function registerRootRoutes(
   app: FastifyInstance,
   env: GatewayEnv,
-  observabilityService: ObservabilityService
+  observabilityService: ObservabilityService,
+  runtimeService: WorkspaceRuntimeService
 ) {
   app.get('/health', async () => {
     const snapshot = observabilityService.getSnapshot();
+    const runtime = runtimeService.getHealthSnapshot();
 
     return {
       status: 'ok' as const,
@@ -19,6 +22,7 @@ export async function registerRootRoutes(
       startedAt: snapshot.startedAt,
       uptimeSeconds: snapshot.uptimeSeconds,
       inflightRequests: snapshot.inflightRequests,
+      runtime,
       time: new Date().toISOString(),
     };
   });
