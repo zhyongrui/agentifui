@@ -18,6 +18,10 @@ import type {
   AdminTenantStatusUpdateRequest,
   AdminTenantStatusUpdateResponse,
   AdminTenantsResponse,
+  AdminUsageResponse,
+  AdminUsageExportFormat,
+  AdminUsageExportJsonBundle,
+  AdminUsageExportMetadata,
   AdminUsersResponse,
 } from '@agentifui/shared/admin';
 import type { AuthAuditEntityType, AuthAuditLevel, AuthUser } from '@agentifui/shared/auth';
@@ -79,6 +83,10 @@ function isAuditExportFormat(value: unknown): value is AdminAuditExportFormat {
   return value === 'csv' || value === 'json';
 }
 
+function isUsageExportFormat(value: unknown): value is AdminUsageExportFormat {
+  return value === 'csv' || value === 'json';
+}
+
 function isAuditPayloadMode(value: unknown): value is AdminAuditPayloadMode {
   return value === 'masked' || value === 'raw';
 }
@@ -116,6 +124,20 @@ function buildAuditExportMetadata(
     exportedAt,
     eventCount,
     appliedFilters,
+  };
+}
+
+function buildUsageExportMetadata(
+  format: AdminUsageExportFormat,
+  tenantCount: number
+): AdminUsageExportMetadata {
+  const exportedAt = new Date().toISOString();
+
+  return {
+    format,
+    filename: `admin-usage-${exportedAt.replace(/[:.]/g, '-')}.${format}`,
+    exportedAt,
+    tenantCount,
   };
 }
 
@@ -183,6 +205,90 @@ function buildAuditExportCsv(bundle: AdminAuditExportJsonBundle) {
   );
 
   return [header.map(toCsvCell).join(','), ...rows].join('\n');
+}
+
+function buildUsageExportCsv(bundle: AdminUsageExportJsonBundle) {
+  const header = [
+    'tenant_id',
+    'tenant_name',
+    'launch_count',
+    'run_count',
+    'message_count',
+    'artifact_count',
+    'uploaded_file_count',
+    'total_storage_bytes',
+    'total_tokens',
+    'last_activity_at',
+    'top_apps',
+    'quota_alerts',
+  ];
+  const rows = bundle.tenants.map(tenant =>
+    [
+      tenant.tenantId,
+      tenant.tenantName,
+      tenant.launchCount,
+      tenant.runCount,
+      tenant.messageCount,
+      tenant.artifactCount,
+      tenant.uploadedFileCount,
+      tenant.totalStorageBytes,
+      tenant.totalTokens,
+      tenant.lastActivityAt,
+      tenant.appBreakdown
+        .slice(0, 5)
+        .map(app => `${app.appName} (${app.launchCount}/${app.runCount})`)
+        .join('; '),
+      tenant.quotaUsage
+        .filter(quota => quota.isOverLimit || quota.utilizationPercent >= 85)
+        .map(quota => `${quota.scopeLabel}:${quota.actualUsed}/${quota.monthlyLimit}`)
+        .join('; '),
+    ]
+      .map(toCsvCell)
+      .join(',')
+  );
+
+  return [header.map(toCsvCell).join(','), ...rows].join('\n');
+}
+
+function summarizeUsageTotals(tenants: AdminUsageResponse['data']['tenants']) {
+  return tenants.reduce<AdminUsageResponse['data']['totals']>(
+    (totals, tenant) => {
+      totals.launchCount += tenant.launchCount;
+      totals.runCount += tenant.runCount;
+      totals.succeededRunCount += tenant.succeededRunCount;
+      totals.failedRunCount += tenant.failedRunCount;
+      totals.stoppedRunCount += tenant.stoppedRunCount;
+      totals.messageCount += tenant.messageCount;
+      totals.artifactCount += tenant.artifactCount;
+      totals.uploadedFileCount += tenant.uploadedFileCount;
+      totals.uploadedBytes += tenant.uploadedBytes;
+      totals.artifactBytes += tenant.artifactBytes;
+      totals.totalStorageBytes += tenant.totalStorageBytes;
+      totals.totalTokens += tenant.totalTokens;
+      totals.lastActivityAt =
+        !totals.lastActivityAt || !tenant.lastActivityAt
+          ? (totals.lastActivityAt ?? tenant.lastActivityAt)
+          : new Date(tenant.lastActivityAt).getTime() > new Date(totals.lastActivityAt).getTime()
+            ? tenant.lastActivityAt
+            : totals.lastActivityAt;
+      return totals;
+    },
+    {
+      launchCount: 0,
+      runCount: 0,
+      succeededRunCount: 0,
+      failedRunCount: 0,
+      stoppedRunCount: 0,
+      messageCount: 0,
+      artifactCount: 0,
+      uploadedFileCount: 0,
+      uploadedBytes: 0,
+      artifactBytes: 0,
+      totalStorageBytes: 0,
+      totalTokens: 0,
+      lastActivityAt: null,
+    }
+  );
 }
 
 function parseAuditFilters(query: Record<string, unknown>):
@@ -444,6 +550,8 @@ async function recordAdminReadEvent(
     resource:
       | '/admin/context'
       | '/admin/apps'
+      | '/admin/usage'
+      | '/admin/usage/export'
       | '/admin/audit'
       | '/admin/audit/export'
       | '/admin/groups'
@@ -830,6 +938,129 @@ export async function registerAdminRoutes(
     });
 
     return response;
+  });
+
+  app.get('/admin/usage', async (request, reply) => {
+    const access = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization,
+    );
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const usage = await adminService.listUsageForUser(access.user);
+    const response: AdminUsageResponse = {
+      ok: true,
+      data: {
+        generatedAt: new Date().toISOString(),
+        tenants: usage.tenants,
+        totals: usage.totals,
+      },
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'admin.workspace.read',
+      entityType: 'tenant',
+      entityId: access.user.tenantId,
+      ipAddress: request.ip,
+      payload: {
+        resource: '/admin/usage',
+      },
+    });
+
+    return response;
+  });
+
+  app.get('/admin/usage/export', async (request, reply) => {
+    const access = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization,
+    );
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const query = (request.query ?? {}) as Record<string, unknown>;
+    const format = readQueryString(query.format);
+    const search = readQueryString(query.search).toLowerCase();
+    const tenantIdFilter = readQueryString(query.tenantId);
+
+    if (!isUsageExportFormat(format)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Usage export requires format to be csv or json.'
+      );
+    }
+
+    const capabilities = await resolveAdminCapabilities(adminService, access.user);
+
+    if (tenantIdFilter && !capabilities.canReadPlatformAdmin && tenantIdFilter !== access.user.tenantId) {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Tenant admins can only export usage for their own tenant.'
+      );
+    }
+
+    const usage = await adminService.listUsageForUser(access.user);
+    const tenants = usage.tenants.filter((tenant) => {
+      if (tenantIdFilter && tenant.tenantId !== tenantIdFilter) {
+        return false;
+      }
+
+      if (!search) {
+        return true;
+      }
+
+      const normalizedAppNames = tenant.appBreakdown.map(app => app.appName.toLowerCase());
+      return (
+        tenant.tenantId.toLowerCase().includes(search) ||
+        tenant.tenantName.toLowerCase().includes(search) ||
+        normalizedAppNames.some(appName => appName.includes(search))
+      );
+    });
+    const metadata = buildUsageExportMetadata(format, tenants.length);
+    const bundle: AdminUsageExportJsonBundle = {
+      metadata,
+      generatedAt: new Date().toISOString(),
+      tenants,
+      totals: summarizeUsageTotals(tenants),
+    };
+
+    reply.header('content-disposition', `attachment; filename="${metadata.filename}"`);
+    reply.header('x-agentifui-export-format', metadata.format);
+    reply.header('x-agentifui-export-filename', metadata.filename);
+    reply.header('x-agentifui-exported-at', metadata.exportedAt);
+    reply.header('x-agentifui-export-count', String(metadata.tenantCount));
+
+    await recordAdminReadEvent(auditService, {
+      user: access.user,
+      ipAddress: request.ip,
+      resource: '/admin/usage/export',
+      resultCount: tenants.length,
+      filters: {
+        tenantId: tenantIdFilter || null,
+      },
+      exportFormat: format,
+    });
+
+    if (format === 'json') {
+      reply.type('application/json; charset=utf-8');
+      return JSON.stringify(bundle, null, 2);
+    }
+
+    reply.type('text/csv; charset=utf-8');
+    return buildUsageExportCsv(bundle);
   });
 
   app.get('/admin/audit', async (request, reply) => {

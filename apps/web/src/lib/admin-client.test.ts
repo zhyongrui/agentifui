@@ -4,11 +4,13 @@ import {
   createAdminTenant,
   createAdminAppGrant,
   exportAdminAudit,
+  exportAdminUsage,
   fetchAdminApps,
   fetchAdminAudit,
   fetchAdminContext,
   fetchAdminGroups,
   fetchAdminTenants,
+  fetchAdminUsage,
   fetchAdminUsers,
   revokeAdminAppGrant,
   updateAdminTenantStatus,
@@ -104,7 +106,7 @@ describe('admin client', () => {
     });
   });
 
-  it('loads admin groups, apps and audit through the same-origin gateway proxy', async () => {
+  it('loads admin groups, apps, usage and audit through the same-origin gateway proxy', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -130,6 +132,30 @@ describe('admin client', () => {
           ok: true,
           data: {
             generatedAt: '2026-03-12T00:00:00.000Z',
+            tenants: [],
+            totals: {
+              launchCount: 0,
+              runCount: 0,
+              succeededRunCount: 0,
+              failedRunCount: 0,
+              stoppedRunCount: 0,
+              messageCount: 0,
+              artifactCount: 0,
+              uploadedFileCount: 0,
+              uploadedBytes: 0,
+              artifactBytes: 0,
+              totalStorageBytes: 0,
+              totalTokens: 0,
+              lastActivityAt: null,
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-12T00:00:00.000Z',
             capabilities: {
               canReadAdmin: true,
               canReadPlatformAdmin: false,
@@ -145,9 +171,10 @@ describe('admin client', () => {
       });
     vi.stubGlobal('fetch', fetchMock);
 
-    const [groupsResult, appsResult, auditResult] = await Promise.all([
+    const [groupsResult, appsResult, usageResult, auditResult] = await Promise.all([
       fetchAdminGroups('session-123'),
       fetchAdminApps('session-123'),
+      fetchAdminUsage('session-123'),
       fetchAdminAudit('session-123'),
     ]);
 
@@ -165,7 +192,14 @@ describe('admin client', () => {
       },
       cache: 'no-store',
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/gateway/admin/audit', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/gateway/admin/usage', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/gateway/admin/audit', {
       method: 'GET',
       headers: {
         authorization: 'Bearer session-123',
@@ -182,6 +216,15 @@ describe('admin client', () => {
       ok: true,
       data: {
         apps: [],
+      },
+    });
+    expect(usageResult).toMatchObject({
+      ok: true,
+      data: {
+        tenants: [],
+        totals: {
+          launchCount: 0,
+        },
       },
     });
     expect(auditResult).toMatchObject({
@@ -274,6 +317,46 @@ describe('admin client', () => {
         format: 'csv',
         filename: 'admin-audit-export.csv',
         eventCount: 1,
+      },
+    });
+  });
+
+  it('downloads admin usage exports through the same-origin gateway proxy', async () => {
+    const blob = new Blob(['tenant_id,tenant_name\ntenant-dev,Tenant Dev\n'], {
+      type: 'text/csv',
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      headers: new Headers({
+        'content-type': 'text/csv; charset=utf-8',
+        'x-agentifui-export-format': 'csv',
+        'x-agentifui-export-filename': 'admin-usage-export.csv',
+        'x-agentifui-exported-at': '2026-03-12T00:00:00.000Z',
+        'x-agentifui-export-count': '1',
+      }),
+      blob: async () => blob,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await exportAdminUsage('session-123', 'csv', {
+      search: 'tenant',
+      tenantId: 'tenant-dev',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/gateway/admin/usage/export?search=tenant&tenantId=tenant-dev&format=csv',
+      {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        cache: 'no-store',
+      }
+    );
+    expect(result).toMatchObject({
+      metadata: {
+        format: 'csv',
+        filename: 'admin-usage-export.csv',
+        tenantCount: 1,
       },
     });
   });

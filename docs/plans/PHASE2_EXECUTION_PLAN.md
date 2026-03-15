@@ -124,7 +124,8 @@ Execution status:
 | completed | `P2-D5` | degraded fallback、只读恢复、admin health 和 browser 验证已闭环 |
 | completed | `P2-E1` | cleanup policy、dry-run/execute job、admin preview、audit 和 runbook 已闭环 |
 | completed | `P2-E2` | perf seed/smoke、JSON artifact、预算门槛和 release gate 已闭环 |
-| active    | `P2-E3` | 下一项，开始 tenant usage analytics 汇总与 admin UI |
+| completed | `P2-E3` | tenant usage analytics、per-app/quota/export、tests 和 browser QA 已闭环 |
+| active    | `P2-E4` | 下一项，开始 backup/export drill 和恢复演练 |
 
 ## 5. First Batch Definition
 
@@ -167,7 +168,8 @@ Current batch status:
 - `P2-D2` complete
 - `P2-D3` complete
 - `P2-D4` complete
-- the active follow-on item is `P2-E3`
+- `P2-E3` complete
+- the active follow-on item is `P2-E4`
 
 ## 6. Detailed Execution Notes
 
@@ -663,16 +665,16 @@ Legend:
 
 ### 7.8 Operations Queue: `P2-E3` Tenant Usage Analytics
 
-- [ ] `P2-E3-01` Define tenant usage metrics for launches, runs, messages, artifacts, and storage footprint
-- [ ] `P2-E3-02` Add persistent aggregation queries or materialized read models for analytics
-- [ ] `P2-E3-03` Expose tenant usage summary routes on the admin boundary
-- [ ] `P2-E3-04` Render tenant usage cards and trend summaries on admin pages
-- [ ] `P2-E3-05` Add per-app usage breakdown within each tenant
-- [ ] `P2-E3-06` Add quota-vs-actual comparisons so overuse is visible in admin surfaces
-- [ ] `P2-E3-07` Add export support for tenant usage summaries
-- [ ] `P2-E3-08` Add tests for aggregation correctness across multiple tenants and groups
-- [ ] `P2-E3-09` Add browser coverage for admin analytics filters and table rendering
-- [ ] `P2-E3-10` Document data freshness, aggregation cadence, and known caveats
+- [x] `P2-E3-01` Define tenant usage metrics for launches, runs, messages, artifacts, and storage footprint
+- [x] `P2-E3-02` Add persistent aggregation queries or materialized read models for analytics
+- [x] `P2-E3-03` Expose tenant usage summary routes on the admin boundary
+- [x] `P2-E3-04` Render tenant usage cards and trend summaries on admin pages
+- [x] `P2-E3-05` Add per-app usage breakdown within each tenant
+- [x] `P2-E3-06` Add quota-vs-actual comparisons so overuse is visible in admin surfaces
+- [x] `P2-E3-07` Add export support for tenant usage summaries
+- [x] `P2-E3-08` Add tests for aggregation correctness across multiple tenants and groups
+- [x] `P2-E3-09` Add browser coverage for admin analytics filters and table rendering
+- [x] `P2-E3-10` Document data freshness, aggregation cadence, and known caveats
 
 ### 7.9 Operations Queue: `P2-E4` Backup And Export Drill
 

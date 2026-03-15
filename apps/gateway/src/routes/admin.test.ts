@@ -7,6 +7,7 @@ import type {
   AdminAuditEventSummary,
   AdminGroupSummary,
   AdminTenantSummary,
+  AdminUsageResponse,
   AdminUserSummary,
 } from '@agentifui/shared/admin';
 import { describe, expect, it, vi } from 'vitest';
@@ -195,6 +196,71 @@ const cleanupStatus = {
   lastRun: null,
 };
 
+const usageStatus = {
+  tenants: [
+    {
+      tenantId: 'tenant-dev',
+      tenantName: 'Tenant Dev',
+      launchCount: 3,
+      runCount: 5,
+      succeededRunCount: 4,
+      failedRunCount: 1,
+      stoppedRunCount: 0,
+      messageCount: 12,
+      artifactCount: 4,
+      uploadedFileCount: 1,
+      uploadedBytes: 256,
+      artifactBytes: 1024,
+      totalStorageBytes: 1280,
+      totalTokens: 420,
+      lastActivityAt: '2026-03-15T10:00:00.000Z',
+      appBreakdown: [
+        {
+          appId: 'app_tenant_control',
+          appName: 'Tenant Control',
+          shortCode: 'TC',
+          kind: 'governance',
+          launchCount: 3,
+          runCount: 5,
+          messageCount: 12,
+          artifactCount: 4,
+          uploadedFileCount: 1,
+          totalStorageBytes: 1280,
+          totalTokens: 420,
+          lastActivityAt: '2026-03-15T10:00:00.000Z',
+        },
+      ],
+      quotaUsage: [
+        {
+          scope: 'tenant',
+          scopeId: 'tenant-dev',
+          scopeLabel: 'Tenant monthly quota',
+          monthlyLimit: 1000,
+          actualUsed: 912,
+          remaining: 88,
+          utilizationPercent: 91,
+          isOverLimit: false,
+        },
+      ],
+    },
+  ],
+  totals: {
+    launchCount: 3,
+    runCount: 5,
+    succeededRunCount: 4,
+    failedRunCount: 1,
+    stoppedRunCount: 0,
+    messageCount: 12,
+    artifactCount: 4,
+    uploadedFileCount: 1,
+    uploadedBytes: 256,
+    artifactBytes: 1024,
+    totalStorageBytes: 1280,
+    totalTokens: 420,
+    lastActivityAt: '2026-03-15T10:00:00.000Z',
+  },
+};
+
 function createAdminService(canReadAdmin = true, canReadPlatformAdmin = false) {
   return {
     canReadAdminForUser: vi.fn().mockResolvedValue(canReadAdmin),
@@ -229,6 +295,7 @@ function createAdminService(canReadAdmin = true, canReadPlatformAdmin = false) {
     listGroupsForUser: vi.fn().mockResolvedValue(adminGroups),
     listAppsForUser: vi.fn().mockResolvedValue(adminApps),
     getCleanupStatusForUser: vi.fn().mockResolvedValue(cleanupStatus),
+    listUsageForUser: vi.fn().mockResolvedValue(usageStatus),
     createAppGrantForUser: vi.fn(),
     revokeAppGrantForUser: vi.fn(),
     listAuditForUser: vi.fn().mockResolvedValue({
@@ -291,6 +358,124 @@ describe('admin routes', () => {
           email: 'admin@iflabx.com',
         })
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns tenant usage analytics for admin viewers', async () => {
+    const authService = createTestAuthService();
+    const adminService = createAdminService();
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/usage',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as AdminUsageResponse).data).toMatchObject({
+        tenants: [
+          expect.objectContaining({
+            tenantId: 'tenant-dev',
+            launchCount: 3,
+            totalStorageBytes: 1280,
+          }),
+        ],
+        totals: expect.objectContaining({
+          runCount: 5,
+          totalTokens: 420,
+        }),
+      });
+      expect(adminService.listUsageForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@iflabx.com',
+        }),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('exports tenant usage analytics for admin viewers', async () => {
+    const authService = createTestAuthService();
+    const adminService = createAdminService();
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/usage/export?format=json&search=tenant',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-disposition']).toContain('attachment; filename=');
+      expect(response.headers['x-agentifui-export-format']).toBe('json');
+      expect(JSON.parse(response.body)).toMatchObject({
+        metadata: {
+          format: 'json',
+          tenantCount: 1,
+        },
+        tenants: [
+          expect.objectContaining({
+            tenantId: 'tenant-dev',
+            appBreakdown: [
+              expect.objectContaining({
+                appId: 'app_tenant_control',
+              }),
+            ],
+          }),
+        ],
+      });
     } finally {
       await app.close();
     }

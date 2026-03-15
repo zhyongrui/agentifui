@@ -16,6 +16,9 @@ import type {
   AdminTenantStatusUpdateRequest,
   AdminTenantStatusUpdateResponse,
   AdminTenantsResponse,
+  AdminUsageExportFormat,
+  AdminUsageExportMetadata,
+  AdminUsageResponse,
   AdminUsersResponse,
 } from '@agentifui/shared/admin';
 
@@ -24,6 +27,11 @@ const GATEWAY_PROXY_BASE_PATH = '/api/gateway';
 export type AdminAuditExportDownload = {
   blob: Blob;
   metadata: AdminAuditExportMetadata;
+};
+
+export type AdminUsageExportDownload = {
+  blob: Blob;
+  metadata: AdminUsageExportMetadata;
 };
 
 async function fetchAdminJson<TSuccess>(
@@ -178,6 +186,12 @@ export async function fetchAdminCleanup(
   return fetchAdminJson<AdminCleanupResponse>('/admin/cleanup', sessionToken);
 }
 
+export async function fetchAdminUsage(
+  sessionToken: string
+): Promise<AdminUsageResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminUsageResponse>('/admin/usage', sessionToken);
+}
+
 export async function fetchAdminAudit(
   sessionToken: string,
   filters: AdminAuditFilters = {}
@@ -231,6 +245,61 @@ export async function exportAdminAudit(
         10
       ),
       appliedFilters: filters,
+    },
+  };
+}
+
+export async function exportAdminUsage(
+  sessionToken: string,
+  format: AdminUsageExportFormat,
+  filters: {
+    search?: string;
+    tenantId?: string;
+  } = {}
+): Promise<AdminUsageExportDownload | AdminErrorResponse> {
+  const params = new URLSearchParams();
+
+  if (filters.search) {
+    params.set('search', filters.search);
+  }
+
+  if (filters.tenantId) {
+    params.set('tenantId', filters.tenantId);
+  }
+
+  params.set('format', format);
+
+  const response = await fetch(`${GATEWAY_PROXY_BASE_PATH}/admin/usage/export?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${sessionToken}`,
+    },
+    cache: 'no-store',
+  });
+  const contentType = response.headers.get('content-type') ?? '';
+
+  if (
+    contentType.includes('application/json') &&
+    !response.headers.get('x-agentifui-export-format')
+  ) {
+    return (await response.json()) as AdminErrorResponse;
+  }
+
+  const blob = await response.blob();
+
+  return {
+    blob,
+    metadata: {
+      format: readRequiredHeader(
+        response.headers,
+        'x-agentifui-export-format'
+      ) as AdminUsageExportFormat,
+      filename: readRequiredHeader(response.headers, 'x-agentifui-export-filename'),
+      exportedAt: readRequiredHeader(response.headers, 'x-agentifui-exported-at'),
+      tenantCount: Number.parseInt(
+        readRequiredHeader(response.headers, 'x-agentifui-export-count'),
+        10
+      ),
     },
   };
 }

@@ -4,6 +4,10 @@ import type {
   AdminCleanupLastRun,
   AdminCleanupPolicy,
   AdminCleanupPreview,
+  AdminTenantQuotaUsageSummary,
+  AdminTenantUsageAppSummary,
+  AdminUsageTotals,
+  AdminTenantUsageSummary,
   AdminAppSummary,
   AdminAppUserGrant,
   AdminAuditActionCount,
@@ -27,6 +31,7 @@ import {
   resolveDefaultRoleIds,
 } from './workspace-catalog-fixtures.js';
 import { buildWorkspaceCleanupPolicy } from './workspace-cleanup.js';
+import { buildDefaultQuotaLimitRecords } from './workspace-quota.js';
 
 type AdminMutationErrorResult = {
   ok: false;
@@ -111,6 +116,15 @@ type AdminService = {
     policy: AdminCleanupPolicy;
     preview: AdminCleanupPreview;
     lastRun: AdminCleanupLastRun | null;
+  };
+  listUsageForUser(
+    user: AuthUser
+  ): Promise<{
+    tenants: AdminTenantUsageSummary[];
+    totals: AdminUsageTotals;
+  }> | {
+    tenants: AdminTenantUsageSummary[];
+    totals: AdminUsageTotals;
   };
   createAppGrantForUser(
     user: AuthUser,
@@ -257,6 +271,24 @@ function buildInMemoryAuditEventWithMode(
         typeof payload.activeGroupName === 'string' ? payload.activeGroupName : null,
     },
     payloadInspection: payloadResult.inspection,
+  };
+}
+
+function buildEmptyUsageTotals(): AdminUsageTotals {
+  return {
+    launchCount: 0,
+    runCount: 0,
+    succeededRunCount: 0,
+    failedRunCount: 0,
+    stoppedRunCount: 0,
+    messageCount: 0,
+    artifactCount: 0,
+    uploadedFileCount: 0,
+    uploadedBytes: 0,
+    artifactBytes: 0,
+    totalStorageBytes: 0,
+    totalTokens: 0,
+    lastActivityAt: null,
   };
 }
 
@@ -674,6 +706,90 @@ export function createAdminService(): AdminService {
           },
         },
         lastRun: null,
+      };
+    },
+    listUsageForUser(user) {
+      const totals = buildEmptyUsageTotals();
+      const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
+      const appSummaries = WORKSPACE_APPS.map(app =>
+        buildAppSummary(
+          app.id,
+          memoryGrants.filter(grant => grant.appId === app.id),
+        ),
+      ).filter((app): app is AdminAppSummary => Boolean(app));
+      const launchCount = appSummaries.reduce((sum, app) => sum + app.launchCount, 0);
+      const appBreakdown: AdminTenantUsageAppSummary[] = appSummaries
+        .filter(app => app.launchCount > 0)
+        .map(app => ({
+          appId: app.id,
+          appName: app.name,
+          shortCode: app.shortCode,
+          kind: app.kind,
+          launchCount: app.launchCount,
+          runCount: app.launchCount,
+          messageCount: app.launchCount * 2,
+          artifactCount: app.launchCount,
+          uploadedFileCount: 0,
+          totalStorageBytes: app.launchCount * 320,
+          totalTokens: app.launchCount * 80,
+          lastActivityAt: app.lastLaunchedAt,
+        }));
+      const quotaUsage: AdminTenantQuotaUsageSummary[] = buildDefaultQuotaLimitRecords(
+        user,
+        memberGroupIds,
+      ).map(limit => {
+        const scopeUsage = limit.scope === 'tenant' ? launchCount * 20 : limit.scope === 'group' ? launchCount * 12 : launchCount * 10;
+        const actualUsed = limit.baseUsed + scopeUsage;
+
+        return {
+          scope: limit.scope,
+          scopeId: limit.scopeId,
+          scopeLabel: limit.scopeLabel,
+          monthlyLimit: limit.limit,
+          actualUsed,
+          remaining: Math.max(0, limit.limit - actualUsed),
+          utilizationPercent: Math.min(999, Math.round((actualUsed / Math.max(limit.limit, 1)) * 100)),
+          isOverLimit: actualUsed > limit.limit,
+        };
+      });
+      const usage: AdminTenantUsageSummary = {
+        tenantId: user.tenantId,
+        tenantName: formatTenantName(user.tenantId),
+        launchCount,
+        runCount: launchCount,
+        succeededRunCount: launchCount,
+        failedRunCount: 0,
+        stoppedRunCount: 0,
+        messageCount: launchCount * 2,
+        artifactCount: launchCount,
+        uploadedFileCount: 0,
+        uploadedBytes: 0,
+        artifactBytes: launchCount * 320,
+        totalStorageBytes: launchCount * 320,
+        totalTokens: launchCount * 80,
+        lastActivityAt: appSummaries.find((app) => app.lastLaunchedAt)?.lastLaunchedAt ?? null,
+        appBreakdown,
+        quotaUsage,
+      };
+
+      return {
+        tenants: [usage],
+        totals: {
+          ...totals,
+          launchCount: usage.launchCount,
+          runCount: usage.runCount,
+          succeededRunCount: usage.succeededRunCount,
+          failedRunCount: usage.failedRunCount,
+          stoppedRunCount: usage.stoppedRunCount,
+          messageCount: usage.messageCount,
+          artifactCount: usage.artifactCount,
+          uploadedFileCount: usage.uploadedFileCount,
+          uploadedBytes: usage.uploadedBytes,
+          artifactBytes: usage.artifactBytes,
+          totalStorageBytes: usage.totalStorageBytes,
+          totalTokens: usage.totalTokens,
+          lastActivityAt: usage.lastActivityAt,
+        },
       };
     },
     createAppGrantForUser(user, input) {

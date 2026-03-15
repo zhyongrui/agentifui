@@ -232,6 +232,82 @@ export type AdminCleanupResponse = {
   };
 };
 
+export type AdminTenantUsageSummary = {
+  tenantId: string;
+  tenantName: string;
+  launchCount: number;
+  runCount: number;
+  succeededRunCount: number;
+  failedRunCount: number;
+  stoppedRunCount: number;
+  messageCount: number;
+  artifactCount: number;
+  uploadedFileCount: number;
+  uploadedBytes: number;
+  artifactBytes: number;
+  totalStorageBytes: number;
+  totalTokens: number;
+  lastActivityAt: string | null;
+  appBreakdown: AdminTenantUsageAppSummary[];
+  quotaUsage: AdminTenantQuotaUsageSummary[];
+};
+
+export type AdminUsageTotals = Omit<
+  AdminTenantUsageSummary,
+  'tenantId' | 'tenantName' | 'appBreakdown' | 'quotaUsage'
+>;
+
+export type AdminTenantUsageAppSummary = {
+  appId: string;
+  appName: string;
+  shortCode: string;
+  kind: AdminAppSummary['kind'];
+  launchCount: number;
+  runCount: number;
+  messageCount: number;
+  artifactCount: number;
+  uploadedFileCount: number;
+  totalStorageBytes: number;
+  totalTokens: number;
+  lastActivityAt: string | null;
+};
+
+export type AdminTenantQuotaUsageSummary = {
+  scope: 'group' | 'tenant' | 'user';
+  scopeId: string;
+  scopeLabel: string;
+  monthlyLimit: number;
+  actualUsed: number;
+  remaining: number;
+  utilizationPercent: number;
+  isOverLimit: boolean;
+};
+
+export type AdminUsageResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    tenants: AdminTenantUsageSummary[];
+    totals: AdminUsageTotals;
+  };
+};
+
+export type AdminUsageExportFormat = 'csv' | 'json';
+
+export type AdminUsageExportMetadata = {
+  format: AdminUsageExportFormat;
+  filename: string;
+  exportedAt: string;
+  tenantCount: number;
+};
+
+export type AdminUsageExportJsonBundle = {
+  metadata: AdminUsageExportMetadata;
+  generatedAt: string;
+  tenants: AdminTenantUsageSummary[];
+  totals: AdminUsageTotals;
+};
+
 export type AdminAppGrantCreateRequest = {
   subjectUserEmail: string;
   effect: AdminAppGrantEffect;

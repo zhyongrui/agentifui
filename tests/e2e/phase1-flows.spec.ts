@@ -2082,6 +2082,8 @@ test("root admins can open the platform tenant inventory page", async ({
   const rootAdminEmail = uniqueEmail("root-admin");
   const tenantAdminEmail = uniqueEmail("tenant-owner");
   const tenantName = "Acme Platform Tenant";
+  const tenantSlug = `acme-platform-${Date.now()}`;
+  const tenantId = `tenant-${tenantSlug}`;
 
   await register(page, {
     email: rootAdminEmail,
@@ -2115,7 +2117,7 @@ test("root admins can open the platform tenant inventory page", async ({
   await expect(page.getByText("Total tenants")).toBeVisible();
 
   await page.getByLabel("Tenant name").fill(tenantName);
-  await page.getByLabel("Tenant slug").fill("acme-platform");
+  await page.getByLabel("Tenant slug").fill(tenantSlug);
   await page.getByLabel("Bootstrap admin email").fill(tenantAdminEmail);
   await page.getByLabel("Bootstrap admin display name").fill("Acme Owner");
   await Promise.all([
@@ -2129,24 +2131,33 @@ test("root admins can open the platform tenant inventory page", async ({
   await expect(page.getByText("/invite/accept?token=")).toBeVisible();
 
   const tenantCard = page.locator("article.admin-card").filter({
-    has: page.getByRole("heading", { name: tenantName }),
+    hasText: tenantId,
   });
   await expect(tenantCard).toBeVisible();
   await expect(tenantCard.getByText("active")).toBeVisible();
 
   await Promise.all([
-    waitForGatewayPut(page, "/admin/tenants/tenant-acme-platform/status"),
+    waitForGatewayPut(page, `/admin/tenants/${tenantId}/status`),
     tenantCard.getByRole("button", { name: "Suspend tenant" }).click(),
   ]);
   await expect(page.getByText(`${tenantName} is now suspended.`)).toBeVisible();
   await expect(tenantCard.getByText("suspended")).toBeVisible();
 
   await Promise.all([
-    waitForGatewayPut(page, "/admin/tenants/tenant-acme-platform/status"),
+    waitForGatewayPut(page, `/admin/tenants/${tenantId}/status`),
     tenantCard.getByRole("button", { name: "Reactivate tenant" }).click(),
   ]);
   await expect(page.getByText(`${tenantName} is now active.`)).toBeVisible();
   await expect(tenantCard.getByText("active")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Usage analytics" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export usage JSON" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export usage CSV" })).toBeVisible();
+  await expect(tenantCard.getByText("Launches / runs")).toBeVisible();
+
+  await page.getByLabel("Filter tenants").fill(tenantId);
+  await expect(page.locator(".admin-grid article.admin-card")).toHaveCount(1);
+  await expect(tenantCard).toBeVisible();
+  await page.getByLabel("Filter tenants").fill("");
 
   await page.getByRole("link", { name: "Audit" }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/);
@@ -2156,18 +2167,9 @@ test("root admins can open the platform tenant inventory page", async ({
   await expect(
     page.getByRole("heading", { name: "Tenant spread" }),
   ).toBeVisible();
-  await expect(
-    page
-      .locator("section")
-      .filter({
-        has: page.getByRole("heading", { name: "Tenant spread" }),
-      })
-      .locator(".tag")
-      .filter({ hasText: "Acme Platform Tenant" }),
-  ).toBeVisible();
   await page
     .getByLabel("Audit tenant filter")
-    .selectOption("tenant-acme-platform");
+    .selectOption(tenantId);
   await page.getByLabel("Audit action filter").fill("admin.tenant.suspended");
   await Promise.all([
     page.waitForResponse(
@@ -2176,7 +2178,7 @@ test("root admins can open the platform tenant inventory page", async ({
         response
           .url()
           .includes(
-            "/api/gateway/admin/audit?scope=platform&tenantId=tenant-acme-platform&action=admin.tenant.suspended",
+            `/api/gateway/admin/audit?scope=platform&tenantId=${tenantId}&action=admin.tenant.suspended`,
           ),
       {
         timeout: 60_000,

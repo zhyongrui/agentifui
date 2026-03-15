@@ -15,6 +15,8 @@ describe('parseGatewayEnv', () => {
       ssoDomainMap: {},
       defaultTenantId: 'dev-tenant',
       defaultSsoUserStatus: 'pending',
+      degradedRuntimeIds: [],
+      uploadsDir: undefined,
       authLockoutThreshold: 5,
       authLockoutDurationMs: 1800000,
     });
@@ -50,6 +52,8 @@ describe('parseGatewayEnv', () => {
       },
       defaultTenantId: 'tenant-a',
       defaultSsoUserStatus: 'active',
+      degradedRuntimeIds: [],
+      uploadsDir: undefined,
       authLockoutThreshold: 3,
       authLockoutDurationMs: 60000,
     });

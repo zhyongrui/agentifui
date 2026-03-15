@@ -12,6 +12,10 @@ import type {
   AdminCleanupPreview,
   AdminAuditPayloadMode,
   AdminAuditTenantCount,
+  AdminTenantQuotaUsageSummary,
+  AdminTenantUsageAppSummary,
+  AdminTenantUsageSummary,
+  AdminUsageTotals,
   AdminTenantSummary,
   AdminErrorCode,
   AdminGroupSummary,
@@ -32,7 +36,7 @@ import {
   getLatestWorkspaceCleanupExecution,
   previewWorkspaceCleanup,
 } from './workspace-cleanup.js';
-import { buildDefaultQuotaLimitRecords } from './workspace-quota.js';
+import { buildDefaultQuotaLimitRecords, calculateCompletionQuotaCost } from './workspace-quota.js';
 
 type UserRow = {
   created_at: Date | string;
@@ -93,6 +97,114 @@ type TenantPrimaryAdminRow = {
   tenant_id: string;
   user_display_name: string;
   user_email: string;
+  user_id: string;
+};
+
+type TenantUsageLaunchRow = {
+  launch_count: number;
+  last_activity_at: Date | string | null;
+  tenant_id: string;
+};
+
+type TenantUsageRunRow = {
+  failed_run_count: number;
+  last_activity_at: Date | string | null;
+  run_count: number;
+  stopped_run_count: number;
+  succeeded_run_count: number;
+  tenant_id: string;
+  total_tokens: number | string;
+};
+
+type TenantUsageConversationRow = {
+  inputs: Record<string, unknown> | string;
+  tenant_id: string;
+  updated_at: Date | string | null;
+};
+
+type TenantUsageArtifactRow = {
+  artifact_bytes: number | string;
+  artifact_count: number;
+  last_activity_at: Date | string | null;
+  tenant_id: string;
+};
+
+type TenantUsageUploadRow = {
+  last_activity_at: Date | string | null;
+  tenant_id: string;
+  upload_count: number;
+  uploaded_bytes: number | string;
+};
+
+type TenantUsageAppLaunchRow = {
+  app_id: string;
+  app_name: string;
+  kind: AdminAppSummary['kind'];
+  last_activity_at: Date | string | null;
+  launch_count: number;
+  short_code: string;
+  tenant_id: string;
+};
+
+type TenantUsageAppCatalogRow = {
+  app_id: string;
+  app_name: string;
+  kind: AdminAppSummary['kind'];
+  short_code: string;
+  tenant_id: string;
+};
+
+type TenantUsageAppRunRow = {
+  app_id: string;
+  last_activity_at: Date | string | null;
+  run_count: number;
+  tenant_id: string;
+  total_tokens: number | string;
+};
+
+type TenantUsageAppConversationRow = {
+  app_id: string;
+  inputs: Record<string, unknown> | string;
+  tenant_id: string;
+  updated_at: Date | string | null;
+};
+
+type TenantUsageAppArtifactRow = {
+  app_id: string;
+  artifact_bytes: number | string;
+  artifact_count: number;
+  last_activity_at: Date | string | null;
+  tenant_id: string;
+};
+
+type TenantUsageAppUploadRow = {
+  app_id: string;
+  last_activity_at: Date | string | null;
+  tenant_id: string;
+  upload_count: number;
+  uploaded_bytes: number | string;
+};
+
+type TenantQuotaLimitRow = {
+  base_used: number;
+  monthly_limit: number;
+  scope: 'group' | 'tenant' | 'user';
+  scope_id: string;
+  scope_label: string;
+  tenant_id: string;
+};
+
+type TenantLaunchCostRow = {
+  active_group_id: string | null;
+  launch_cost: number;
+  tenant_id: string;
+  user_id: string;
+};
+
+type TenantRunQuotaRow = {
+  active_group_id: string | null;
+  tenant_id: string;
+  total_tokens: number;
   user_id: string;
 };
 
@@ -763,6 +875,530 @@ async function findTenantSummary(database: DatabaseClient, tenantId: string) {
   return tenants.find(tenant => tenant.id === tenantId) ?? null;
 }
 
+function buildEmptyUsageTotals(): AdminUsageTotals {
+  return {
+    launchCount: 0,
+    runCount: 0,
+    succeededRunCount: 0,
+    failedRunCount: 0,
+    stoppedRunCount: 0,
+    messageCount: 0,
+    artifactCount: 0,
+    uploadedFileCount: 0,
+    uploadedBytes: 0,
+    artifactBytes: 0,
+    totalStorageBytes: 0,
+    totalTokens: 0,
+    lastActivityAt: null,
+  };
+}
+
+function countConversationMessages(inputs: Record<string, unknown> | string) {
+  const payload = normalizeJsonRecord(inputs);
+  const messageHistory = payload.messageHistory;
+
+  return Array.isArray(messageHistory) ? messageHistory.length : 0;
+}
+
+function toNumeric(value: number | string | null | undefined) {
+  return typeof value === 'number' ? value : Number(value ?? 0);
+}
+
+function pickLatestTimestamp(...values: Array<string | null>) {
+  return values.reduce<string | null>((latest, current) => {
+    if (!current) {
+      return latest;
+    }
+
+    if (!latest) {
+      return current;
+    }
+
+    return new Date(current).getTime() > new Date(latest).getTime() ? current : latest;
+  }, null);
+}
+
+function buildTenantAppKey(tenantId: string, appId: string) {
+  return `${tenantId}:${appId}`;
+}
+
+async function listTenantUsageSummaries(
+  database: DatabaseClient,
+  user: AuthUser,
+): Promise<{
+  tenants: AdminTenantUsageSummary[];
+  totals: AdminUsageTotals;
+}> {
+  const roleIds = await ensureDefaultRoles(database, user);
+  const canReadPlatformAdmin = roleIds.includes('root_admin');
+  const tenantFilter = canReadPlatformAdmin ? null : user.tenantId;
+  const tenantSummaries = canReadPlatformAdmin
+    ? await listTenantSummaries(database)
+    : [await findTenantSummary(database, user.tenantId)].filter(
+        (tenant): tenant is AdminTenantSummary => Boolean(tenant),
+      );
+
+  const [
+    launchRows,
+    runRows,
+    conversationRows,
+    artifactRows,
+    uploadRows,
+    appCatalogRows,
+    appLaunchRows,
+    appRunRows,
+    appConversationRows,
+    appArtifactRows,
+    appUploadRows,
+    quotaLimitRows,
+    launchCostRows,
+    runQuotaRows,
+  ] = await Promise.all([
+    database<TenantUsageLaunchRow[]>`
+      select
+        tenant_id,
+        count(*)::int as launch_count,
+        max(launched_at) as last_activity_at
+      from workspace_app_launches
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+      group by tenant_id
+    `,
+    database<TenantUsageRunRow[]>`
+      select
+        tenant_id,
+        count(*)::int as run_count,
+        count(*) filter (where status = 'succeeded')::int as succeeded_run_count,
+        count(*) filter (where status = 'failed')::int as failed_run_count,
+        count(*) filter (where status = 'stopped')::int as stopped_run_count,
+        coalesce(sum(total_tokens), 0)::int as total_tokens,
+        max(coalesce(finished_at, created_at)) as last_activity_at
+      from runs
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+      group by tenant_id
+    `,
+    database<TenantUsageConversationRow[]>`
+      select tenant_id, inputs, updated_at
+      from conversations
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+        and status <> 'deleted'
+    `,
+    database<TenantUsageArtifactRow[]>`
+      select
+        tenant_id,
+        count(*)::int as artifact_count,
+        coalesce(sum(size_bytes), 0)::bigint as artifact_bytes,
+        max(updated_at) as last_activity_at
+      from workspace_artifacts
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+      group by tenant_id
+    `,
+    database<TenantUsageUploadRow[]>`
+      select
+        tenant_id,
+        count(*)::int as upload_count,
+        coalesce(sum(size_bytes), 0)::bigint as uploaded_bytes,
+        max(created_at) as last_activity_at
+      from workspace_uploaded_files
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+      group by tenant_id
+    `,
+    database<TenantUsageAppCatalogRow[]>`
+      select
+        tenant_id,
+        id as app_id,
+        name as app_name,
+        short_code,
+        kind
+      from workspace_apps
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+    `,
+    database<TenantUsageAppLaunchRow[]>`
+      select
+        launches.tenant_id,
+        launches.app_id,
+        apps.name as app_name,
+        apps.short_code,
+        apps.kind,
+        count(*)::int as launch_count,
+        max(launches.launched_at) as last_activity_at
+      from workspace_app_launches as launches
+      inner join workspace_apps as apps on apps.id = launches.app_id
+      where (${tenantFilter}::varchar is null or launches.tenant_id = ${tenantFilter})
+      group by launches.tenant_id, launches.app_id, apps.name, apps.short_code, apps.kind
+    `,
+    database<TenantUsageAppRunRow[]>`
+      select
+        tenant_id,
+        app_id,
+        count(*)::int as run_count,
+        coalesce(sum(total_tokens), 0)::int as total_tokens,
+        max(coalesce(finished_at, created_at)) as last_activity_at
+      from runs
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+      group by tenant_id, app_id
+    `,
+    database<TenantUsageAppConversationRow[]>`
+      select tenant_id, app_id, inputs, updated_at
+      from conversations
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+        and status <> 'deleted'
+    `,
+    database<TenantUsageAppArtifactRow[]>`
+      select
+        runs.tenant_id,
+        runs.app_id,
+        count(*)::int as artifact_count,
+        coalesce(sum(artifacts.size_bytes), 0)::bigint as artifact_bytes,
+        max(artifacts.updated_at) as last_activity_at
+      from workspace_artifacts as artifacts
+      inner join runs on runs.id = artifacts.run_id
+      where (${tenantFilter}::varchar is null or runs.tenant_id = ${tenantFilter})
+      group by runs.tenant_id, runs.app_id
+    `,
+    database<TenantUsageAppUploadRow[]>`
+      select
+        conversations.tenant_id,
+        conversations.app_id,
+        count(*)::int as upload_count,
+        coalesce(sum(files.size_bytes), 0)::bigint as uploaded_bytes,
+        max(files.created_at) as last_activity_at
+      from workspace_uploaded_files as files
+      inner join conversations on conversations.id = files.conversation_id
+      where (${tenantFilter}::varchar is null or conversations.tenant_id = ${tenantFilter})
+      group by conversations.tenant_id, conversations.app_id
+    `,
+    database<TenantQuotaLimitRow[]>`
+      select
+        tenant_id,
+        scope,
+        scope_id,
+        scope_label,
+        monthly_limit,
+        base_used
+      from workspace_quota_limits
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+    `,
+    database<TenantLaunchCostRow[]>`
+      select
+        launches.tenant_id,
+        launches.user_id,
+        launches.attributed_group_id as active_group_id,
+        apps.launch_cost
+      from workspace_app_launches as launches
+      inner join workspace_apps as apps on apps.id = launches.app_id
+      where (${tenantFilter}::varchar is null or launches.tenant_id = ${tenantFilter})
+    `,
+    database<TenantRunQuotaRow[]>`
+      select tenant_id, user_id, active_group_id, total_tokens
+      from runs
+      where (${tenantFilter}::varchar is null or tenant_id = ${tenantFilter})
+        and status in ('succeeded', 'failed', 'stopped')
+        and total_tokens > 0
+    `,
+  ]);
+
+  const launchByTenantId = new Map(launchRows.map(row => [row.tenant_id, row]));
+  const runByTenantId = new Map(runRows.map(row => [row.tenant_id, row]));
+  const artifactByTenantId = new Map(artifactRows.map(row => [row.tenant_id, row]));
+  const uploadByTenantId = new Map(uploadRows.map(row => [row.tenant_id, row]));
+  const conversationMetricsByTenantId = conversationRows.reduce<
+    Map<string, { lastActivityAt: string | null; messageCount: number }>
+  >((metrics, row) => {
+    const current = metrics.get(row.tenant_id) ?? {
+      messageCount: 0,
+      lastActivityAt: null,
+    };
+    const updatedAt = toIso(row.updated_at);
+
+    current.messageCount += countConversationMessages(row.inputs);
+    current.lastActivityAt = pickLatestTimestamp(current.lastActivityAt, updatedAt);
+    metrics.set(row.tenant_id, current);
+    return metrics;
+  }, new Map());
+
+  const appMetadataByKey = new Map(
+    appCatalogRows.map(row => [
+      buildTenantAppKey(row.tenant_id, row.app_id),
+      {
+        appName: row.app_name,
+        shortCode: row.short_code,
+        kind: row.kind,
+      },
+    ]),
+  );
+  const appMetricsByTenantId = new Map<string, Map<string, AdminTenantUsageAppSummary>>();
+  const getAppMetrics = (tenantId: string, appId: string) => {
+    let tenantMetrics = appMetricsByTenantId.get(tenantId);
+
+    if (!tenantMetrics) {
+      tenantMetrics = new Map();
+      appMetricsByTenantId.set(tenantId, tenantMetrics);
+    }
+
+    const existing = tenantMetrics.get(appId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const metadata =
+      appMetadataByKey.get(buildTenantAppKey(tenantId, appId)) ?? {
+        appName: appId,
+        shortCode: '--',
+        kind: 'analysis' as AdminAppSummary['kind'],
+      };
+    const created: AdminTenantUsageAppSummary = {
+      appId,
+      appName: metadata.appName,
+      shortCode: metadata.shortCode,
+      kind: metadata.kind,
+      launchCount: 0,
+      runCount: 0,
+      messageCount: 0,
+      artifactCount: 0,
+      uploadedFileCount: 0,
+      totalStorageBytes: 0,
+      totalTokens: 0,
+      lastActivityAt: null,
+    };
+
+    tenantMetrics.set(appId, created);
+    return created;
+  };
+
+  for (const row of appLaunchRows) {
+    const metrics = getAppMetrics(row.tenant_id, row.app_id);
+    metrics.launchCount += row.launch_count;
+    metrics.lastActivityAt = pickLatestTimestamp(
+      metrics.lastActivityAt,
+      toIso(row.last_activity_at),
+    );
+  }
+
+  for (const row of appRunRows) {
+    const metrics = getAppMetrics(row.tenant_id, row.app_id);
+    metrics.runCount += row.run_count;
+    metrics.totalTokens += toNumeric(row.total_tokens);
+    metrics.lastActivityAt = pickLatestTimestamp(
+      metrics.lastActivityAt,
+      toIso(row.last_activity_at),
+    );
+  }
+
+  for (const row of appConversationRows) {
+    const metrics = getAppMetrics(row.tenant_id, row.app_id);
+    metrics.messageCount += countConversationMessages(row.inputs);
+    metrics.lastActivityAt = pickLatestTimestamp(metrics.lastActivityAt, toIso(row.updated_at));
+  }
+
+  for (const row of appArtifactRows) {
+    const metrics = getAppMetrics(row.tenant_id, row.app_id);
+    metrics.artifactCount += row.artifact_count;
+    metrics.totalStorageBytes += toNumeric(row.artifact_bytes);
+    metrics.lastActivityAt = pickLatestTimestamp(
+      metrics.lastActivityAt,
+      toIso(row.last_activity_at),
+    );
+  }
+
+  for (const row of appUploadRows) {
+    const metrics = getAppMetrics(row.tenant_id, row.app_id);
+    metrics.uploadedFileCount += row.upload_count;
+    metrics.totalStorageBytes += toNumeric(row.uploaded_bytes);
+    metrics.lastActivityAt = pickLatestTimestamp(
+      metrics.lastActivityAt,
+      toIso(row.last_activity_at),
+    );
+  }
+
+  const quotaUsageTotalsByTenantId = new Map<
+    string,
+    {
+      groupsById: Record<string, number>;
+      tenant: number;
+      usersById: Record<string, number>;
+    }
+  >();
+  const getQuotaUsageTotals = (tenantId: string) => {
+    const existing = quotaUsageTotalsByTenantId.get(tenantId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const created = {
+      tenant: 0,
+      groupsById: {} as Record<string, number>,
+      usersById: {} as Record<string, number>,
+    };
+    quotaUsageTotalsByTenantId.set(tenantId, created);
+    return created;
+  };
+
+  for (const row of launchCostRows) {
+    const usageTotals = getQuotaUsageTotals(row.tenant_id);
+
+    usageTotals.tenant += row.launch_cost;
+    usageTotals.usersById[row.user_id] = (usageTotals.usersById[row.user_id] ?? 0) + row.launch_cost;
+
+    if (row.active_group_id) {
+      usageTotals.groupsById[row.active_group_id] =
+        (usageTotals.groupsById[row.active_group_id] ?? 0) + row.launch_cost;
+    }
+  }
+
+  for (const row of runQuotaRows) {
+    const usageCost = calculateCompletionQuotaCost(row.total_tokens);
+
+    if (usageCost <= 0) {
+      continue;
+    }
+
+    const usageTotals = getQuotaUsageTotals(row.tenant_id);
+
+    usageTotals.tenant += usageCost;
+    usageTotals.usersById[row.user_id] = (usageTotals.usersById[row.user_id] ?? 0) + usageCost;
+
+    if (row.active_group_id) {
+      usageTotals.groupsById[row.active_group_id] =
+        (usageTotals.groupsById[row.active_group_id] ?? 0) + usageCost;
+    }
+  }
+
+  const quotaRowsByTenantId = quotaLimitRows.reduce<Map<string, TenantQuotaLimitRow[]>>(
+    (rowsByTenant, row) => {
+      const current = rowsByTenant.get(row.tenant_id) ?? [];
+      current.push(row);
+      rowsByTenant.set(row.tenant_id, current);
+      return rowsByTenant;
+    },
+    new Map(),
+  );
+
+  const totals = buildEmptyUsageTotals();
+  const tenants = tenantSummaries.map((tenant) => {
+    const launch = launchByTenantId.get(tenant.id);
+    const run = runByTenantId.get(tenant.id);
+    const conversation = conversationMetricsByTenantId.get(tenant.id);
+    const artifact = artifactByTenantId.get(tenant.id);
+    const upload = uploadByTenantId.get(tenant.id);
+    const uploadedBytes = toNumeric(upload?.uploaded_bytes);
+    const artifactBytes = toNumeric(artifact?.artifact_bytes);
+    const quotaUsageTotals = quotaUsageTotalsByTenantId.get(tenant.id) ?? {
+      tenant: 0,
+      groupsById: {},
+      usersById: {},
+    };
+    const quotaUsage: AdminTenantQuotaUsageSummary[] = (
+      quotaRowsByTenantId.get(tenant.id) ??
+      buildDefaultQuotaLimitRecords(user, resolveDefaultMemberGroupIds(user.email)).map(limit => ({
+        tenant_id: tenant.id,
+        scope: limit.scope,
+        scope_id: limit.scopeId,
+        scope_label: limit.scopeLabel,
+        monthly_limit: limit.limit,
+        base_used: limit.baseUsed,
+      }))
+    )
+      .map((row) => {
+        const incrementalUsage =
+          row.scope === 'tenant'
+            ? quotaUsageTotals.tenant
+            : row.scope === 'group'
+              ? (quotaUsageTotals.groupsById[row.scope_id] ?? 0)
+              : (quotaUsageTotals.usersById[row.scope_id] ?? 0);
+        const actualUsed = row.base_used + incrementalUsage;
+
+        return {
+          scope: row.scope,
+          scopeId: row.scope_id,
+          scopeLabel: row.scope_label,
+          monthlyLimit: row.monthly_limit,
+          actualUsed,
+          remaining: Math.max(0, row.monthly_limit - actualUsed),
+          utilizationPercent: Math.min(
+            999,
+            Math.round((actualUsed / Math.max(row.monthly_limit, 1)) * 100),
+          ),
+          isOverLimit: actualUsed > row.monthly_limit,
+        };
+      })
+      .sort((left, right) => {
+        if (left.isOverLimit !== right.isOverLimit) {
+          return left.isOverLimit ? -1 : 1;
+        }
+
+        return right.utilizationPercent - left.utilizationPercent;
+      });
+    const appBreakdown = Array.from(appMetricsByTenantId.get(tenant.id)?.values() ?? [])
+      .filter(
+        metrics =>
+          metrics.launchCount > 0 ||
+          metrics.runCount > 0 ||
+          metrics.messageCount > 0 ||
+          metrics.artifactCount > 0 ||
+          metrics.uploadedFileCount > 0,
+      )
+      .sort((left, right) => {
+        if (right.runCount !== left.runCount) {
+          return right.runCount - left.runCount;
+        }
+
+        if (right.launchCount !== left.launchCount) {
+          return right.launchCount - left.launchCount;
+        }
+
+        return right.totalTokens - left.totalTokens;
+      });
+    const summary: AdminTenantUsageSummary = {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      launchCount: launch?.launch_count ?? 0,
+      runCount: run?.run_count ?? 0,
+      succeededRunCount: run?.succeeded_run_count ?? 0,
+      failedRunCount: run?.failed_run_count ?? 0,
+      stoppedRunCount: run?.stopped_run_count ?? 0,
+      messageCount: conversation?.messageCount ?? 0,
+      artifactCount: artifact?.artifact_count ?? 0,
+      uploadedFileCount: upload?.upload_count ?? 0,
+      uploadedBytes,
+      artifactBytes,
+      totalStorageBytes: uploadedBytes + artifactBytes,
+      totalTokens: toNumeric(run?.total_tokens),
+      lastActivityAt: pickLatestTimestamp(
+        toIso(launch?.last_activity_at ?? null),
+        toIso(run?.last_activity_at ?? null),
+        conversation?.lastActivityAt ?? null,
+        toIso(artifact?.last_activity_at ?? null),
+        toIso(upload?.last_activity_at ?? null),
+      ),
+      appBreakdown,
+      quotaUsage,
+    };
+
+    totals.launchCount += summary.launchCount;
+    totals.runCount += summary.runCount;
+    totals.succeededRunCount += summary.succeededRunCount;
+    totals.failedRunCount += summary.failedRunCount;
+    totals.stoppedRunCount += summary.stoppedRunCount;
+    totals.messageCount += summary.messageCount;
+    totals.artifactCount += summary.artifactCount;
+    totals.uploadedFileCount += summary.uploadedFileCount;
+    totals.uploadedBytes += summary.uploadedBytes;
+    totals.artifactBytes += summary.artifactBytes;
+    totals.totalStorageBytes += summary.totalStorageBytes;
+    totals.totalTokens += summary.totalTokens;
+    totals.lastActivityAt = pickLatestTimestamp(totals.lastActivityAt, summary.lastActivityAt);
+
+    return summary;
+  });
+
+  return {
+    tenants,
+    totals,
+  };
+}
+
 async function seedTenantQuotaLimits(
   database: DatabaseClient,
   user: AuthUser,
@@ -1323,6 +1959,9 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
         preview,
         lastRun,
       };
+    },
+    async listUsageForUser(user) {
+      return listTenantUsageSummaries(database, user);
     },
     async createAppGrantForUser(user, input) {
       const appId = input.appId.trim();

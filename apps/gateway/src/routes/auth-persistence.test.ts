@@ -5,6 +5,7 @@ import type {
   AdminGroupsResponse,
   AdminTenantCreateResponse,
   AdminTenantStatusUpdateResponse,
+  AdminUsageResponse,
   AdminUsersResponse,
 } from '@agentifui/shared/admin';
 import type {
@@ -4026,7 +4027,16 @@ describe.sequential('persistent auth runtime', () => {
         expect(launchBody.data.traceId).toBeTruthy();
         expect(launchBody.data.conversationId).toBeTruthy();
 
-        const [usersResponse, groupsResponse, appsResponse, auditResponse, filteredAuditResponse, exportResponse] =
+        const [
+          usersResponse,
+          groupsResponse,
+          appsResponse,
+          usageResponse,
+          usageExportResponse,
+          auditResponse,
+          filteredAuditResponse,
+          exportResponse,
+        ] =
           await Promise.all([
             app.inject({
               method: 'GET',
@@ -4045,6 +4055,20 @@ describe.sequential('persistent auth runtime', () => {
             app.inject({
               method: 'GET',
               url: '/admin/apps',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/usage',
+              headers: {
+                authorization: `Bearer ${adminSessionToken}`,
+              },
+            }),
+            app.inject({
+              method: 'GET',
+              url: '/admin/usage/export?format=json',
               headers: {
                 authorization: `Bearer ${adminSessionToken}`,
               },
@@ -4075,6 +4099,8 @@ describe.sequential('persistent auth runtime', () => {
         expect(usersResponse.statusCode).toBe(200);
         expect(groupsResponse.statusCode).toBe(200);
         expect(appsResponse.statusCode).toBe(200);
+        expect(usageResponse.statusCode).toBe(200);
+        expect(usageExportResponse.statusCode).toBe(200);
         expect(auditResponse.statusCode).toBe(200);
         expect(filteredAuditResponse.statusCode).toBe(200);
         expect(exportResponse.statusCode).toBe(200);
@@ -4082,6 +4108,7 @@ describe.sequential('persistent auth runtime', () => {
         const usersBody = usersResponse.json() as AdminUsersResponse;
         const groupsBody = groupsResponse.json() as AdminGroupsResponse;
         const appsBody = appsResponse.json() as AdminAppsResponse;
+        const usageBody = usageResponse.json() as AdminUsageResponse;
         const auditBody = auditResponse.json() as AdminAuditResponse;
         const filteredAuditBody = filteredAuditResponse.json() as AdminAuditResponse;
 
@@ -4099,6 +4126,31 @@ describe.sequential('persistent auth runtime', () => {
         ).toMatchObject({
           grantedRoleIds: ['tenant_admin'],
           launchCount: 1,
+        });
+        expect(usageBody.data.tenants).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              tenantId: 'tenant-dev',
+              launchCount: 1,
+              runCount: 1,
+            }),
+          ]),
+        );
+        expect(usageBody.data.totals).toMatchObject({
+          launchCount: 1,
+          runCount: 1,
+        });
+        expect(JSON.parse(usageExportResponse.body)).toMatchObject({
+          metadata: {
+            format: 'json',
+          },
+          tenants: [
+            expect.objectContaining({
+              tenantId: 'tenant-dev',
+              quotaUsage: expect.any(Array),
+              appBreakdown: expect.any(Array),
+            }),
+          ],
         });
         expect(auditBody.data.countsByAction).toEqual(
           expect.arrayContaining([
