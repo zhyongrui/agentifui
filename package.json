@@ -21,6 +21,8 @@
     "smoke:browser": "node scripts/public-browser-smoke.mjs",
     "perf:seed": "node scripts/perf-seed.mjs",
     "perf:smoke": "node scripts/perf-smoke.mjs",
+    "backup:export": "node scripts/backup-export.mjs",
+    "backup:restore": "node scripts/backup-restore.mjs",
     "type-check": "turbo run type-check",
     "lint": "turbo run lint",
     "test:unit": "vitest run --exclude apps/gateway/src/routes/auth-persistence.test.ts",

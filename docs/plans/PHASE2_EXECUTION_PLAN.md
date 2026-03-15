@@ -125,7 +125,8 @@ Execution status:
 | completed | `P2-E1` | cleanup policy、dry-run/execute job、admin preview、audit 和 runbook 已闭环 |
 | completed | `P2-E2` | perf seed/smoke、JSON artifact、预算门槛和 release gate 已闭环 |
 | completed | `P2-E3` | tenant usage analytics、per-app/quota/export、tests 和 browser QA 已闭环 |
-| active    | `P2-E4` | 下一项，开始 backup/export drill 和恢复演练 |
+| completed | `P2-E4` | backup/export 脚本、restore sanity 校验、checksum 和 post-restore HTTP smoke 已闭环 |
+| active    | `P3-A`  | 下一项，开始 retrieval/search/knowledge context 的 shared ingestion boundary |
 
 ## 5. First Batch Definition
 
@@ -169,7 +170,7 @@ Current batch status:
 - `P2-D3` complete
 - `P2-D4` complete
 - `P2-E3` complete
-- the active follow-on item is `P2-E4`
+- the active follow-on item is `P3-A`
 
 ## 6. Detailed Execution Notes
 
@@ -678,16 +679,16 @@ Legend:
 
 ### 7.9 Operations Queue: `P2-E4` Backup And Export Drill
 
-- [ ] `P2-E4-01` Define the minimum backup set for auth, workspace, artifacts, shares, and admin audit data
-- [ ] `P2-E4-02` Add an export script or documented command set for the critical data surfaces
-- [ ] `P2-E4-03` Add import/restore drill steps for a clean local environment
-- [ ] `P2-E4-04` Verify that restored conversations preserve run replay and artifact links
-- [ ] `P2-E4-05` Verify that restored audit rows remain queryable through admin surfaces
-- [ ] `P2-E4-06` Verify that restored quota and usage data remain consistent
-- [ ] `P2-E4-07` Add a documented checksum or sanity-check step after export and restore
-- [ ] `P2-E4-08` Record public-access/browser QA implications for restored preview links
-- [ ] `P2-E4-09` Add a smoke checklist for periodic backup/restore rehearsals
-- [ ] `P2-E4-10` Publish a concise disaster-recovery runbook for future sessions
+- [x] `P2-E4-01` Define the minimum backup set for auth, workspace, artifacts, shares, and admin audit data
+- [x] `P2-E4-02` Add an export script or documented command set for the critical data surfaces
+- [x] `P2-E4-03` Add import/restore drill steps for a clean local environment
+- [x] `P2-E4-04` Verify that restored conversations preserve run replay and artifact links
+- [x] `P2-E4-05` Verify that restored audit rows remain queryable through admin surfaces
+- [x] `P2-E4-06` Verify that restored quota and usage data remain consistent
+- [x] `P2-E4-07` Add a documented checksum or sanity-check step after export and restore
+- [x] `P2-E4-08` Record public-access/browser QA implications for restored preview links
+- [x] `P2-E4-09` Add a smoke checklist for periodic backup/restore rehearsals
+- [x] `P2-E4-10` Publish a concise disaster-recovery runbook for future sessions
 
 ### 7.10 Future Delivery Queue: `P3-A` Retrieval, Search, And Knowledge Context
 
