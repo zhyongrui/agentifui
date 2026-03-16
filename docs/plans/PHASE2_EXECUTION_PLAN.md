@@ -145,7 +145,8 @@ Execution status:
 | completed | `P3-C-05` | `@email` comment mention、review inbox notification route、read-state persistence 和 `/apps` inbox 已闭环 |
 | completed | `P3-C-08` | collaborative edits / comment actions 已补到 audit action 和 route/persistence 验证                  |
 | completed | `P3-C-09` | multi-user collaboration browser coverage 已补齐并适配默认中文 UI                                      |
-| active    | `P3-C-10` | 下一项，补 collaboration semantics / consistency model / known limits 文档                            |
+| completed | `P3-C-10` | collaboration semantics / consistency model / known limits 已文档化                                   |
+| active    | `P3-C-06` | 下一项，补 commenter / editor / owner 权限模式                                                      |
 
 ## 5. First Batch Definition
 
@@ -195,7 +196,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-C-10`
+- the active follow-on item is `P3-C-06`
 
 ## 6. Detailed Execution Notes
 
@@ -768,7 +769,7 @@ Legend:
 - [ ] `P3-C-07` Add conflict handling for concurrent conversation metadata edits
 - [x] `P3-C-08` Add audit coverage for collaborative edits and comment actions
 - [x] `P3-C-09` Add browser coverage for multi-user collaboration behavior
-- [ ] `P3-C-10` Document collaboration semantics, consistency model, and known limits
+- [x] `P3-C-10` Document collaboration semantics, consistency model, and known limits
 
 ### 7.13 Future Delivery Queue: `P3-D` Evaluation, Replay QA, And Release Quality
 
