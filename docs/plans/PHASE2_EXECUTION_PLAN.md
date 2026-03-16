@@ -142,8 +142,9 @@ Execution status:
 | completed | `P3-C-02` | `/chat/[conversationId]` 已加 live refresh / polling、presence heartbeat 和 last-sync surfacing       |
 | completed | `P3-C-03` | shared conversation presence route、viewer chips 和 shared-surface heartbeat 已闭环                    |
 | completed | `P3-C-04` | conversation-scoped comment threads 已接到 message / run / artifact 三类目标                          |
+| completed | `P3-C-08` | collaborative edits / comment actions 已补到 audit action 和 route/persistence 验证                  |
 | completed | `P3-C-09` | multi-user collaboration browser coverage 已补齐并适配默认中文 UI                                      |
-| active    | `P3-C-08` | 下一项，补 collaborative edits / comment actions 的 audit coverage                                     |
+| active    | `P3-C-05` | 下一项，补 comment mention / notification primitives                                                  |
 
 ## 5. First Batch Definition
 
@@ -193,7 +194,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-C-08`
+- the active follow-on item is `P3-C-05`
 
 ## 6. Detailed Execution Notes
 
@@ -764,7 +765,7 @@ Legend:
 - [ ] `P3-C-05` Add mention/notification primitives for shared work review
 - [ ] `P3-C-06` Add fine-grained permission modes for commenter vs editor vs owner
 - [ ] `P3-C-07` Add conflict handling for concurrent conversation metadata edits
-- [ ] `P3-C-08` Add audit coverage for collaborative edits and comment actions
+- [x] `P3-C-08` Add audit coverage for collaborative edits and comment actions
 - [x] `P3-C-09` Add browser coverage for multi-user collaboration behavior
 - [ ] `P3-C-10` Document collaboration semantics, consistency model, and known limits
 

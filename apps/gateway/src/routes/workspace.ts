@@ -1167,6 +1167,21 @@ export async function registerWorkspaceRoutes(
       data: result.data,
     };
 
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.comment.created',
+      entityType: 'conversation_comment',
+      entityId: result.data.comment.id,
+      ipAddress: request.ip,
+      payload: {
+        conversationId,
+        targetType: result.data.targetType,
+        targetId: result.data.targetId,
+        threadLength: result.data.thread.length,
+      },
+    });
+
     return response;
   });
 

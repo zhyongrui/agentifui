@@ -2224,6 +2224,47 @@ describe.sequential('persistent auth runtime', () => {
               }),
             ]),
           );
+
+          const auditEvents = await restartedApp.inject({
+            method: 'GET',
+            url: '/auth/audit-events',
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(auditEvents.statusCode).toBe(200);
+          expect(auditEvents.json().data.events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                action: 'workspace.comment.created',
+                entityType: 'conversation_comment',
+                payload: expect.objectContaining({
+                  conversationId,
+                  targetType: 'message',
+                  targetId: assistantMessage.id,
+                }),
+              }),
+              expect.objectContaining({
+                action: 'workspace.comment.created',
+                entityType: 'conversation_comment',
+                payload: expect.objectContaining({
+                  conversationId,
+                  targetType: 'run',
+                  targetId: runId,
+                }),
+              }),
+              expect.objectContaining({
+                action: 'workspace.comment.created',
+                entityType: 'conversation_comment',
+                payload: expect.objectContaining({
+                  conversationId,
+                  targetType: 'artifact',
+                  targetId: artifactId,
+                }),
+              }),
+            ])
+          );
         } finally {
           if (!restartedAppClosed) {
             await restartedApp.close();

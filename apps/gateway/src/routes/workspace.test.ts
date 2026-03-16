@@ -1217,7 +1217,8 @@ describe("workspace routes", () => {
 
   it("creates workspace comment threads for messages, runs and artifacts", async () => {
     const authService = createTestAuthService();
-    const { app } = await createTestApp(authService);
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
 
     authService.register({
       email: "comments@iflabx.com",
@@ -1446,6 +1447,40 @@ describe("workspace routes", () => {
         expect.arrayContaining([
           expect.objectContaining({
             content: "Use this artifact in the weekly digest.",
+          }),
+        ]),
+      );
+
+      expect(
+        await auditService.listEvents({ actorUserId: login.data.user.id }),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.comment.created",
+            entityType: "conversation_comment",
+            payload: expect.objectContaining({
+              conversationId,
+              targetType: "message",
+              targetId: assistantMessage.id,
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.comment.created",
+            entityType: "conversation_comment",
+            payload: expect.objectContaining({
+              conversationId,
+              targetType: "run",
+              targetId: latestRunId,
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.comment.created",
+            entityType: "conversation_comment",
+            payload: expect.objectContaining({
+              conversationId,
+              targetType: "artifact",
+              targetId: artifactId,
+            }),
           }),
         ]),
       );
