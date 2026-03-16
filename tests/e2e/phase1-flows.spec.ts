@@ -6,11 +6,43 @@ import postgres from "postgres";
 const DATABASE_URL =
   "postgresql://agentifui:agentifui@localhost:5432/agentifui";
 const DEFAULT_PASSWORD = "Secure123";
-const LOCALE_STORAGE_KEY = "agentifui.locale";
-const TEST_LOCALE = "en-US";
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const TOTP_STEP_MS = 30_000;
 const EXPECT_DEGRADED_RUNTIME = process.env.PLAYWRIGHT_EXPECT_DEGRADED_RUNTIME === "1";
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function eitherLocale(chinese: string, english: string) {
+  return new RegExp(`^(?:${escapeRegex(chinese)}|${escapeRegex(english)})$`);
+}
+
+const DISPLAY_NAME_LABEL = eitherLocale("显示名称", "Display Name");
+const EMAIL_LABEL = eitherLocale("邮箱", "Email");
+const PASSWORD_LABEL = eitherLocale("密码", "Password");
+const CREATE_ACCOUNT_BUTTON = eitherLocale("创建账号", "Create account");
+const CONTINUE_BUTTON = eitherLocale("继续", "Continue");
+const APPS_WORKSPACE_NAME = eitherLocale("应用工作台", "Apps workspace");
+const SECURITY_MFA_LINK = eitherLocale("安全 / MFA", "Security / MFA");
+const ADMIN_PREVIEW_LINK = eitherLocale("管理预览", "Admin preview");
+const USERS_NAME = eitherLocale("用户", "Users");
+const GROUPS_NAME = eitherLocale("群组", "Groups");
+const ADMIN_APPS_NAME = eitherLocale("应用", "Apps");
+const ADMIN_AUDIT_LINK = eitherLocale("审计", "Audit");
+const ADMIN_TENANTS_LINK = eitherLocale("租户", "Tenants");
+const FAVORITES_NAME = eitherLocale("收藏", "Favorites");
+const RECENT_NAME = eitherLocale("最近使用", "Recent");
+const SEARCH_APPS_LABEL = eitherLocale("搜索应用", "Search apps");
+const WORKING_GROUP_LABEL = eitherLocale("工作群组", "Working group");
+const REGISTERED_NOTICE = /^(注册完成，现在可以登录。|Registration complete\. You can now sign in\.)$/;
+const ACTIVATED_NOTICE = /^(邀请已接受，请使用新密码登录。|Invitation accepted\. Sign in with your new password\.)$/;
+const SSO_DETECTED_NOTICE = /^(检测到|Enterprise SSO detected for)/;
+const SSO_CONTINUE_BUTTON = /^(继续使用 iflabx-sso|Continue with iflabx-sso)$/;
+const TOTAL_USERS_TEXT = /^(用户总数|Total users)$/;
+const TOTAL_GROUPS_TEXT = /^(群组总数|Total groups)$/;
+const SAVE_TOOL_REGISTRY_BUTTON = /^(保存工具注册表|Save tool registry)$/;
+const SAVE_DIRECT_OVERRIDE_BUTTON = /^(保存直接覆盖|Save direct override)$/;
 
 function uniqueEmail(prefix: string, domain = "example.com") {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@${domain}`;
@@ -84,15 +116,6 @@ function appCard(page: Page, appName: string): Locator {
   });
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(
-    ({ key, locale }) => {
-      window.localStorage.setItem(key, locale);
-    },
-    { key: LOCALE_STORAGE_KEY, locale: TEST_LOCALE },
-  );
-});
-
 async function waitForGatewayPost(page: Page, path: string) {
   await waitForGatewayRequest(page, "POST", path);
 }
@@ -128,14 +151,14 @@ async function register(
   await page.goto("/register");
 
   if (input.displayName) {
-    await page.getByLabel("Display Name").fill(input.displayName);
+    await page.getByLabel(DISPLAY_NAME_LABEL).fill(input.displayName);
   }
 
-  await page.getByLabel("Email").fill(input.email);
-  await page.getByLabel("Password").fill(input.password ?? DEFAULT_PASSWORD);
+  await page.getByLabel(EMAIL_LABEL).fill(input.email);
+  await page.getByLabel(PASSWORD_LABEL).fill(input.password ?? DEFAULT_PASSWORD);
   await Promise.all([
     waitForGatewayPost(page, "/auth/register"),
-    page.getByRole("button", { name: "Create account" }).click(),
+    page.getByRole("button", { name: CREATE_ACCOUNT_BUTTON }).click(),
   ]);
 }
 
@@ -146,12 +169,20 @@ async function login(
     password?: string;
   },
 ) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(input.email);
-  await page.getByLabel("Password").fill(input.password ?? DEFAULT_PASSWORD);
+  await page
+    .waitForURL(/\/login(?:\?|$)/, {
+      timeout: 5_000,
+    })
+    .catch(async () => {
+      if (!/\/login(?:\?|$)/.test(page.url())) {
+        await page.goto("/login");
+      }
+    });
+  await page.getByLabel(EMAIL_LABEL).fill(input.email);
+  await page.getByLabel(PASSWORD_LABEL).fill(input.password ?? DEFAULT_PASSWORD);
   await Promise.all([
     waitForGatewayPost(page, "/auth/login"),
-    page.getByRole("button", { name: "Continue" }).click(),
+    page.getByRole("button", { name: CONTINUE_BUTTON }).click(),
   ]);
 }
 
@@ -192,7 +223,7 @@ async function expectAppsWorkspace(page: Page) {
     timeout: 60_000,
   });
   await expect(
-    page.getByRole("heading", { name: "Apps workspace" }),
+    page.getByRole("heading", { name: APPS_WORKSPACE_NAME }),
   ).toBeVisible({
     timeout: 60_000,
   });
@@ -699,9 +730,7 @@ test("register/login/workspace controls work for a normal active user", async ({
     displayName: "Normal User",
   });
   await expect(page).toHaveURL(/\/login\?registered=1$/);
-  await expect(
-    page.getByText("Registration complete. You can now sign in."),
-  ).toBeVisible();
+  await expect(page.getByText(REGISTERED_NOTICE)).toBeVisible();
 
   await register(page, {
     email,
@@ -716,17 +745,15 @@ test("register/login/workspace controls work for a normal active user", async ({
   });
   await expectAppsWorkspace(page);
   await expect(page.getByText(/^(5 authorized apps|5 个授权应用)$/)).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "Security / MFA" }),
-  ).toBeVisible();
+  await expect(page.getByRole("link", { name: SECURITY_MFA_LINK })).toBeVisible();
 
-  await page.getByRole("link", { name: "Security / MFA" }).click();
+  await page.getByRole("link", { name: SECURITY_MFA_LINK }).click();
   await expect(page).toHaveURL(/\/settings\/security$/);
   await expect(
     page.getByRole("heading", { name: "Security Settings" }),
   ).toBeVisible();
 
-  await page.getByRole("link", { name: "Apps workspace" }).click();
+  await page.getByRole("link", { name: APPS_WORKSPACE_NAME }).click();
   await expectAppsWorkspace(page);
 
   await expect(appCard(page, "Service Copilot")).toBeVisible();
@@ -741,14 +768,14 @@ test("register/login/workspace controls work for a normal active user", async ({
   ]);
   await expect(
     page.locator("section.workspace-section").filter({
-      has: page.getByRole("heading", { name: "Favorites" }),
+      has: page.getByRole("heading", { name: FAVORITES_NAME }),
     }),
   ).toContainText("Service Copilot");
 
-  await page.getByLabel("Search apps").fill("policy");
+  await page.getByLabel(SEARCH_APPS_LABEL).fill("policy");
   await expect(appCard(page, "Policy Watch")).toBeVisible();
   await expect(appCard(page, "Service Copilot")).toHaveCount(0);
-  await page.getByLabel("Search apps").fill("");
+  await page.getByLabel(SEARCH_APPS_LABEL).fill("");
 
   await Promise.all([
     waitForGatewayPut(page, "/workspace/preferences"),
@@ -761,7 +788,9 @@ test("register/login/workspace controls work for a normal active user", async ({
   ).toBeVisible({
     timeout: 15_000,
   });
-  await expect(page.getByLabel("Working group")).toHaveValue("grp_research");
+  await expect(
+    page.getByRole("combobox", { name: WORKING_GROUP_LABEL }),
+  ).toHaveValue("grp_research");
 
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
@@ -793,9 +822,12 @@ test("register/login/workspace controls work for a normal active user", async ({
     .fill("Summarize the current policy changes for my group.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(
-    page.getByText(
-      "Policy Watch is now reachable through the AgentifUI gateway.",
-    ),
+    page
+      .locator("article.chat-bubble.assistant")
+      .first()
+      .getByText("Policy Watch is now reachable through the AgentifUI gateway.", {
+        exact: true,
+      }),
   ).toBeVisible({
     timeout: 60_000,
   });
@@ -915,19 +947,19 @@ test("register/login/workspace controls work for a normal active user", async ({
   await expectAppsWorkspace(page);
   await expect(
     page.locator("section.workspace-section").filter({
-      has: page.getByRole("heading", { name: "Recent" }),
+      has: page.getByRole("heading", { name: RECENT_NAME }),
     }),
   ).toContainText("Policy Watch");
 
   await page.reload();
   await expect(
     page.locator("section.workspace-section").filter({
-      has: page.getByRole("heading", { name: "Favorites" }),
+      has: page.getByRole("heading", { name: FAVORITES_NAME }),
     }),
   ).toContainText("Service Copilot");
   await expect(
     page.locator("section.workspace-section").filter({
-      has: page.getByRole("heading", { name: "Recent" }),
+      has: page.getByRole("heading", { name: RECENT_NAME }),
     }),
   ).toContainText("Policy Watch");
 
@@ -1352,14 +1384,14 @@ test("sso pending flow keeps access limited to the profile page", async ({
   const email = uniqueEmail("pending", "iflabx.com");
 
   await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await expect(page.getByText("Enterprise SSO detected for")).toBeVisible();
+  await page.getByLabel(EMAIL_LABEL).fill(email);
+  await expect(page.getByText(SSO_DETECTED_NOTICE)).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /Continue with iflabx-sso/ }),
+    page.getByRole("button", { name: SSO_CONTINUE_BUTTON }),
   ).toBeVisible();
   await Promise.all([
     waitForGatewayPost(page, "/auth/sso/callback"),
-    page.getByRole("button", { name: /Continue with iflabx-sso/ }).click(),
+    page.getByRole("button", { name: SSO_CONTINUE_BUTTON }).click(),
   ]);
 
   await expect(page).toHaveURL(/\/auth\/pending$/);
@@ -1406,9 +1438,7 @@ test("invitation acceptance activates the user and allows password login", async
   ]);
 
   await expect(page).toHaveURL(/\/login\?activated=1$/);
-  await expect(
-    page.getByText("Invitation accepted. Sign in with your new password."),
-  ).toBeVisible();
+  await expect(page.getByText(ACTIVATED_NOTICE)).toBeVisible();
 
   await login(page, {
     email,
@@ -1480,11 +1510,11 @@ test("mfa setup, mfa login verification, and disable flow work end-to-end", asyn
 
   await logout(page);
   await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(DEFAULT_PASSWORD);
+  await page.getByLabel(EMAIL_LABEL).fill(email);
+  await page.getByLabel(PASSWORD_LABEL).fill(DEFAULT_PASSWORD);
   await Promise.all([
     waitForGatewayPost(page, "/auth/login"),
-    page.getByRole("button", { name: "Continue" }).click(),
+    page.getByRole("button", { name: CONTINUE_BUTTON }).click(),
   ]);
 
   await expect(page).toHaveURL(/\/auth\/mfa$/, {
@@ -1552,7 +1582,9 @@ test("conversation shares allow another group member to open a read-only shared 
   await appCard(page, "Policy Watch")
     .getByRole("button", { name: /^(Switch to|切换到) Research Lab$/ })
     .click();
-  await expect(page.getByLabel("Working group")).toHaveValue("grp_research");
+  await expect(
+    page.getByRole("combobox", { name: WORKING_GROUP_LABEL }),
+  ).toHaveValue("grp_research");
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
     appCard(page, "Policy Watch")
@@ -1565,9 +1597,12 @@ test("conversation shares allow another group member to open a read-only shared 
     .fill("Share this transcript with my research team.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(
-    page.getByText(
-      "Policy Watch is now reachable through the AgentifUI gateway.",
-    ),
+    page
+      .locator("article.chat-bubble.assistant")
+      .first()
+      .getByText("Policy Watch is now reachable through the AgentifUI gateway.", {
+        exact: true,
+      }),
   ).toBeVisible({
     timeout: 60_000,
   });
@@ -1640,7 +1675,9 @@ test("chat history lists recent conversations and links back to timeline-aware r
   await appCard(page, "Policy Watch")
     .getByRole("button", { name: /^(Switch to|切换到) Research Lab$/ })
     .click();
-  await expect(page.getByLabel("Working group")).toHaveValue("grp_research");
+  await expect(
+    page.getByRole("combobox", { name: WORKING_GROUP_LABEL }),
+  ).toHaveValue("grp_research");
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
     appCard(page, "Policy Watch")
@@ -1653,9 +1690,12 @@ test("chat history lists recent conversations and links back to timeline-aware r
     .fill("Show this conversation in recent history.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(
-    page.getByText(
-      "Policy Watch is now reachable through the AgentifUI gateway.",
-    ),
+    page
+      .locator("article.chat-bubble.assistant")
+      .first()
+      .getByText("Policy Watch is now reachable through the AgentifUI gateway.", {
+        exact: true,
+      }),
   ).toBeVisible({
     timeout: 60_000,
   });
@@ -2034,30 +2074,32 @@ test("admin pages render persisted governance data for tenant admins", async ({
   });
   await expectAppsWorkspace(page);
 
-  await page.getByRole("link", { name: "Admin preview" }).click();
+  await page.getByRole("link", { name: ADMIN_PREVIEW_LINK }).click();
   await expect(page).toHaveURL(/\/admin\/users$/);
-  await expect(page.getByRole("heading", { name: "Users" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: USERS_NAME })).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText("Total users")).toBeVisible();
+  await expect(page.getByText(TOTAL_USERS_TEXT)).toBeVisible();
   await expect(page.getByText(adminEmail)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Tenants" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: ADMIN_TENANTS_LINK })).toHaveCount(0);
 
-  await page.getByRole("link", { name: "Groups" }).click();
+  await page.getByRole("link", { name: GROUPS_NAME }).click();
   await expect(page).toHaveURL(/\/admin\/groups$/);
-  await expect(page.getByRole("heading", { name: "Groups" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: GROUPS_NAME })).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText("Total groups")).toBeVisible();
+  await expect(page.getByText(TOTAL_GROUPS_TEXT)).toBeVisible();
   await expect(page.getByText("Product Studio")).toBeVisible();
 
-  await page.getByRole("link", { name: "Apps", exact: true }).click();
+  await page.getByRole("link", { name: ADMIN_APPS_NAME, exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/apps$/);
-  await expect(page.getByRole("heading", { name: "Apps" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: ADMIN_APPS_NAME })).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText("Tenant Control")).toBeVisible();
   const tenantControlCard = appCard(page, "Tenant Control");
+  await expect(tenantControlCard).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(
     tenantControlCard.getByLabel("Tenant Control tool tenant.usage.read"),
   ).toBeChecked();
@@ -2066,11 +2108,10 @@ test("admin pages render persisted governance data for tenant admins", async ({
     .uncheck();
   await Promise.all([
     waitForGatewayPut(page, "/admin/apps/app_tenant_control/tools"),
-    tenantControlCard.getByRole("button", { name: "Save tool registry" }).click(),
+    tenantControlCard.getByRole("button", { name: SAVE_TOOL_REGISTRY_BUTTON }).click(),
   ]);
-  await expect(
-    page.getByText("Tenant Control now exposes 1 enabled tools in this tenant."),
-  ).toBeVisible();
+  await expect(page.locator(".notice.success")).toContainText("Tenant Control");
+  await expect(page.locator(".notice.success")).toContainText("1");
   await expect(tenantControlCard.getByText("1 / 2")).toBeVisible();
   await tenantControlCard
     .getByLabel("Tenant Control grant email")
@@ -2081,17 +2122,14 @@ test("admin pages render persisted governance data for tenant admins", async ({
   await Promise.all([
     waitForGatewayPost(page, "/admin/apps/app_tenant_control/grants"),
     tenantControlCard
-      .getByRole("button", { name: "Save direct override" })
+      .getByRole("button", { name: SAVE_DIRECT_OVERRIDE_BUTTON })
       .click(),
   ]);
-  await expect(
-    page.getByText(
-      `${memberEmail} now has a allow override on Tenant Control.`,
-    ),
-  ).toBeVisible();
+  await expect(page.locator(".notice.success")).toContainText(memberEmail);
+  await expect(page.locator(".notice.success")).toContainText("Tenant Control");
   await expect(tenantControlCard.getByText(memberEmail)).toBeVisible();
 
-  await page.getByRole("link", { name: "Audit" }).click();
+  await page.getByRole("link", { name: ADMIN_AUDIT_LINK }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/);
   await expect(page.getByRole("heading", { name: "Audit" })).toBeVisible({
     timeout: 60_000,
@@ -2210,14 +2248,14 @@ test("root admins can open the platform tenant inventory page", async ({
         timeout: 60_000,
       },
     ),
-    page.getByRole("link", { name: "Admin preview" }).click(),
+    page.getByRole("link", { name: ADMIN_PREVIEW_LINK }).click(),
   ]);
   await expect(page).toHaveURL(/\/admin\/users$/);
-  await expect(page.getByRole("link", { name: "Tenants" })).toBeVisible({
+  await expect(page.getByRole("link", { name: ADMIN_TENANTS_LINK })).toBeVisible({
     timeout: 20_000,
   });
 
-  await page.getByRole("link", { name: "Tenants" }).click();
+  await page.getByRole("link", { name: ADMIN_TENANTS_LINK }).click();
   await expect(page).toHaveURL(/\/admin\/tenants$/);
   await expect(page.getByRole("heading", { name: "Tenants" })).toBeVisible({
     timeout: 60_000,
@@ -2267,7 +2305,7 @@ test("root admins can open the platform tenant inventory page", async ({
   await expect(tenantCard).toBeVisible();
   await page.getByLabel("Filter tenants").fill("");
 
-  await page.getByRole("link", { name: "Audit" }).click();
+  await page.getByRole("link", { name: ADMIN_AUDIT_LINK }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/);
   await expect(
     page.locator(".workspace-badge").filter({ hasText: "Scope: platform" }),

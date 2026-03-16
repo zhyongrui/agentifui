@@ -1,8 +1,23 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const DEFAULT_PASSWORD = "Secure123";
-const LOCALE_STORAGE_KEY = "agentifui.locale";
-const TEST_LOCALE = "en-US";
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function eitherLocale(chinese: string, english: string) {
+  return new RegExp(`^(?:${escapeRegex(chinese)}|${escapeRegex(english)})$`);
+}
+
+const DISPLAY_NAME_LABEL = eitherLocale("显示名称", "Display Name");
+const EMAIL_LABEL = eitherLocale("邮箱", "Email");
+const PASSWORD_LABEL = eitherLocale("密码", "Password");
+const CREATE_ACCOUNT_BUTTON = eitherLocale("创建账号", "Create account");
+const CONTINUE_BUTTON = eitherLocale("继续", "Continue");
+const APPS_WORKSPACE_NAME = eitherLocale("应用工作台", "Apps workspace");
+const ADMIN_PREVIEW_LINK = eitherLocale("管理预览", "Admin preview");
+const ADMIN_SOURCES_LINK = eitherLocale("知识源", "Sources");
 
 function uniqueEmail(prefix: string, domain = "example.com") {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@${domain}`;
@@ -13,15 +28,6 @@ function appCard(page: Page, appName: string): Locator {
     has: page.getByRole("heading", { name: appName }),
   });
 }
-
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(
-    ({ key, locale }) => {
-      window.localStorage.setItem(key, locale);
-    },
-    { key: LOCALE_STORAGE_KEY, locale: TEST_LOCALE },
-  );
-});
 
 async function waitForGatewayRequest(
   page: Page,
@@ -43,22 +49,22 @@ async function register(
   input: { displayName: string; email: string },
 ) {
   await page.goto("/register");
-  await page.getByLabel("Display Name").fill(input.displayName);
-  await page.getByLabel("Email").fill(input.email);
-  await page.getByLabel("Password").fill(DEFAULT_PASSWORD);
+  await page.getByLabel(DISPLAY_NAME_LABEL).fill(input.displayName);
+  await page.getByLabel(EMAIL_LABEL).fill(input.email);
+  await page.getByLabel(PASSWORD_LABEL).fill(DEFAULT_PASSWORD);
   await Promise.all([
     waitForGatewayRequest(page, "POST", "/auth/register"),
-    page.getByRole("button", { name: "Create account" }).click(),
+    page.getByRole("button", { name: CREATE_ACCOUNT_BUTTON }).click(),
   ]);
 }
 
 async function login(page: Page, email: string) {
   await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(DEFAULT_PASSWORD);
+  await page.getByLabel(EMAIL_LABEL).fill(email);
+  await page.getByLabel(PASSWORD_LABEL).fill(DEFAULT_PASSWORD);
   await Promise.all([
     waitForGatewayRequest(page, "POST", "/auth/login"),
-    page.getByRole("button", { name: "Continue" }).click(),
+    page.getByRole("button", { name: CONTINUE_BUTTON }).click(),
   ]);
 }
 
@@ -67,7 +73,7 @@ async function expectAppsWorkspace(page: Page) {
     timeout: 60_000,
   });
   await expect(
-    page.getByRole("heading", { name: "Apps workspace" }),
+    page.getByRole("heading", { name: APPS_WORKSPACE_NAME }),
   ).toBeVisible({
     timeout: 60_000,
   });
@@ -98,10 +104,10 @@ test("admin source management feeds retrieval-backed chat citations", async ({
   await login(page, adminEmail);
   await expectAppsWorkspace(page);
 
-  await page.getByRole("link", { name: "Admin preview" }).click();
+  await page.getByRole("link", { name: ADMIN_PREVIEW_LINK }).click();
   await expect(page).toHaveURL(/\/admin\/users$/);
 
-  await page.getByRole("link", { name: "Sources" }).click();
+  await page.getByRole("link", { name: ADMIN_SOURCES_LINK }).click();
   await expect(page).toHaveURL(/\/admin\/sources$/);
   await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible({
     timeout: 60_000,
