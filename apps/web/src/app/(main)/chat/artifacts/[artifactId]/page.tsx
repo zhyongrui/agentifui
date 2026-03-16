@@ -78,6 +78,7 @@ export default function ArtifactPreviewPage() {
           addComment: "添加评论",
           addingComment: "提交中...",
           noComments: "还没有评论，先记录一下复核意见。",
+          commentMentionHint: "可用 @邮箱 提及已共享访问该会话的协作者。",
           previewLead: '预览直接使用持久化产物载荷，而不是转录摘要，因此表格、JSON、文本、Markdown 和链接输出都可以复用同一路由渲染。',
           backToShared: "返回共享会话",
           backToApps: "返回应用工作台",
@@ -110,6 +111,8 @@ export default function ArtifactPreviewPage() {
           addComment: "Add comment",
           addingComment: "Saving...",
           noComments: "No comments yet.",
+          commentMentionHint:
+            "Use @email to mention collaborators who already have access to the shared conversation.",
           previewLead: 'The preview uses the persisted artifact payload, not the transcript summary, so tables, JSON, text, markdown, and link outputs can all render from the same workspace route.',
           backToShared: "Back to shared conversation",
           backToApps: "Back to Apps workspace",
@@ -362,6 +365,7 @@ export default function ArtifactPreviewPage() {
           comments={artifact.comments ?? []}
           locale={locale}
           emptyText={copy.noComments}
+          helperText={copy.commentMentionHint}
           textareaLabel={copy.commentInput}
           submitLabel={copy.addComment}
           submittingLabel={copy.addingComment}

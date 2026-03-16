@@ -74,6 +74,13 @@ export const workspaceCommentTargetTypeEnum = pgEnum('workspace_comment_target_t
   'run',
   'artifact',
 ]);
+export const workspaceNotificationTypeEnum = pgEnum('workspace_notification_type', [
+  'comment_mention',
+]);
+export const workspaceNotificationStatusEnum = pgEnum('workspace_notification_status', [
+  'unread',
+  'read',
+]);
 export const knowledgeSourceKindEnum = pgEnum('knowledge_source_kind', [
   'url',
   'markdown',
@@ -434,6 +441,10 @@ export const workspaceComments = pgTable(
     targetType: workspaceCommentTargetTypeEnum('target_type').notNull(),
     targetId: varchar('target_id', { length: 120 }).notNull(),
     content: text('content').notNull(),
+    mentions: jsonb('mentions')
+      .$type<Array<{ userId: string; email: string; displayName: string | null }>>()
+      .notNull()
+      .default([]),
     authorDisplayName: varchar('author_display_name', { length: 160 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -450,6 +461,50 @@ export const workspaceComments = pgTable(
       table.createdAt
     ),
     workspaceCommentsUserIndex: index('workspace_comments_user_idx').on(table.userId),
+  })
+);
+
+export const workspaceNotifications = pgTable(
+  'workspace_notifications',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    actorUserId: varchar('actor_user_id', { length: 120 }).references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    type: workspaceNotificationTypeEnum('type').notNull(),
+    status: workspaceNotificationStatusEnum('status').notNull().default('unread'),
+    conversationId: varchar('conversation_id', { length: 120 })
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    commentId: varchar('comment_id', { length: 120 })
+      .notNull()
+      .references(() => workspaceComments.id, { onDelete: 'cascade' }),
+    targetType: workspaceCommentTargetTypeEnum('target_type').notNull(),
+    targetId: varchar('target_id', { length: 120 }).notNull(),
+    actorDisplayName: varchar('actor_display_name', { length: 160 }),
+    preview: text('preview').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+  },
+  table => ({
+    workspaceNotificationsTenantIndex: index('workspace_notifications_tenant_idx').on(table.tenantId),
+    workspaceNotificationsUserIndex: index('workspace_notifications_user_idx').on(
+      table.userId,
+      table.status,
+      table.createdAt
+    ),
+    workspaceNotificationsConversationIndex: index(
+      'workspace_notifications_conversation_idx'
+    ).on(table.conversationId, table.createdAt),
+    workspaceNotificationsCommentIndex: index('workspace_notifications_comment_idx').on(
+      table.commentId
+    ),
   })
 );
 

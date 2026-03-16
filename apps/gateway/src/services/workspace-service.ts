@@ -8,6 +8,7 @@ import type {
   WorkspaceArtifactSummary,
   WorkspaceCitation,
   WorkspaceComment,
+  WorkspaceCommentMention,
   WorkspaceCatalog,
   WorkspaceCommentCreateRequest,
   WorkspaceConversationAttachment,
@@ -29,6 +30,7 @@ import type {
   WorkspacePreferencesUpdateRequest,
   WorkspaceRun,
   WorkspaceRunFailure,
+  WorkspaceNotification,
   WorkspaceRunRuntime,
   WorkspaceRunStatus,
   WorkspaceRunSummary,
@@ -73,6 +75,10 @@ import {
   calculateCompletionQuotaCost,
   type WorkspaceQuotaLimitRecord,
 } from './workspace-quota.js';
+import {
+  buildWorkspaceCommentPreview,
+  normalizeWorkspaceCommentContent,
+} from './workspace-comments.js';
 
 type WorkspaceLaunchFailure = {
   ok: false;
@@ -184,6 +190,7 @@ type WorkspaceConversationAttachmentLookupInput = {
 type WorkspaceCommentCreateInput = {
   conversationId: string;
   request: WorkspaceCommentCreateRequest;
+  mentions?: WorkspaceCommentMention[];
 };
 
 type WorkspaceConversationShareCreateInput = {
@@ -292,8 +299,8 @@ type WorkspaceCommentCreateResult =
         targetId: string;
         comment: WorkspaceComment;
         thread: WorkspaceComment[];
-      };
-    }
+    };
+  }
   | WorkspaceLookupFailure
   | {
       ok: false;
@@ -302,6 +309,21 @@ type WorkspaceCommentCreateResult =
       message: string;
       details?: unknown;
     };
+
+type WorkspaceNotificationsResult = {
+  ok: true;
+  data: {
+    items: WorkspaceNotification[];
+    unreadCount: number;
+  };
+};
+
+type WorkspaceNotificationReadResult =
+  | {
+      ok: true;
+      data: WorkspaceNotification;
+    }
+  | WorkspaceLookupFailure;
 
 type WorkspaceArtifactResult =
   | {
@@ -414,6 +436,17 @@ type WorkspaceService = {
     user: AuthUser,
     input: WorkspaceCommentCreateInput
   ): WorkspaceCommentCreateResult | Promise<WorkspaceCommentCreateResult>;
+  canUserAccessConversationForCollaboration(
+    user: AuthUser,
+    conversationId: string
+  ): boolean | Promise<boolean>;
+  listNotificationsForUser(
+    user: AuthUser
+  ): WorkspaceNotificationsResult | Promise<WorkspaceNotificationsResult>;
+  markNotificationReadForUser(
+    user: AuthUser,
+    notificationId: string
+  ): WorkspaceNotificationReadResult | Promise<WorkspaceNotificationReadResult>;
   getArtifactForUser(
     user: AuthUser,
     artifactId: string
@@ -512,6 +545,10 @@ type WorkspaceArtifactRecord = WorkspaceArtifact & {
 };
 
 type WorkspaceCommentRecord = WorkspaceComment & {
+  userId: string;
+};
+
+type WorkspaceNotificationRecord = WorkspaceNotification & {
   userId: string;
 };
 
@@ -1197,6 +1234,7 @@ function createWorkspaceCommentRecord(input: {
   authorDisplayName: string | null;
   content: string;
   conversationId: string;
+  mentions?: WorkspaceCommentMention[];
   targetId: string;
   targetType: WorkspaceComment["targetType"];
   userId: string;
@@ -1209,6 +1247,7 @@ function createWorkspaceCommentRecord(input: {
     targetType: input.targetType,
     targetId: input.targetId,
     content: input.content,
+    mentions: input.mentions && input.mentions.length > 0 ? input.mentions : [],
     authorUserId: input.userId,
     authorDisplayName: input.authorDisplayName,
     createdAt,
@@ -1217,8 +1256,32 @@ function createWorkspaceCommentRecord(input: {
   };
 }
 
-function normalizeCommentContent(content: string) {
-  return content.trim().replace(/\s+\n/g, "\n").slice(0, 2000);
+function createWorkspaceNotificationRecord(input: {
+  actorDisplayName: string | null;
+  actorUserId: string;
+  comment: WorkspaceComment;
+  conversationId: string;
+  conversationTitle: string;
+  targetId: string;
+  targetType: WorkspaceComment["targetType"];
+  userId: string;
+}): WorkspaceNotificationRecord {
+  return {
+    id: `notification_${randomUUID()}`,
+    type: "comment_mention",
+    status: "unread",
+    actorUserId: input.actorUserId,
+    actorDisplayName: input.actorDisplayName,
+    conversationId: input.conversationId,
+    conversationTitle: input.conversationTitle,
+    commentId: input.comment.id,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    preview: buildWorkspaceCommentPreview(input.comment.content),
+    createdAt: input.comment.createdAt,
+    readAt: null,
+    userId: input.userId,
+  };
 }
 
 function mergeMessageCommentThreads(
@@ -1473,6 +1536,8 @@ export function createWorkspaceService(options: {
   const artifactsById = new Map<string, WorkspaceArtifactRecord>();
   const sharesById = new Map<string, WorkspaceConversationShareRecord>();
   const shareIdsByConversationId = new Map<string, string[]>();
+  const notificationsById = new Map<string, WorkspaceNotificationRecord>();
+  const notificationIdsByUserId = new Map<string, string[]>();
   const presenceByConversationId = new Map<
     string,
     Array<Omit<WorkspaceConversationPresence['viewers'][number], 'isCurrentUser'>>
@@ -2169,7 +2234,7 @@ export function createWorkspaceService(options: {
         };
       }
 
-      const content = normalizeCommentContent(input.request.content);
+      const content = normalizeWorkspaceCommentContent(input.request.content);
 
       if (!content || input.request.targetId.trim().length === 0) {
         return {
@@ -2183,14 +2248,17 @@ export function createWorkspaceService(options: {
 
       const targetId = input.request.targetId.trim();
       const targetType = input.request.targetType;
+      const mentions = input.mentions ?? [];
       const comment = createWorkspaceCommentRecord({
         authorDisplayName: user.displayName ?? null,
         content,
         conversationId: input.conversationId,
+        mentions,
         targetId,
         targetType,
         userId: user.id,
       });
+      let thread: WorkspaceComment[];
 
       if (targetType === 'message') {
         const messageIndex = conversation.messages.findIndex(
@@ -2213,20 +2281,8 @@ export function createWorkspaceService(options: {
           index === messageIndex ? { ...message, comments: nextThread } : message
         );
         conversation.updatedAt = comment.updatedAt;
-
-        return {
-          ok: true,
-          data: {
-            conversationId: input.conversationId,
-            targetType,
-            targetId,
-            comment,
-            thread: nextThread,
-          },
-        };
-      }
-
-      if (targetType === 'run') {
+        thread = nextThread;
+      } else if (targetType === 'run') {
         const run = runsById.get(targetId);
 
         if (!run || run.conversationId !== input.conversationId || run.userId !== user.id) {
@@ -2240,36 +2296,49 @@ export function createWorkspaceService(options: {
 
         run.comments = [...run.comments, comment];
         conversation.updatedAt = comment.updatedAt;
+        thread = run.comments;
+      } else {
+        const artifact = artifactsById.get(targetId);
 
-        return {
-          ok: true,
-          data: {
-            conversationId: input.conversationId,
-            targetType,
-            targetId,
-            comment,
-            thread: run.comments,
-          },
-        };
+        if (
+          !artifact ||
+          artifact.conversationId !== input.conversationId ||
+          artifact.userId !== user.id
+        ) {
+          return {
+            ok: false,
+            statusCode: 404,
+            code: 'WORKSPACE_NOT_FOUND',
+            message: 'The target workspace artifact could not be found.',
+          };
+        }
+
+        artifact.comments = [...(artifact.comments ?? []), comment];
+        conversation.updatedAt = comment.updatedAt;
+        thread = artifact.comments;
       }
 
-      const artifact = artifactsById.get(targetId);
+      for (const mention of mentions) {
+        if (mention.userId === user.id) {
+          continue;
+        }
 
-      if (
-        !artifact ||
-        artifact.conversationId !== input.conversationId ||
-        artifact.userId !== user.id
-      ) {
-        return {
-          ok: false,
-          statusCode: 404,
-          code: 'WORKSPACE_NOT_FOUND',
-          message: 'The target workspace artifact could not be found.',
-        };
+        const notification = createWorkspaceNotificationRecord({
+          actorDisplayName: user.displayName ?? null,
+          actorUserId: user.id,
+          comment,
+          conversationId: input.conversationId,
+          conversationTitle: conversation.title,
+          targetId,
+          targetType,
+          userId: mention.userId,
+        });
+        notificationsById.set(notification.id, notification);
+        notificationIdsByUserId.set(mention.userId, [
+          notification.id,
+          ...(notificationIdsByUserId.get(mention.userId) ?? []),
+        ]);
       }
-
-      artifact.comments = [...(artifact.comments ?? []), comment];
-      conversation.updatedAt = comment.updatedAt;
 
       return {
         ok: true,
@@ -2278,8 +2347,73 @@ export function createWorkspaceService(options: {
           targetType,
           targetId,
           comment,
-          thread: artifact.comments,
+          thread,
         },
+      };
+    },
+    canUserAccessConversationForCollaboration(user, conversationId) {
+      const conversation = conversationsById.get(conversationId);
+
+      if (!conversation) {
+        return false;
+      }
+
+      if (conversation.userId === user.id) {
+        return true;
+      }
+
+      const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
+
+      return listShareRecords(conversationId).some(
+        (share) => share.status === 'active' && memberGroupIds.includes(share.group.id)
+      );
+    },
+    listNotificationsForUser(user) {
+      const items = (notificationIdsByUserId.get(user.id) ?? [])
+        .map((notificationId) => notificationsById.get(notificationId))
+        .filter(
+          (notification): notification is WorkspaceNotificationRecord =>
+            notification !== undefined
+        )
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+      return {
+        ok: true,
+        data: {
+          items,
+          unreadCount: items.filter((item) => item.status === 'unread').length,
+        },
+      };
+    },
+    markNotificationReadForUser(user, notificationId) {
+      const notification = notificationsById.get(notificationId);
+
+      if (!notification || notification.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace notification could not be found.',
+        };
+      }
+
+      if (notification.status === 'read') {
+        return {
+          ok: true,
+          data: notification,
+        };
+      }
+
+      const nextNotification: WorkspaceNotificationRecord = {
+        ...notification,
+        status: 'read',
+        readAt: new Date().toISOString(),
+      };
+      notificationsById.set(notificationId, nextNotification);
+
+      return {
+        ok: true,
+        data: nextNotification,
       };
     },
     getArtifactForUser(user, artifactId) {

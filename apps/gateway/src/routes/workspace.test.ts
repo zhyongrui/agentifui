@@ -7,6 +7,8 @@ import type {
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationPresenceResponse,
   WorkspaceConversationResponse,
+  WorkspaceNotificationReadResponse,
+  WorkspaceNotificationsResponse,
   WorkspacePendingActionRespondResponse,
   WorkspacePendingActionsResponse,
   WorkspaceConversationShareResponse,
@@ -1225,6 +1227,11 @@ describe("workspace routes", () => {
       password: "Secure123",
       displayName: "Comments Reviewer",
     });
+    authService.register({
+      email: "reviewer@example.net",
+      password: "Secure123",
+      displayName: "Review Partner",
+    });
 
     const login = authService.login({
       email: "comments@iflabx.com",
@@ -1235,6 +1242,17 @@ describe("workspace routes", () => {
 
     if (!login.ok) {
       throw new Error("expected active login to succeed");
+    }
+
+    const reviewerLogin = authService.login({
+      email: "reviewer@example.net",
+      password: "Secure123",
+    });
+
+    expect(reviewerLogin.ok).toBe(true);
+
+    if (!reviewerLogin.ok) {
+      throw new Error("expected reviewer login to succeed");
     }
 
     try {
@@ -1330,6 +1348,19 @@ describe("workspace routes", () => {
         throw new Error("expected generated artifact to exist");
       }
 
+      const share = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          groupId: "grp_research",
+        },
+      });
+
+      expect(share.statusCode).toBe(200);
+
       const messageComment = await app.inject({
         method: "POST",
         url: `/workspace/conversations/${conversationId}/comments`,
@@ -1339,7 +1370,8 @@ describe("workspace routes", () => {
         payload: {
           targetType: "message",
           targetId: assistantMessage.id,
-          content: "Please tighten the summary before sharing.",
+          content:
+            "Please tighten the summary before sharing. @reviewer@example.net can review the draft.",
         },
       });
 
@@ -1351,11 +1383,19 @@ describe("workspace routes", () => {
           targetType: "message",
           targetId: assistantMessage.id,
           comment: expect.objectContaining({
-            content: "Please tighten the summary before sharing.",
+            content:
+              "Please tighten the summary before sharing. @reviewer@example.net can review the draft.",
+            mentions: [
+              expect.objectContaining({
+                email: "reviewer@example.net",
+                displayName: "Review Partner",
+              }),
+            ],
           }),
           thread: [
             expect.objectContaining({
-              content: "Please tighten the summary before sharing.",
+              content:
+                "Please tighten the summary before sharing. @reviewer@example.net can review the draft.",
             }),
           ],
         },
@@ -1408,7 +1448,13 @@ describe("workspace routes", () => {
             id: assistantMessage.id,
             comments: [
               expect.objectContaining({
-                content: "Please tighten the summary before sharing.",
+                content:
+                  "Please tighten the summary before sharing. @reviewer@example.net can review the draft.",
+                mentions: [
+                  expect.objectContaining({
+                    email: "reviewer@example.net",
+                  }),
+                ],
               }),
             ],
           }),
@@ -1462,6 +1508,8 @@ describe("workspace routes", () => {
               conversationId,
               targetType: "message",
               targetId: assistantMessage.id,
+              mentionCount: 1,
+              mentionedUserIds: [reviewerLogin.data.user.id],
             }),
           }),
           expect.objectContaining({
@@ -1484,6 +1532,58 @@ describe("workspace routes", () => {
           }),
         ]),
       );
+
+      const notifications = await app.inject({
+        method: "GET",
+        url: "/workspace/notifications",
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(notifications.statusCode).toBe(200);
+      expect(notifications.json()).toMatchObject({
+        ok: true,
+        data: {
+          unreadCount: 1,
+          items: [
+            expect.objectContaining({
+              type: "comment_mention",
+              status: "unread",
+              conversationId,
+              conversationTitle: expect.any(String),
+              targetType: "message",
+              targetId: assistantMessage.id,
+              actorDisplayName: "Comments Reviewer",
+            }),
+          ],
+        },
+      } satisfies WorkspaceNotificationsResponse);
+
+      const notificationId = (
+        notifications.json() as WorkspaceNotificationsResponse
+      ).data.items[0]?.id;
+
+      if (!notificationId) {
+        throw new Error("expected a notification id");
+      }
+
+      const markRead = await app.inject({
+        method: "PUT",
+        url: `/workspace/notifications/${notificationId}/read`,
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(markRead.statusCode).toBe(200);
+      expect(markRead.json()).toMatchObject({
+        ok: true,
+        data: expect.objectContaining({
+          id: notificationId,
+          status: "read",
+        }),
+      } satisfies WorkspaceNotificationReadResponse);
     } finally {
       await app.close();
     }

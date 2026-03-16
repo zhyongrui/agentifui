@@ -533,6 +533,7 @@ export default function ConversationPage() {
           addingComment: "提交中...",
           commentInput: "评论内容",
           noComments: "还没有评论，先留下一条上下文备注。",
+          commentMentionHint: "可用 @邮箱 提及已共享访问该会话的协作者。",
         }
       : {
           checking: "Checking your session...",
@@ -603,6 +604,8 @@ export default function ConversationPage() {
           addingComment: "Saving...",
           commentInput: "Comment",
           noComments: "No comments yet.",
+          commentMentionHint:
+            "Use @email to mention collaborators who already have access to the shared conversation.",
         };
 
   async function refreshGatewayRuntimeHealth() {
@@ -2491,6 +2494,7 @@ export default function ConversationPage() {
                   comments={message.comments ?? []}
                   locale={locale}
                   emptyText={copy.noComments}
+                  helperText={copy.commentMentionHint}
                   textareaLabel={copy.commentInput}
                   submitLabel={copy.addComment}
                   submittingLabel={copy.addingComment}
@@ -2930,6 +2934,7 @@ export default function ConversationPage() {
                     comments={selectedRun.comments}
                     locale={locale}
                     emptyText={copy.noComments}
+                    helperText={copy.commentMentionHint}
                     textareaLabel={copy.commentInput}
                     submitLabel={copy.addComment}
                     submittingLabel={copy.addingComment}

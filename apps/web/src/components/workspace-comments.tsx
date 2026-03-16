@@ -7,6 +7,7 @@ import type { WorkspaceComment } from "@agentifui/shared/apps";
 type WorkspaceCommentThreadProps = {
   comments: WorkspaceComment[];
   emptyText: string;
+  helperText?: string;
   isSubmitting?: boolean;
   locale: string;
   readOnly?: boolean;
@@ -46,6 +47,15 @@ export function WorkspaceCommentThread(props: WorkspaceCommentThreadProps) {
                 <strong>{comment.authorDisplayName ?? "Unknown user"}</strong>
                 <span>{new Date(comment.createdAt).toLocaleString(props.locale)}</span>
               </div>
+              {comment.mentions && comment.mentions.length > 0 ? (
+                <div className="workspace-comment-mentions">
+                  {comment.mentions.map((mention) => (
+                    <span key={`${comment.id}:${mention.userId}`} className="tag tag-muted">
+                      @{mention.displayName ?? mention.email}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <p>{comment.content}</p>
             </article>
           ))}
@@ -63,6 +73,9 @@ export function WorkspaceCommentThread(props: WorkspaceCommentThreadProps) {
               onChange={(event) => setDraft(event.target.value)}
             />
           </label>
+          {props.helperText ? (
+            <p className="workspace-comment-helper">{props.helperText}</p>
+          ) : null}
           {props.submitError ? <div className="notice error">{props.submitError}</div> : null}
           <button
             className="primary"

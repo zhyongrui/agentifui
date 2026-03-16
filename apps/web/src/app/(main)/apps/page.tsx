@@ -11,7 +11,9 @@ import {
   type WorkspaceApp,
   type WorkspaceCatalog,
   type WorkspaceGroup,
+  type WorkspaceNotification,
 } from '@agentifui/shared/apps';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 
@@ -20,8 +22,10 @@ import {
   toggleFavoriteApp,
 } from '../../../lib/apps-workspace';
 import {
+  fetchWorkspaceNotifications,
   fetchWorkspaceCatalog,
   launchWorkspaceApp,
+  markWorkspaceNotificationRead,
   updateWorkspacePreferences,
 } from '../../../lib/apps-client';
 import {
@@ -243,6 +247,102 @@ function WorkspaceSection({
   );
 }
 
+function getNotificationTargetLabel(
+  notification: WorkspaceNotification,
+  copy: ReturnType<typeof useI18n>['messages']['apps']
+) {
+  if (notification.targetType === 'run') {
+    return copy.reviewInboxCommentTargetRun;
+  }
+
+  if (notification.targetType === 'artifact') {
+    return copy.reviewInboxCommentTargetArtifact;
+  }
+
+  return copy.reviewInboxCommentTargetMessage;
+}
+
+type ReviewInboxProps = {
+  copy: ReturnType<typeof useI18n>['messages']['apps'];
+  items: WorkspaceNotification[];
+  isLoading: boolean;
+  locale: ReturnType<typeof useI18n>['locale'];
+  markingId: string | null;
+  onMarkRead: (notificationId: string) => void;
+};
+
+function ReviewInbox({
+  copy,
+  items,
+  isLoading,
+  locale,
+  markingId,
+  onMarkRead,
+}: ReviewInboxProps) {
+  return (
+    <section className="workspace-section workspace-review-inbox">
+      <div className="section-header">
+        <div>
+          <h2>{copy.reviewInboxTitle}</h2>
+          <p>{copy.reviewInboxDescription}</p>
+        </div>
+        <span className="workspace-count">
+          {items.filter((item) => item.status === 'unread').length}
+        </span>
+      </div>
+
+      {isLoading ? (
+        <div className="workspace-empty">{copy.reviewInboxLoading}</div>
+      ) : items.length === 0 ? (
+        <div className="workspace-empty">{copy.reviewInboxEmpty}</div>
+      ) : (
+        <div className="workspace-notification-list">
+          {items.map((notification) => (
+            <article className="workspace-notification-card" key={notification.id}>
+              <div className="workspace-notification-meta">
+                <span
+                  className={`status-chip ${
+                    notification.status === 'unread' ? 'status-beta' : 'status-ready'
+                  }`}
+                >
+                  {notification.status === 'unread'
+                    ? copy.reviewInboxUnread
+                    : copy.reviewInboxRead}
+                </span>
+                <span>{getNotificationTargetLabel(notification, copy)}</span>
+                <span>{new Date(notification.createdAt).toLocaleString(locale)}</span>
+              </div>
+              <h3>{notification.conversationTitle}</h3>
+              <p>
+                {copy.reviewInboxMentionedBy}:{" "}
+                {notification.actorDisplayName ?? notification.actorUserId}
+              </p>
+              <p>{notification.preview}</p>
+              <div className="workspace-notification-actions">
+                <Link className="secondary" href={`/chat/${notification.conversationId}`}>
+                  {copy.reviewInboxOpen}
+                </Link>
+                {notification.status === 'unread' ? (
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={markingId === notification.id}
+                    onClick={() => onMarkRead(notification.id)}
+                  >
+                    {markingId === notification.id
+                      ? copy.reviewInboxMarkingRead
+                      : copy.reviewInboxMarkRead}
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function AppsPage() {
   const router = useRouter();
   const { locale, messages, formatDateTime } = useI18n();
@@ -251,6 +351,9 @@ export default function AppsPage() {
   const [workspace, setWorkspace] = useState<WorkspaceCatalog | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
+  const [notifications, setNotifications] = useState<WorkspaceNotification[]>([]);
+  const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
+  const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [activeGroupId, setActiveGroupId] = useState('');
@@ -281,48 +384,71 @@ export default function AppsPage() {
       setFavoriteIds([]);
       setRecentIds([]);
       setActiveGroupId('');
+      setNotifications([]);
+      setMarkingNotificationId(null);
       return;
     }
 
     let isCancelled = false;
 
     setIsWorkspaceLoading(true);
+    setIsNotificationsLoading(true);
     setWorkspaceError(null);
 
-    fetchWorkspaceCatalog(session.sessionToken)
-      .then(result => {
+    Promise.all([
+      fetchWorkspaceCatalog(session.sessionToken),
+      fetchWorkspaceNotifications(session.sessionToken),
+    ])
+      .then(([catalogResult, notificationsResult]) => {
         if (isCancelled) {
           return;
         }
 
-        if (!result.ok) {
+        if (!catalogResult.ok) {
           setWorkspace(null);
 
-          if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+          if (catalogResult.error.code === 'WORKSPACE_UNAUTHORIZED') {
             clearAuthSession(window.sessionStorage);
             router.replace('/login');
             return;
           }
 
-          if (result.error.code === 'WORKSPACE_FORBIDDEN') {
+          if (catalogResult.error.code === 'WORKSPACE_FORBIDDEN') {
             router.replace('/auth/pending');
             return;
           }
 
-          setWorkspaceError(result.error.message);
+          setWorkspaceError(catalogResult.error.message);
           return;
         }
 
-        setWorkspace(result.data);
-        setFavoriteIds(result.data.favoriteAppIds);
-        setRecentIds(result.data.recentAppIds);
+        setWorkspace(catalogResult.data);
+        setFavoriteIds(catalogResult.data.favoriteAppIds);
+        setRecentIds(catalogResult.data.recentAppIds);
         setActiveGroupId(
           resolveActiveGroupId(
-            result.data.defaultActiveGroupId,
-            result.data.memberGroupIds,
-            result.data.defaultActiveGroupId
+            catalogResult.data.defaultActiveGroupId,
+            catalogResult.data.memberGroupIds,
+            catalogResult.data.defaultActiveGroupId
           )
         );
+
+        if (!notificationsResult.ok) {
+          if (notificationsResult.error.code === 'WORKSPACE_UNAUTHORIZED') {
+            clearAuthSession(window.sessionStorage);
+            router.replace('/login');
+            return;
+          }
+
+          setNotice({
+            tone: 'error',
+            message: notificationsResult.error.message,
+          });
+          setNotifications([]);
+          return;
+        }
+
+        setNotifications(notificationsResult.data.items);
       })
       .catch(() => {
         if (isCancelled) {
@@ -330,11 +456,13 @@ export default function AppsPage() {
         }
 
         setWorkspace(null);
+        setNotifications([]);
         setWorkspaceError(appsCopy.workspaceLoadFailed);
       })
       .finally(() => {
         if (!isCancelled) {
           setIsWorkspaceLoading(false);
+          setIsNotificationsLoading(false);
         }
       });
 
@@ -498,6 +626,37 @@ export default function AppsPage() {
     router.push(result.data.launchUrl);
   }
 
+  async function handleMarkNotificationRead(notificationId: string) {
+    setMarkingNotificationId(notificationId);
+
+    const result = await markWorkspaceNotificationRead(
+      currentSession.sessionToken,
+      notificationId
+    );
+
+    setMarkingNotificationId(null);
+
+    if (!result.ok) {
+      if (result.error.code === 'WORKSPACE_UNAUTHORIZED') {
+        clearAuthSession(window.sessionStorage);
+        router.replace('/login');
+        return;
+      }
+
+      setNotice({
+        tone: 'error',
+        message: result.error.message,
+      });
+      return;
+    }
+
+    setNotifications((currentNotifications) =>
+      currentNotifications.map((notification) =>
+        notification.id === notificationId ? result.data : notification
+      )
+    );
+  }
+
   return (
     <div className="workspace">
       <MainSectionNav showAdminPreview={hasAdminPreview} showSecurity />
@@ -567,6 +726,17 @@ export default function AppsPage() {
       ) : null}
 
       {notice ? <div className={`notice ${notice.tone}`}>{notice.message}</div> : null}
+
+      <ReviewInbox
+        copy={appsCopy}
+        items={notifications}
+        isLoading={isNotificationsLoading}
+        locale={locale}
+        markingId={markingNotificationId}
+        onMarkRead={(notificationId) => {
+          void handleMarkNotificationRead(notificationId);
+        }}
+      />
 
       <div className="quota-grid">
         {quotaUsages.map(usage => (

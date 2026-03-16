@@ -34,6 +34,8 @@ const BACKUP_TABLES = [
   'run_timeline_events',
   'workspace_uploaded_files',
   'workspace_artifacts',
+  'workspace_comments',
+  'workspace_notifications',
   'knowledge_sources',
   'knowledge_source_chunks',
   'workspace_app_launches',

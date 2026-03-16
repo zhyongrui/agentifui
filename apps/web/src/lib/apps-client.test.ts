@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createWorkspaceComment,
   downloadWorkspaceArtifact,
   fetchWorkspaceConversation,
   fetchWorkspaceConversationPresence,
   fetchWorkspaceConversationList,
+  fetchWorkspaceNotifications,
   fetchWorkspacePendingActions,
   fetchWorkspaceSharedConversationPresence,
   respondToWorkspacePendingAction,
@@ -13,6 +15,7 @@ import {
   fetchWorkspaceCatalog,
   fetchWorkspaceRun,
   launchWorkspaceApp,
+  markWorkspaceNotificationRead,
   updateWorkspaceConversationPresence,
   updateWorkspaceSharedConversationPresence,
   updateWorkspaceConversation,
@@ -317,6 +320,170 @@ describe('apps client', () => {
         run: {
           traceId: 'trace-123',
         },
+      },
+    });
+  });
+
+  it('creates workspace comments through the gateway proxy and preserves mentions', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            targetType: 'message',
+            targetId: 'msg-123',
+            comment: {
+              id: 'comment-123',
+              conversationId: 'conv-123',
+              targetType: 'message',
+              targetId: 'msg-123',
+              content: 'Please review this. @reviewer@example.net',
+              mentions: [
+                {
+                  userId: 'usr-reviewer',
+                  email: 'reviewer@example.net',
+                  displayName: 'Review Partner',
+                },
+              ],
+              authorUserId: 'usr-author',
+              authorDisplayName: 'Author',
+              createdAt: '2026-03-16T16:00:00.000Z',
+              updatedAt: '2026-03-16T16:00:00.000Z',
+            },
+            thread: [],
+          },
+        }),
+      })
+    );
+
+    const result = await createWorkspaceComment('session-123', 'conv-123', {
+      targetType: 'message',
+      targetId: 'msg-123',
+      content: 'Please review this. @reviewer@example.net',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/conversations/conv-123/comments', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        targetType: 'message',
+        targetId: 'msg-123',
+        content: 'Please review this. @reviewer@example.net',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        comment: {
+          mentions: [
+            {
+              email: 'reviewer@example.net',
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  it('loads workspace notifications through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            unreadCount: 1,
+            items: [
+              {
+                id: 'notification-123',
+                type: 'comment_mention',
+                status: 'unread',
+                actorUserId: 'usr-author',
+                actorDisplayName: 'Author',
+                conversationId: 'conv-123',
+                conversationTitle: 'Policy Watch',
+                commentId: 'comment-123',
+                targetType: 'message',
+                targetId: 'msg-123',
+                preview: 'Please review this.',
+                createdAt: '2026-03-16T16:00:00.000Z',
+                readAt: null,
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceNotifications('session-123');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/notifications', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        unreadCount: 1,
+        items: [
+          {
+            id: 'notification-123',
+            status: 'unread',
+          },
+        ],
+      },
+    });
+  });
+
+  it('marks workspace notifications as read through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'notification-123',
+            type: 'comment_mention',
+            status: 'read',
+            actorUserId: 'usr-author',
+            actorDisplayName: 'Author',
+            conversationId: 'conv-123',
+            conversationTitle: 'Policy Watch',
+            commentId: 'comment-123',
+            targetType: 'message',
+            targetId: 'msg-123',
+            preview: 'Please review this.',
+            createdAt: '2026-03-16T16:00:00.000Z',
+            readAt: '2026-03-16T16:05:00.000Z',
+          },
+        }),
+      })
+    );
+
+    const result = await markWorkspaceNotificationRead('session-123', 'notification-123');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/notifications/notification-123/read', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      body: undefined,
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        id: 'notification-123',
+        status: 'read',
       },
     });
   });

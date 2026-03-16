@@ -298,16 +298,43 @@ export type WorkspaceConversationMessageFeedback = {
 
 export type WorkspaceCommentTargetType = "message" | "run" | "artifact";
 
+export type WorkspaceCommentMention = {
+  userId: string;
+  email: string;
+  displayName: string | null;
+};
+
 export type WorkspaceComment = {
   id: string;
   conversationId: string;
   targetType: WorkspaceCommentTargetType;
   targetId: string;
   content: string;
+  mentions?: WorkspaceCommentMention[];
   authorUserId: string;
   authorDisplayName: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WorkspaceNotificationType = "comment_mention";
+
+export type WorkspaceNotificationStatus = "unread" | "read";
+
+export type WorkspaceNotification = {
+  id: string;
+  type: WorkspaceNotificationType;
+  status: WorkspaceNotificationStatus;
+  actorUserId: string;
+  actorDisplayName: string | null;
+  conversationId: string;
+  conversationTitle: string;
+  commentId: string;
+  targetType: WorkspaceCommentTargetType;
+  targetId: string;
+  preview: string;
+  createdAt: string;
+  readAt: string | null;
 };
 
 export type WorkspaceConversationMessageRole = "user" | "assistant" | "tool";
@@ -585,6 +612,19 @@ export type WorkspaceCommentCreateResponse = {
     comment: WorkspaceComment;
     thread: WorkspaceComment[];
   };
+};
+
+export type WorkspaceNotificationsResponse = {
+  ok: true;
+  data: {
+    items: WorkspaceNotification[];
+    unreadCount: number;
+  };
+};
+
+export type WorkspaceNotificationReadResponse = {
+  ok: true;
+  data: WorkspaceNotification;
 };
 
 export type WorkspaceConversationListItem = {

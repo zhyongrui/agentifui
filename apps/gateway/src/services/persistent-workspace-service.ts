@@ -10,6 +10,7 @@ import {
   type WorkspaceArtifactSummary,
   type WorkspaceCitation,
   type WorkspaceComment,
+  type WorkspaceCommentMention,
   type WorkspaceConversationAttachment,
   type WorkspaceConversation,
   type WorkspaceConversationMessageFeedback,
@@ -20,6 +21,7 @@ import {
   type WorkspaceConversationStatus,
   type WorkspaceGroup,
   type WorkspaceMessageFeedbackRating,
+  type WorkspaceNotification,
   type WorkspacePreferences,
   type WorkspacePreferencesUpdateRequest,
   type WorkspaceRun,
@@ -97,6 +99,10 @@ import {
   calculateCompletionQuotaCost,
   type WorkspaceQuotaLimitRecord,
 } from "./workspace-quota.js";
+import {
+  buildWorkspaceCommentPreview,
+  normalizeWorkspaceCommentContent,
+} from "./workspace-comments.js";
 
 type GroupRow = {
   description: string | null;
@@ -233,10 +239,27 @@ type WorkspaceCommentRow = {
   conversation_id: string;
   created_at: Date | string;
   id: string;
+  mentions: WorkspaceCommentMention[] | string;
   target_id: string;
   target_type: WorkspaceComment["targetType"];
   updated_at: Date | string;
   user_id: string;
+};
+
+type WorkspaceNotificationRow = {
+  actor_display_name: string | null;
+  actor_user_id: string | null;
+  comment_id: string;
+  conversation_id: string;
+  conversation_title: string;
+  created_at: Date | string;
+  id: string;
+  preview: string;
+  read_at: Date | string | null;
+  status: WorkspaceNotification["status"];
+  target_id: string;
+  target_type: WorkspaceComment["targetType"];
+  type: WorkspaceNotification["type"];
 };
 
 type WorkspaceRunTimelineEventRow = {
@@ -1338,12 +1361,45 @@ function toWorkspaceArtifactFromRow(row: WorkspaceArtifactRow): WorkspaceArtifac
 }
 
 function toWorkspaceComment(row: WorkspaceCommentRow): WorkspaceComment {
+  const mentions =
+    Array.isArray(row.mentions)
+      ? row.mentions
+      : typeof row.mentions === "string"
+        ? (() => {
+            try {
+              const parsed = JSON.parse(row.mentions) as unknown;
+              return Array.isArray(parsed)
+                ? (parsed.filter(
+                    (mention): mention is WorkspaceCommentMention =>
+                      (() => {
+                        if (typeof mention !== "object" || mention === null) {
+                          return false;
+                        }
+
+                        const candidate = mention as Record<string, unknown>;
+
+                        return (
+                          typeof candidate.userId === "string" &&
+                          typeof candidate.email === "string" &&
+                          (candidate.displayName === null ||
+                            typeof candidate.displayName === "string")
+                        );
+                      })(),
+                  ) ?? [])
+                : [];
+            } catch {
+              return [];
+            }
+          })()
+        : [];
+
   return {
     id: row.id,
     conversationId: row.conversation_id,
     targetType: row.target_type,
     targetId: row.target_id,
     content: row.content,
+    mentions,
     authorUserId: row.user_id,
     authorDisplayName: row.author_display_name,
     createdAt: toIso(row.created_at)!,
@@ -1351,8 +1407,22 @@ function toWorkspaceComment(row: WorkspaceCommentRow): WorkspaceComment {
   };
 }
 
-function normalizeCommentContent(content: string) {
-  return content.trim().replace(/\s+\n/g, "\n").slice(0, 2000);
+function toWorkspaceNotification(row: WorkspaceNotificationRow): WorkspaceNotification {
+  return {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    actorUserId: row.actor_user_id ?? "",
+    actorDisplayName: row.actor_display_name,
+    conversationId: row.conversation_id,
+    conversationTitle: row.conversation_title,
+    commentId: row.comment_id,
+    targetType: row.target_type,
+    targetId: row.target_id,
+    preview: row.preview,
+    createdAt: toIso(row.created_at)!,
+    readAt: toIso(row.read_at),
+  };
 }
 
 function attachConversationComments(
@@ -2352,6 +2422,7 @@ async function readCommentsForConversation(
       target_type,
       target_id,
       content,
+      mentions,
       user_id,
       author_display_name,
       created_at,
@@ -2379,6 +2450,7 @@ async function readCommentThreadForTarget(
       target_type,
       target_id,
       content,
+      mentions,
       user_id,
       author_display_name,
       created_at,
@@ -2391,6 +2463,134 @@ async function readCommentThreadForTarget(
   `;
 
   return rows.map(toWorkspaceComment);
+}
+
+async function canUserAccessConversationForCollaboration(
+  database: DatabaseClient,
+  user: AuthUser,
+  conversationId: string,
+): Promise<boolean> {
+  const [conversationRow] = await database<{ user_id: string }[]>`
+    select user_id
+    from conversations
+    where id = ${conversationId}
+      and status <> 'deleted'
+    limit 1
+  `;
+
+  if (!conversationRow) {
+    return false;
+  }
+
+  if (conversationRow.user_id === user.id) {
+    return true;
+  }
+
+  const memberGroupIds = await listMemberGroupIds(database, user.id);
+  const effectiveGroupIds =
+    memberGroupIds.length > 0 ? memberGroupIds : resolveDefaultMemberGroupIds(user.email);
+
+  if (effectiveGroupIds.length === 0) {
+    return false;
+  }
+
+  const rows = await database<{ shared_group_id: string }[]>`
+    select shared_group_id
+    from workspace_conversation_shares
+    where conversation_id = ${conversationId}
+      and status = 'active'
+  `;
+
+  return rows.some((row) => effectiveGroupIds.includes(row.shared_group_id));
+}
+
+async function listNotificationsForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+): Promise<{
+  items: WorkspaceNotification[];
+  unreadCount: number;
+}> {
+  const rows = await database<WorkspaceNotificationRow[]>`
+    select
+      n.id,
+      n.type,
+      n.status,
+      n.actor_user_id,
+      n.actor_display_name,
+      n.conversation_id,
+      c.title as conversation_title,
+      n.comment_id,
+      n.target_type,
+      n.target_id,
+      n.preview,
+      n.created_at,
+      n.read_at
+    from workspace_notifications n
+    inner join conversations c on c.id = n.conversation_id
+    where n.tenant_id = ${user.tenantId}
+      and n.user_id = ${user.id}
+    order by n.created_at desc
+  `;
+
+  const items = rows.map(toWorkspaceNotification);
+
+  return {
+    items,
+    unreadCount: items.filter((item) => item.status === "unread").length,
+  };
+}
+
+async function markNotificationReadForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  notificationId: string,
+): Promise<WorkspaceNotification | null> {
+  const rows = await database<WorkspaceNotificationRow[]>`
+    with updated as (
+      update workspace_notifications
+      set
+        status = 'read',
+        read_at = coalesce(read_at, now())
+      where tenant_id = ${user.tenantId}
+        and user_id = ${user.id}
+        and id = ${notificationId}
+      returning
+        id,
+        type,
+        status,
+        actor_user_id,
+        actor_display_name,
+        conversation_id,
+        comment_id,
+        target_type,
+        target_id,
+        preview,
+        created_at,
+        read_at
+    )
+    select
+      u.id,
+      u.type,
+      u.status,
+      u.actor_user_id,
+      u.actor_display_name,
+      u.conversation_id,
+      c.title as conversation_title,
+      u.comment_id,
+      u.target_type,
+      u.target_id,
+      u.preview,
+      u.created_at,
+      u.read_at
+    from updated u
+    inner join conversations c on c.id = u.conversation_id
+    limit 1
+  `;
+
+  const row = rows[0];
+
+  return row ? toWorkspaceNotification(row) : null;
 }
 
 async function readConversationRunsForUser(
@@ -2770,8 +2970,9 @@ async function createCommentForUser(
     };
   }
 
-  const content = normalizeCommentContent(input.request.content);
+  const content = normalizeWorkspaceCommentContent(input.request.content);
   const targetId = input.request.targetId.trim();
+  const mentions = input.mentions ?? [];
 
   if (!content || targetId.length === 0) {
     return {
@@ -2837,32 +3038,79 @@ async function createCommentForUser(
   const commentId = `comment_${randomUUID()}`;
   const createdAt = new Date().toISOString();
 
-  await database`
-    insert into workspace_comments (
-      id,
-      tenant_id,
-      user_id,
-      conversation_id,
-      target_type,
-      target_id,
-      content,
-      author_display_name,
-      created_at,
-      updated_at
-    )
-    values (
-      ${commentId},
-      ${user.tenantId},
-      ${user.id},
-      ${input.conversationId},
-      ${input.request.targetType},
-      ${targetId},
-      ${content},
-      ${user.displayName ?? null},
-      ${createdAt}::timestamptz,
-      ${createdAt}::timestamptz
-    )
-  `;
+  await database.begin(async (transaction) => {
+    const sql = transaction as unknown as DatabaseClient;
+
+    await sql`
+      insert into workspace_comments (
+        id,
+        tenant_id,
+        user_id,
+        conversation_id,
+        target_type,
+        target_id,
+        content,
+        mentions,
+        author_display_name,
+        created_at,
+        updated_at
+      )
+      values (
+        ${commentId},
+        ${user.tenantId},
+        ${user.id},
+        ${input.conversationId},
+        ${input.request.targetType},
+        ${targetId},
+        ${content},
+        ${mentions}::jsonb,
+        ${user.displayName ?? null},
+        ${createdAt}::timestamptz,
+        ${createdAt}::timestamptz
+      )
+    `;
+
+    for (const mention of mentions) {
+      if (mention.userId === user.id) {
+        continue;
+      }
+
+      await sql`
+        insert into workspace_notifications (
+          id,
+          tenant_id,
+          user_id,
+          actor_user_id,
+          type,
+          status,
+          conversation_id,
+          comment_id,
+          target_type,
+          target_id,
+          actor_display_name,
+          preview,
+          created_at,
+          read_at
+        )
+        values (
+          ${`notification_${randomUUID()}`},
+          ${user.tenantId},
+          ${mention.userId},
+          ${user.id},
+          'comment_mention',
+          'unread',
+          ${input.conversationId},
+          ${commentId},
+          ${input.request.targetType},
+          ${targetId},
+          ${user.displayName ?? null},
+          ${buildWorkspaceCommentPreview(content)},
+          ${createdAt}::timestamptz,
+          null
+        )
+      `;
+    }
+  });
 
   const thread = await readCommentThreadForTarget(database, {
     conversationId: input.conversationId,
@@ -4564,6 +4812,38 @@ export function createPersistentWorkspaceService(
       input,
     ): Promise<WorkspaceCommentCreateResult> {
       return createCommentForUser(database, user, input);
+    },
+    async canUserAccessConversationForCollaboration(user, conversationId) {
+      return canUserAccessConversationForCollaboration(database, user, conversationId);
+    },
+    async listNotificationsForUser(user) {
+      const data = await listNotificationsForUser(database, user);
+
+      return {
+        ok: true,
+        data,
+      };
+    },
+    async markNotificationReadForUser(user, notificationId) {
+      const notification = await markNotificationReadForUser(
+        database,
+        user,
+        notificationId,
+      );
+
+      if (!notification) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "WORKSPACE_NOT_FOUND",
+          message: "The target workspace notification could not be found.",
+        };
+      }
+
+      return {
+        ok: true,
+        data: notification,
+      };
     },
     async getArtifactForUser(user, artifactId) {
       const artifact = await readArtifactForUser(database, user, artifactId);

@@ -110,6 +110,20 @@ type Messages = {
     quotaExceededSuffix: string;
     quotaDegradedDescription: string;
     workspaceLoadFailed: string;
+    reviewInboxTitle: string;
+    reviewInboxDescription: string;
+    reviewInboxEmpty: string;
+    reviewInboxLoading: string;
+    reviewInboxUnread: string;
+    reviewInboxRead: string;
+    reviewInboxOpen: string;
+    reviewInboxMarkRead: string;
+    reviewInboxMarkingRead: string;
+    reviewInboxMentionedBy: string;
+    reviewInboxCommentTargetMessage: string;
+    reviewInboxCommentTargetRun: string;
+    reviewInboxCommentTargetArtifact: string;
+    commentMentionHint: string;
   };
   adminApps: {
     loading: string;
@@ -328,6 +342,20 @@ const messages: Record<AppLocale, Messages> = {
       quotaExceededSuffix: '，因此被拦截。',
       quotaDegradedDescription: '当前处于配额服务降级模式，目录可查看，但新启动会被暂停。',
       workspaceLoadFailed: '应用工作台加载失败，请稍后重试。',
+      reviewInboxTitle: '协作提醒',
+      reviewInboxDescription: '这里会显示评论中通过 @邮箱 提及你的协作提醒。',
+      reviewInboxEmpty: '目前没有新的协作提醒。',
+      reviewInboxLoading: '正在同步协作提醒...',
+      reviewInboxUnread: '未读',
+      reviewInboxRead: '已读',
+      reviewInboxOpen: '打开对话',
+      reviewInboxMarkRead: '标记已读',
+      reviewInboxMarkingRead: '处理中...',
+      reviewInboxMentionedBy: '提及人',
+      reviewInboxCommentTargetMessage: '消息评论',
+      reviewInboxCommentTargetRun: '运行评论',
+      reviewInboxCommentTargetArtifact: '产物评论',
+      commentMentionHint: '可用 @邮箱 提及已共享访问该会话的协作者。',
     },
     adminApps: {
       loading: '正在加载管理端应用...',
@@ -545,6 +573,22 @@ const messages: Record<AppLocale, Messages> = {
       quotaDegradedDescription:
         'The quota service is degraded. The catalog remains readable, but new launches stay paused.',
       workspaceLoadFailed: 'Apps workspace failed to load. Please retry later.',
+      reviewInboxTitle: 'Review inbox',
+      reviewInboxDescription:
+        'Comment mentions addressed to you appear here. Use @email syntax in workspace comments.',
+      reviewInboxEmpty: 'No collaboration reminders yet.',
+      reviewInboxLoading: 'Syncing collaboration notifications...',
+      reviewInboxUnread: 'Unread',
+      reviewInboxRead: 'Read',
+      reviewInboxOpen: 'Open conversation',
+      reviewInboxMarkRead: 'Mark as read',
+      reviewInboxMarkingRead: 'Updating...',
+      reviewInboxMentionedBy: 'Mentioned by',
+      reviewInboxCommentTargetMessage: 'Message comment',
+      reviewInboxCommentTargetRun: 'Run comment',
+      reviewInboxCommentTargetArtifact: 'Artifact comment',
+      commentMentionHint:
+        'Use @email to mention collaborators who already have access to the shared conversation.',
     },
     adminApps: {
       loading: 'Loading admin apps...',

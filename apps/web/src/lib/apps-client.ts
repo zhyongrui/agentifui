@@ -12,6 +12,8 @@ import type {
   WorkspaceCommentCreateResponse,
   WorkspaceConversationMessageFeedbackRequest,
   WorkspaceConversationMessageFeedbackResponse,
+  WorkspaceNotificationReadResponse,
+  WorkspaceNotificationsResponse,
   WorkspaceConversationPresenceResponse,
   WorkspaceConversationPresenceUpdateRequest,
   WorkspaceConversationResponse,
@@ -194,6 +196,28 @@ export async function createWorkspaceComment(
       method: 'POST',
       sessionToken,
       body: input,
+    }
+  );
+}
+
+export async function fetchWorkspaceNotifications(
+  sessionToken: string
+): Promise<WorkspaceNotificationsResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceNotificationsResponse>('/workspace/notifications', {
+    method: 'GET',
+    sessionToken,
+  });
+}
+
+export async function markWorkspaceNotificationRead(
+  sessionToken: string,
+  notificationId: string
+): Promise<WorkspaceNotificationReadResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceNotificationReadResponse>(
+    `/workspace/notifications/${notificationId}/read`,
+    {
+      method: 'PUT',
+      sessionToken,
     }
   );
 }

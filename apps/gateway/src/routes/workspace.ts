@@ -14,6 +14,7 @@ import type {
   WorkspaceConversationListStatusFilter,
   WorkspaceCommentCreateRequest,
   WorkspaceCommentCreateResponse,
+  WorkspaceCommentMention,
   WorkspaceConversationMessageFeedbackRequest,
   WorkspaceConversationPresenceResponse,
   WorkspaceConversationPresenceUpdateRequest,
@@ -34,6 +35,8 @@ import type {
   WorkspaceErrorResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
+  WorkspaceNotificationReadResponse,
+  WorkspaceNotificationsResponse,
   WorkspaceSharedConversationResponse,
   WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
@@ -43,6 +46,10 @@ import type { FastifyInstance } from 'fastify';
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 import type { WorkspaceRuntimeService } from '../services/workspace-runtime.js';
+import {
+  dedupeWorkspaceCommentMentions,
+  extractWorkspaceCommentMentionEmails,
+} from '../services/workspace-comments.js';
 import { readWorkspaceToolApprovalMetadata } from '../services/workspace-tool-approval.js';
 import type { WorkspaceService } from '../services/workspace-service.js';
 
@@ -99,6 +106,52 @@ function isWorkspaceCommentCreateRequest(
     typeof request.targetId === 'string' &&
     typeof request.content === 'string'
   );
+}
+
+async function resolveWorkspaceCommentMentions(input: {
+  authService: AuthService;
+  workspaceService: WorkspaceService;
+  actorUser: AuthUser;
+  conversationId: string;
+  content: string;
+}): Promise<WorkspaceCommentMention[]> {
+  const mentionEmails = extractWorkspaceCommentMentionEmails(input.content);
+
+  if (mentionEmails.length === 0) {
+    return [];
+  }
+
+  const mentions: WorkspaceCommentMention[] = [];
+
+  for (const email of mentionEmails) {
+    const mentionedUser = await input.authService.getUserByEmail(email);
+
+    if (
+      !mentionedUser ||
+      mentionedUser.tenantId !== input.actorUser.tenantId ||
+      mentionedUser.id === input.actorUser.id
+    ) {
+      continue;
+    }
+
+    const hasAccess =
+      await input.workspaceService.canUserAccessConversationForCollaboration(
+        mentionedUser,
+        input.conversationId
+      );
+
+    if (!hasAccess) {
+      continue;
+    }
+
+    mentions.push({
+      userId: mentionedUser.id,
+      email: mentionedUser.email,
+      displayName: mentionedUser.displayName ?? null,
+    });
+  }
+
+  return dedupeWorkspaceCommentMentions(mentions);
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -1152,9 +1205,18 @@ export async function registerWorkspaceRoutes(
       );
     }
 
+    const mentions = await resolveWorkspaceCommentMentions({
+      authService,
+      workspaceService,
+      actorUser: access.user,
+      conversationId,
+      content: body.content,
+    });
+
     const result = await workspaceService.createCommentForUser(access.user, {
       conversationId,
       request: body,
+      mentions,
     });
 
     if (!result.ok) {
@@ -1179,8 +1241,68 @@ export async function registerWorkspaceRoutes(
         targetType: result.data.targetType,
         targetId: result.data.targetId,
         threadLength: result.data.thread.length,
+        mentionCount: result.data.comment.mentions?.length ?? 0,
+        mentionedUserIds:
+          result.data.comment.mentions?.map((mention) => mention.userId) ?? [],
       },
     });
+
+    return response;
+  });
+
+  app.get('/workspace/notifications', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const result = await workspaceService.listNotificationsForUser(access.user);
+
+    const response: WorkspaceNotificationsResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.put('/workspace/notifications/:notificationId/read', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      notificationId?: string;
+    };
+    const notificationId = params.notificationId?.trim();
+
+    if (!notificationId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace notification updates require a notification id.'
+      );
+    }
+
+    const result = await workspaceService.markNotificationReadForUser(
+      access.user,
+      notificationId
+    );
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceNotificationReadResponse = {
+      ok: true,
+      data: result.data,
+    };
 
     return response;
   });

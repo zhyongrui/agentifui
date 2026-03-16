@@ -774,6 +774,14 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.workspace-comment-mentions,
+.workspace-notification-actions,
+.workspace-notification-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .workspace-comment-meta {
   display: flex;
   align-items: center;
@@ -781,6 +789,37 @@ button:disabled {
   gap: 12px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.workspace-comment-helper {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.workspace-notification-list {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-notification-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(247, 249, 252, 0.94);
+}
+
+.workspace-notification-card h3,
+.workspace-notification-card p {
+  margin: 0;
+}
+
+.workspace-notification-meta {
+  color: var(--muted);
+  font-size: 13px;
+  align-items: center;
 }
 
 .run-history-grid {

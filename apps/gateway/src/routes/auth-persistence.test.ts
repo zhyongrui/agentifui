@@ -14,6 +14,8 @@ import type {
   WorkspaceCatalogResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceConversationListResponse,
+  WorkspaceNotificationReadResponse,
+  WorkspaceNotificationsResponse,
   WorkspacePendingActionRespondResponse,
   WorkspacePendingActionsResponse,
   WorkspaceConversationResponse,
@@ -2022,6 +2024,18 @@ describe.sequential('persistent auth runtime', () => {
 
         expect(register.statusCode).toBe(201);
 
+        const reviewerRegister = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'reviewer@example.net',
+            password: 'Secure123',
+            displayName: 'Review Partner',
+          },
+        });
+
+        expect(reviewerRegister.statusCode).toBe(201);
+
         const login = await app.inject({
           method: 'POST',
           url: '/auth/login',
@@ -2036,6 +2050,19 @@ describe.sequential('persistent auth runtime', () => {
         const loginPayload = login.json().data as {
           sessionToken: string;
         };
+
+        const reviewerLogin = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'reviewer@example.net',
+            password: 'Secure123',
+          },
+        });
+
+        expect(reviewerLogin.statusCode).toBe(200);
+
+        const reviewerSessionToken = reviewerLogin.json().data.sessionToken as string;
 
         const launch = await app.inject({
           method: 'POST',
@@ -2129,11 +2156,24 @@ describe.sequential('persistent auth runtime', () => {
           throw new Error('expected artifact id');
         }
 
+        const share = await app.inject({
+          method: 'POST',
+          url: `/workspace/conversations/${conversationId}/shares`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            groupId: 'grp_research',
+          },
+        });
+
+        expect(share.statusCode).toBe(200);
+
         for (const payload of [
           {
             targetType: 'message',
             targetId: assistantMessage.id,
-            content: 'Message review note.',
+            content: 'Message review note. @reviewer@example.net please confirm.',
           },
           {
             targetType: 'run',
@@ -2182,7 +2222,12 @@ describe.sequential('persistent auth runtime', () => {
                 id: assistantMessage.id,
                 comments: [
                   expect.objectContaining({
-                    content: 'Message review note.',
+                    content: 'Message review note. @reviewer@example.net please confirm.',
+                    mentions: [
+                      expect.objectContaining({
+                        email: 'reviewer@example.net',
+                      }),
+                    ],
                   }),
                 ],
               }),
@@ -2243,6 +2288,7 @@ describe.sequential('persistent auth runtime', () => {
                   conversationId,
                   targetType: 'message',
                   targetId: assistantMessage.id,
+                  mentionCount: 1,
                 }),
               }),
               expect.objectContaining({
@@ -2265,6 +2311,56 @@ describe.sequential('persistent auth runtime', () => {
               }),
             ])
           );
+
+          const notifications = await restartedApp.inject({
+            method: 'GET',
+            url: '/workspace/notifications',
+            headers: {
+              authorization: `Bearer ${reviewerSessionToken}`,
+            },
+          });
+
+          expect(notifications.statusCode).toBe(200);
+          expect(notifications.json()).toMatchObject({
+            ok: true,
+            data: {
+              unreadCount: 1,
+              items: [
+                expect.objectContaining({
+                  type: 'comment_mention',
+                  status: 'unread',
+                  conversationId,
+                  targetType: 'message',
+                  targetId: assistantMessage.id,
+                }),
+              ],
+            },
+          } satisfies WorkspaceNotificationsResponse);
+
+          const notificationId = (
+            notifications.json() as WorkspaceNotificationsResponse
+          ).data.items[0]?.id;
+
+          if (!notificationId) {
+            throw new Error('expected notification id');
+          }
+
+          const markRead = await restartedApp.inject({
+            method: 'PUT',
+            url: `/workspace/notifications/${notificationId}/read`,
+            headers: {
+              authorization: `Bearer ${reviewerSessionToken}`,
+            },
+          });
+
+          expect(markRead.statusCode).toBe(200);
+          expect(markRead.json()).toMatchObject({
+            ok: true,
+            data: expect.objectContaining({
+              id: notificationId,
+              status: 'read',
+            }),
+          } satisfies WorkspaceNotificationReadResponse);
         } finally {
           if (!restartedAppClosed) {
             await restartedApp.close();
