@@ -13,6 +13,8 @@ import type {
   WorkspaceConversationListResponse,
   WorkspaceConversationListStatusFilter,
   WorkspaceConversationMessageFeedbackRequest,
+  WorkspaceConversationPresenceResponse,
+  WorkspaceConversationPresenceUpdateRequest,
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
   WorkspaceConversationStatus,
@@ -116,6 +118,26 @@ function isPendingActionRespondRequest(
 
 function isMessageFeedbackRating(value: unknown): value is 'positive' | 'negative' | null {
   return value === null || value === 'positive' || value === 'negative';
+}
+
+function isConversationPresenceUpdateRequest(
+  value: unknown
+): value is WorkspaceConversationPresenceUpdateRequest {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const request = value as Record<string, unknown>;
+
+  return (
+    typeof request.sessionId === 'string' &&
+    request.sessionId.trim().length > 0 &&
+    (request.activeRunId === undefined || isNullableString(request.activeRunId)) &&
+    (request.surface === undefined || request.surface === 'conversation') &&
+    (request.state === undefined ||
+      request.state === 'active' ||
+      request.state === 'idle')
+  );
 }
 
 function isConversationStatus(value: unknown): value is WorkspaceConversationStatus {
@@ -652,6 +674,89 @@ export async function registerWorkspaceRoutes(
     }
 
     const response: WorkspaceConversationResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.get('/workspace/conversations/:conversationId/presence', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+
+    if (!conversationId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace presence lookup requires a conversation id.'
+      );
+    }
+
+    const result = await workspaceService.getConversationPresenceForUser(
+      access.user,
+      conversationId
+    );
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationPresenceResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.put('/workspace/conversations/:conversationId/presence', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+    const body = request.body;
+
+    if (!conversationId || !isConversationPresenceUpdateRequest(body)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace presence updates require a conversation id plus a valid session id and optional state changes.'
+      );
+    }
+
+    const result = await workspaceService.updateConversationPresenceForUser(access.user, {
+      conversationId,
+      sessionId: body.sessionId.trim(),
+      activeRunId:
+        body.activeRunId === undefined ? undefined : body.activeRunId?.trim() || null,
+      state: body.state,
+      surface: body.surface,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationPresenceResponse = {
       ok: true,
       data: result.data,
     };

@@ -4,6 +4,7 @@ import type {
   WorkspaceCatalogResponse,
   WorkspaceConversationListResponse,
   WorkspaceConversationMessageFeedbackResponse,
+  WorkspaceConversationPresenceResponse,
   WorkspaceConversationResponse,
   WorkspacePendingActionRespondResponse,
   WorkspacePendingActionsResponse,
@@ -613,6 +614,133 @@ describe("workspace routes", () => {
         usage: {
           totalTokens: 0,
         },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("tracks conversation presence sessions for multiple viewers", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "reviewer@iflabx.com",
+      password: "Secure123",
+      displayName: "Reviewer",
+    });
+
+    const login = authService.login({
+      email: "reviewer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+      const runId = launchBody.data.runId;
+
+      if (!conversationId || !runId) {
+        throw new Error("expected launch payload to include conversation and run ids");
+      }
+
+      const firstPresence = await app.inject({
+        method: "PUT",
+        url: `/workspace/conversations/${conversationId}/presence`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          sessionId: "presence-a",
+          state: "active",
+          activeRunId: runId,
+        },
+      });
+
+      expect(firstPresence.statusCode).toBe(200);
+      expect((firstPresence.json() as WorkspaceConversationPresenceResponse).data).toMatchObject({
+        conversationId,
+        ttlSeconds: 60,
+        viewers: [
+          expect.objectContaining({
+            sessionId: "presence-a",
+            displayName: "Reviewer",
+            state: "active",
+            activeRunId: runId,
+            isCurrentUser: true,
+          }),
+        ],
+      });
+
+      const secondPresence = await app.inject({
+        method: "PUT",
+        url: `/workspace/conversations/${conversationId}/presence`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          sessionId: "presence-b",
+          state: "idle",
+        },
+      });
+
+      expect(secondPresence.statusCode).toBe(200);
+      expect((secondPresence.json() as WorkspaceConversationPresenceResponse).data.viewers).toEqual([
+        expect.objectContaining({
+          sessionId: "presence-b",
+          state: "idle",
+          isCurrentUser: true,
+        }),
+        expect.objectContaining({
+          sessionId: "presence-a",
+          state: "active",
+          activeRunId: runId,
+          isCurrentUser: true,
+        }),
+      ]);
+
+      const listPresence = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/presence`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(listPresence.statusCode).toBe(200);
+      expect((listPresence.json() as WorkspaceConversationPresenceResponse).data).toMatchObject({
+        conversationId,
+        viewers: [
+          expect.objectContaining({
+            sessionId: "presence-b",
+            state: "idle",
+          }),
+          expect.objectContaining({
+            sessionId: "presence-a",
+            state: "active",
+            activeRunId: runId,
+          }),
+        ],
       });
     } finally {
       await app.close();

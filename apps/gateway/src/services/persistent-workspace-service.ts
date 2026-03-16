@@ -13,6 +13,7 @@ import {
   type WorkspaceConversation,
   type WorkspaceConversationMessageFeedback,
   type WorkspaceConversationListItem,
+  type WorkspaceConversationPresence,
   type WorkspaceConversationShare,
   type WorkspaceConversationMessage,
   type WorkspaceConversationStatus,
@@ -76,6 +77,11 @@ import {
   buildWorkspaceToolExecutionFailure,
   parseWorkspaceRunFailure,
 } from "./workspace-run-failure.js";
+import {
+  buildWorkspaceConversationPresence,
+  pruneWorkspacePresenceEntries,
+  upsertWorkspacePresenceEntry,
+} from "./workspace-presence.js";
 import { buildWorkspaceToolApprovalResolution } from "./workspace-tool-approval.js";
 import {
   applyWorkspaceHitlStepResponse,
@@ -3681,6 +3687,11 @@ export function createPersistentWorkspaceService(
     fileStorage?: WorkspaceFileStorage;
   } = {},
 ): WorkspaceService {
+  const presenceByConversationId = new Map<
+    string,
+    Array<Omit<WorkspaceConversationPresence["viewers"][number], "isCurrentUser">>
+  >();
+
   return {
     async getCatalogForUser(user) {
       const context = await resolveWorkspaceContext(database, user);
@@ -3940,6 +3951,71 @@ export function createPersistentWorkspaceService(
       return {
         ok: true,
         data: conversation,
+      };
+    },
+    async getConversationPresenceForUser(user, conversationId) {
+      const conversation = await readConversationForUser(
+        database,
+        user,
+        conversationId,
+      );
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "WORKSPACE_NOT_FOUND",
+          message: "The target workspace conversation could not be found.",
+        };
+      }
+
+      const nextEntries = pruneWorkspacePresenceEntries(
+        presenceByConversationId.get(conversationId) ?? [],
+      );
+      presenceByConversationId.set(conversationId, nextEntries);
+
+      return {
+        ok: true,
+        data: buildWorkspaceConversationPresence({
+          conversationId,
+          entries: nextEntries,
+          currentUserId: user.id,
+        }),
+      };
+    },
+    async updateConversationPresenceForUser(user, input) {
+      const conversation = await readConversationForUser(
+        database,
+        user,
+        input.conversationId,
+      );
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "WORKSPACE_NOT_FOUND",
+          message: "The target workspace conversation could not be found.",
+        };
+      }
+
+      const nextEntries = upsertWorkspacePresenceEntry({
+        activeRunId: input.activeRunId,
+        entries: presenceByConversationId.get(input.conversationId) ?? [],
+        sessionId: input.sessionId,
+        state: input.state,
+        surface: input.surface,
+        user,
+      });
+      presenceByConversationId.set(input.conversationId, nextEntries);
+
+      return {
+        ok: true,
+        data: buildWorkspaceConversationPresence({
+          conversationId: input.conversationId,
+          entries: nextEntries,
+          currentUserId: user.id,
+        }),
       };
     },
     async listConversationsForUser(

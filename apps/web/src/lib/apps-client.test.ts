@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   downloadWorkspaceArtifact,
   fetchWorkspaceConversation,
+  fetchWorkspaceConversationPresence,
   fetchWorkspaceConversationList,
   fetchWorkspacePendingActions,
   respondToWorkspacePendingAction,
@@ -11,6 +12,7 @@ import {
   fetchWorkspaceCatalog,
   fetchWorkspaceRun,
   launchWorkspaceApp,
+  updateWorkspaceConversationPresence,
   updateWorkspaceConversation,
   updateWorkspaceConversationMessageFeedback,
   updateWorkspacePreferences,
@@ -313,6 +315,119 @@ describe('apps client', () => {
         run: {
           traceId: 'trace-123',
         },
+      },
+    });
+  });
+
+  it('loads conversation presence through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            ttlSeconds: 60,
+            viewers: [
+              {
+                sessionId: 'presence-1',
+                userId: 'usr_1',
+                displayName: 'Reviewer',
+                joinedAt: '2026-03-16T15:00:00.000Z',
+                lastSeenAt: '2026-03-16T15:00:30.000Z',
+                expiresAt: '2026-03-16T15:01:30.000Z',
+                surface: 'conversation',
+                state: 'active',
+                activeRunId: 'run-123',
+                isCurrentUser: true,
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceConversationPresence('session-123', 'conv-123');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/conversations/conv-123/presence', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        conversationId: 'conv-123',
+        viewers: [
+          {
+            sessionId: 'presence-1',
+            state: 'active',
+            isCurrentUser: true,
+          },
+        ],
+      },
+    });
+  });
+
+  it('updates conversation presence through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            ttlSeconds: 60,
+            viewers: [
+              {
+                sessionId: 'presence-1',
+                userId: 'usr_1',
+                displayName: 'Reviewer',
+                joinedAt: '2026-03-16T15:00:00.000Z',
+                lastSeenAt: '2026-03-16T15:00:45.000Z',
+                expiresAt: '2026-03-16T15:01:45.000Z',
+                surface: 'conversation',
+                state: 'idle',
+                activeRunId: 'run-123',
+                isCurrentUser: true,
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await updateWorkspaceConversationPresence('session-123', 'conv-123', {
+      sessionId: 'presence-1',
+      state: 'idle',
+      activeRunId: 'run-123',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/conversations/conv-123/presence', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId: 'presence-1',
+        state: 'idle',
+        activeRunId: 'run-123',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        conversationId: 'conv-123',
+        viewers: [
+          {
+            sessionId: 'presence-1',
+            state: 'idle',
+          },
+        ],
       },
     });
   });

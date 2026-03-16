@@ -123,6 +123,8 @@ export type WorkspaceConversationFeedbackSummary = {
 };
 export type WorkspaceConversationShareStatus = "active" | "revoked";
 export type WorkspaceConversationShareAccess = "read_only";
+export type WorkspaceConversationPresenceSurface = "conversation";
+export type WorkspaceConversationPresenceState = "active" | "idle";
 
 export type WorkspaceRunType = "workflow" | "agent" | "generation";
 
@@ -631,6 +633,37 @@ export type WorkspaceConversationShareCreateRequest = {
 export type WorkspaceConversationShareResponse = {
   ok: true;
   data: WorkspaceConversationShare;
+};
+
+export type WorkspaceConversationPresenceEntry = {
+  sessionId: string;
+  userId: string;
+  displayName: string;
+  joinedAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  surface: WorkspaceConversationPresenceSurface;
+  state: WorkspaceConversationPresenceState;
+  activeRunId: string | null;
+  isCurrentUser: boolean;
+};
+
+export type WorkspaceConversationPresence = {
+  conversationId: string;
+  ttlSeconds: number;
+  viewers: WorkspaceConversationPresenceEntry[];
+};
+
+export type WorkspaceConversationPresenceUpdateRequest = {
+  sessionId: string;
+  surface?: WorkspaceConversationPresenceSurface;
+  state?: WorkspaceConversationPresenceState;
+  activeRunId?: string | null;
+};
+
+export type WorkspaceConversationPresenceResponse = {
+  ok: true;
+  data: WorkspaceConversationPresence;
 };
 
 export type WorkspaceConversationSharesResponse = {

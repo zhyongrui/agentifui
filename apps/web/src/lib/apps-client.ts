@@ -10,6 +10,8 @@ import type {
   WorkspaceConversationListStatusFilter,
   WorkspaceConversationMessageFeedbackRequest,
   WorkspaceConversationMessageFeedbackResponse,
+  WorkspaceConversationPresenceResponse,
+  WorkspaceConversationPresenceUpdateRequest,
   WorkspaceConversationResponse,
   WorkspaceConversationShareCreateRequest,
   WorkspaceConversationShareResponse,
@@ -175,6 +177,34 @@ export async function fetchWorkspaceConversation(
     {
       method: 'GET',
       sessionToken,
+    }
+  );
+}
+
+export async function fetchWorkspaceConversationPresence(
+  sessionToken: string,
+  conversationId: string
+): Promise<WorkspaceConversationPresenceResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationPresenceResponse>(
+    `/workspace/conversations/${conversationId}/presence`,
+    {
+      method: 'GET',
+      sessionToken,
+    }
+  );
+}
+
+export async function updateWorkspaceConversationPresence(
+  sessionToken: string,
+  conversationId: string,
+  input: WorkspaceConversationPresenceUpdateRequest
+): Promise<WorkspaceConversationPresenceResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationPresenceResponse>(
+    `/workspace/conversations/${conversationId}/presence`,
+    {
+      method: 'PUT',
+      sessionToken,
+      body: input,
     }
   );
 }

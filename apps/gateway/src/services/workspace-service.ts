@@ -16,6 +16,8 @@ import type {
   WorkspaceConversationStatus,
   WorkspaceConversationMessageFeedback,
   WorkspaceConversationListItem,
+  WorkspaceConversationPresence,
+  WorkspaceConversationPresenceUpdateRequest,
   WorkspaceConversationShare,
   WorkspaceConversationMessage,
   WorkspacePendingActionRespondRequest,
@@ -52,6 +54,11 @@ import {
   buildWorkspaceToolExecutionFailure,
   parseWorkspaceRunFailure,
 } from './workspace-run-failure.js';
+import {
+  buildWorkspaceConversationPresence,
+  pruneWorkspacePresenceEntries,
+  upsertWorkspacePresenceEntry,
+} from './workspace-presence.js';
 import { buildWorkspaceToolApprovalResolution } from './workspace-tool-approval.js';
 import {
   applyWorkspaceHitlStepResponse,
@@ -317,6 +324,13 @@ type WorkspaceSharedConversationResult =
       details?: unknown;
     };
 
+type WorkspaceConversationPresenceResult =
+  | {
+      ok: true;
+      data: WorkspaceConversationPresence;
+    }
+  | WorkspaceLookupFailure;
+
 type WorkspaceService = {
   getCatalogForUser(user: AuthUser): WorkspaceCatalog | Promise<WorkspaceCatalog>;
   getPreferencesForUser(user: AuthUser): WorkspacePreferences | Promise<WorkspacePreferences>;
@@ -382,6 +396,20 @@ type WorkspaceService = {
     user: AuthUser,
     conversationId: string
   ): WorkspaceConversationSharesResult | Promise<WorkspaceConversationSharesResult>;
+  getConversationPresenceForUser(
+    user: AuthUser,
+    conversationId: string
+  ): WorkspaceConversationPresenceResult | Promise<WorkspaceConversationPresenceResult>;
+  updateConversationPresenceForUser(
+    user: AuthUser,
+    input: {
+      conversationId: string;
+      sessionId: string;
+      activeRunId?: string | null;
+      state?: WorkspaceConversationPresenceUpdateRequest['state'];
+      surface?: WorkspaceConversationPresenceUpdateRequest['surface'];
+    }
+  ): WorkspaceConversationPresenceResult | Promise<WorkspaceConversationPresenceResult>;
   createConversationShareForUser(
     user: AuthUser,
     input: WorkspaceConversationShareCreateInput
@@ -1343,6 +1371,10 @@ export function createWorkspaceService(options: {
   const artifactsById = new Map<string, WorkspaceArtifactRecord>();
   const sharesById = new Map<string, WorkspaceConversationShareRecord>();
   const shareIdsByConversationId = new Map<string, string[]>();
+  const presenceByConversationId = new Map<
+    string,
+    Array<Omit<WorkspaceConversationPresence['viewers'][number], 'isCurrentUser'>>
+  >();
 
   function getContextForUser(user: AuthUser) {
     const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
@@ -2274,6 +2306,63 @@ export function createWorkspaceService(options: {
           conversationId,
           shares: listShareRecords(conversationId).map(toWorkspaceConversationShare),
         },
+      };
+    },
+    getConversationPresenceForUser(user, conversationId) {
+      const conversation = conversationsById.get(conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const nextEntries = pruneWorkspacePresenceEntries(
+        presenceByConversationId.get(conversationId) ?? []
+      );
+      presenceByConversationId.set(conversationId, nextEntries);
+
+      return {
+        ok: true,
+        data: buildWorkspaceConversationPresence({
+          conversationId,
+          entries: nextEntries,
+          currentUserId: user.id,
+        }),
+      };
+    },
+    updateConversationPresenceForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const nextEntries = upsertWorkspacePresenceEntry({
+        activeRunId: input.activeRunId,
+        entries: presenceByConversationId.get(input.conversationId) ?? [],
+        sessionId: input.sessionId,
+        state: input.state,
+        surface: input.surface,
+        user,
+      });
+      presenceByConversationId.set(input.conversationId, nextEntries);
+
+      return {
+        ok: true,
+        data: buildWorkspaceConversationPresence({
+          conversationId: input.conversationId,
+          entries: nextEntries,
+          currentUserId: user.id,
+        }),
       };
     },
     createConversationShareForUser(user, input) {
