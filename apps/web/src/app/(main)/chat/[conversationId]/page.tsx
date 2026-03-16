@@ -12,6 +12,7 @@ import type {
   QuotaUsage,
   WorkspaceConversation,
   WorkspaceConversationAttachment,
+  WorkspaceConversationPresence,
   WorkspaceHitlStep,
   WorkspaceConversationMessage,
   WorkspaceErrorResponse,
@@ -57,10 +58,12 @@ import {
 import {
   fetchWorkspaceCatalog,
   fetchWorkspaceConversation,
+  fetchWorkspaceConversationPresence,
   fetchWorkspacePendingActions,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceRun,
   respondToWorkspacePendingAction,
+  updateWorkspaceConversationPresence,
   updateWorkspaceConversation,
   updateWorkspaceConversationMessageFeedback,
   uploadWorkspaceConversationFile,
@@ -78,6 +81,10 @@ import {
   localizeAppStatus,
   localizeWorkspaceApp,
 } from "../../../../lib/workspace-localization";
+import {
+  readOrCreateWorkspacePresenceSessionId,
+  summarizeWorkspacePresence,
+} from "../../../../lib/workspace-presence";
 import { useProtectedSession } from "../../../../lib/use-protected-session";
 
 function toGatewayMessages(
@@ -394,6 +401,9 @@ export default function ConversationPage() {
   const [messages, setMessages] = useState<WorkspaceConversationMessage[]>([]);
   const [runs, setRuns] = useState<WorkspaceRunSummary[]>([]);
   const [selectedRun, setSelectedRun] = useState<WorkspaceRun | null>(null);
+  const [presence, setPresence] = useState<WorkspaceConversationPresence | null>(
+    null,
+  );
   const [quotaUsages, setQuotaUsages] = useState<QuotaUsage[]>([]);
   const [quotaServiceState, setQuotaServiceState] =
     useState<QuotaServiceState>("available");
@@ -411,6 +421,8 @@ export default function ConversationPage() {
   >(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
+  const [lastLiveSyncAt, setLastLiveSyncAt] = useState<string | null>(null);
+  const [presenceSessionId, setPresenceSessionId] = useState<string | null>(null);
   const [pendingActions, setPendingActions] = useState<WorkspaceHitlStep[]>([]);
   const [pendingActionError, setPendingActionError] = useState<string | null>(
     null,
@@ -453,6 +465,10 @@ export default function ConversationPage() {
           trace: "链路追踪",
           gatewayContext: "网关上下文",
           gatewayLead: "最新会话快照来自工作台状态，每次 completion 都会落到可查询的独立运行记录。",
+          liveSync: "实时同步",
+          viewers: "查看者",
+          activeViewers: "活跃查看",
+          lastSynced: "上次同步",
           app: "应用",
           attributedGroup: "归属群组",
           conversationState: "会话状态",
@@ -511,6 +527,10 @@ export default function ConversationPage() {
           trace: "Trace",
           gatewayContext: "Gateway context",
           gatewayLead: "The latest conversation snapshot still comes from workspace state, and each completion now lands in its own queryable run record.",
+          liveSync: "Live sync",
+          viewers: "viewers",
+          activeViewers: "active viewers",
+          lastSynced: "Last synced",
           app: "App",
           attributedGroup: "Attributed group",
           conversationState: "Conversation state",
@@ -638,6 +658,45 @@ export default function ConversationPage() {
     );
   }
 
+  async function refreshPresence(
+    sessionToken: string,
+    input: {
+      activeRunId?: string | null;
+      state?: "active" | "idle";
+    } = {},
+  ) {
+    if (!presenceSessionId) {
+      return;
+    }
+
+    const result = await updateWorkspaceConversationPresence(
+      sessionToken,
+      conversationId,
+      {
+        sessionId: presenceSessionId,
+        state: input.state ?? "active",
+        activeRunId:
+          input.activeRunId === undefined ? undefined : input.activeRunId,
+      },
+    );
+
+    if (result.ok) {
+      setPresence(result.data);
+      setLastLiveSyncAt(new Date().toISOString());
+    }
+  }
+
+  async function loadPresence(sessionToken: string) {
+    const result = await fetchWorkspaceConversationPresence(
+      sessionToken,
+      conversationId,
+    );
+
+    if (result.ok) {
+      setPresence(result.data);
+    }
+  }
+
   async function loadConversation(
     sessionToken: string,
     options: {
@@ -715,6 +774,19 @@ export default function ConversationPage() {
         sessionToken,
         options.preferredRunId ?? result.data.run.id,
       );
+      if (presenceSessionId) {
+        await refreshPresence(sessionToken, {
+          activeRunId: options.preferredRunId ?? result.data.run.id,
+          state:
+            typeof document !== "undefined" &&
+            document.visibilityState === "hidden"
+              ? "idle"
+              : "active",
+        });
+      } else {
+        await loadPresence(sessionToken);
+      }
+      setLastLiveSyncAt(new Date().toISOString());
     } catch {
       setConversation(null);
       setConversationError(
@@ -731,12 +803,15 @@ export default function ConversationPage() {
     setMessages([]);
     setRuns([]);
     setSelectedRun(null);
+    setPresence(null);
     setQuotaUsages([]);
     setQuotaServiceState("available");
     setDraft("");
     setDraftAttachments([]);
     setComposerError(null);
     setLastTraceId(null);
+    setLastLiveSyncAt(null);
+    setPresenceSessionId(null);
     setPendingActions([]);
     setPendingActionError(null);
     setActivePendingActionId(null);
@@ -752,6 +827,16 @@ export default function ConversationPage() {
     stopRequestedRef.current = false;
     setIsUploadingAttachments(false);
     setIsAwaitingRunMetadata(false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      return;
+    }
+
+    setPresenceSessionId(
+      readOrCreateWorkspacePresenceSessionId(window.sessionStorage, conversationId),
+    );
   }, [conversationId]);
 
   useEffect(() => {
@@ -798,6 +883,72 @@ export default function ConversationPage() {
       isCancelled = true;
     };
   }, [conversationId, router, session]);
+
+  useEffect(() => {
+    if (!session || !conversationId || !presenceSessionId) {
+      return;
+    }
+
+    let isCancelled = false;
+    let pollInFlight = false;
+
+    const tick = async () => {
+      if (isCancelled || pollInFlight) {
+        return;
+      }
+
+      pollInFlight = true;
+
+      try {
+        const nextState =
+          document.visibilityState === "hidden" ? "idle" : "active";
+
+        if (
+          nextState === "active" &&
+          !isStreaming &&
+          !isStopping &&
+          activePendingActionId === null
+        ) {
+          await loadConversation(session.sessionToken, {
+            withSpinner: false,
+            syncMessages: true,
+            preferredRunId: selectedRun?.id ?? activeRunIdRef.current,
+          });
+        } else {
+          await refreshPresence(session.sessionToken, {
+            activeRunId: activeRunIdRef.current,
+            state: nextState,
+          });
+        }
+      } finally {
+        pollInFlight = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void tick();
+    }, 10_000);
+    const handleVisibilityChange = () => {
+      void tick();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void tick();
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [
+    activePendingActionId,
+    conversationId,
+    isStopping,
+    isStreaming,
+    presenceSessionId,
+    selectedRun?.id,
+    session,
+  ]);
 
   async function handleConversationUpdateAction(
     action: "archive" | "delete" | "pin" | "rename" | "restore" | "unpin",
@@ -1587,6 +1738,7 @@ export default function ConversationPage() {
     gatewayRuntime?.overallStatus === "degraded" ||
     (selectedRun?.id === conversation.run.id && isWorkspaceRunDegraded(selectedRun));
   const isConversationReadOnly = isConversationArchived || isRuntimeDegraded;
+  const presenceSummary = summarizeWorkspacePresence(presence);
 
   return (
     <div className="chat-surface stack">
@@ -1610,6 +1762,17 @@ export default function ConversationPage() {
           <span className="workspace-badge">
             {copy.trace} {lastTraceId ?? conversation.run.traceId}
           </span>
+          <span className="workspace-badge">
+            {copy.liveSync} · {presenceSummary.total} {copy.viewers}
+          </span>
+          <span className="workspace-badge">
+            {presenceSummary.active} {copy.activeViewers}
+          </span>
+          {lastLiveSyncAt ? (
+            <span className="workspace-badge">
+              {copy.lastSynced} {new Date(lastLiveSyncAt).toLocaleTimeString()}
+            </span>
+          ) : null}
         </div>
       </header>
 

@@ -139,7 +139,8 @@ Execution status:
 | completed | `P3-B-11` | tool run 成功 / 失败 / 取消 / 审批路径的 route+persistence 测试矩阵已补齐                               |
 | completed | `P3-B-12` | tool onboarding / e2e test runbook 已文档化                                                            |
 | completed | `P3-C-01` | conversation presence/session 合同、owner route、service 和 client 已落地                              |
-| active    | `P3-C-02` | 下一项，给 chat surface 加 live refresh / polling 和 presence heartbeat                                |
+| completed | `P3-C-02` | `/chat/[conversationId]` 已加 live refresh / polling、presence heartbeat 和 last-sync surfacing       |
+| active    | `P3-C-03` | 下一项，给 shared conversation surface 加 collaborator identity chips / viewer context                  |
 
 ## 5. First Batch Definition
 
@@ -189,7 +190,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-C-02`
+- the active follow-on item is `P3-C-03`
 
 ## 6. Detailed Execution Notes
 
@@ -754,7 +755,7 @@ Legend:
 ### 7.12 Future Delivery Queue: `P3-C` Collaboration, Presence, And Shared Work
 
 - [x] `P3-C-01` Define a presence/session model for multiple viewers on the same conversation
-- [ ] `P3-C-02` Add live refresh or polling for new messages and run status changes
+- [x] `P3-C-02` Add live refresh or polling for new messages and run status changes
 - [ ] `P3-C-03` Add collaborator identity chips or cursors on shared conversation surfaces
 - [ ] `P3-C-04` Add comment or note threads attached to runs, artifacts, or messages
 - [ ] `P3-C-05` Add mention/notification primitives for shared work review
