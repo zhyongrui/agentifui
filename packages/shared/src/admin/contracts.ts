@@ -193,6 +193,7 @@ export type AdminCleanupPolicy = {
   archivedConversationRetentionDays: number;
   shareExpiryDays: number;
   timelineRetentionDays: number;
+  staleKnowledgeSourceRetentionDays: number;
 };
 
 export type AdminCleanupPreview = {
@@ -200,11 +201,13 @@ export type AdminCleanupPreview = {
   expiredShares: number;
   orphanedArtifacts: number;
   coldTimelineEvents: number;
+  staleKnowledgeSources: number;
   totalCandidates: number;
   cutoffs: {
     archivedConversationBefore: string;
     shareCreatedBefore: string;
     timelineCreatedBefore: string;
+    staleKnowledgeSourceBefore: string;
   };
 };
 
@@ -219,6 +222,7 @@ export type AdminCleanupLastRun = {
     expiredSharesRevoked: number;
     orphanedArtifactsDeleted: number;
     coldTimelineEventsDeleted: number;
+    staleKnowledgeSourcesDeleted: number;
   };
 };
 

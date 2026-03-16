@@ -8,12 +8,14 @@ export type WorkspaceCleanupPolicy = {
   archivedConversationRetentionDays: number;
   shareExpiryDays: number;
   timelineRetentionDays: number;
+  staleKnowledgeSourceRetentionDays: number;
 };
 
 export type WorkspaceCleanupCutoffs = {
   archivedConversationBefore: string;
   shareCreatedBefore: string;
   timelineCreatedBefore: string;
+  staleKnowledgeSourceBefore: string;
 };
 
 export type WorkspaceCleanupPreview = {
@@ -21,6 +23,7 @@ export type WorkspaceCleanupPreview = {
   expiredShares: number;
   orphanedArtifacts: number;
   coldTimelineEvents: number;
+  staleKnowledgeSources: number;
   totalCandidates: number;
   cutoffs: WorkspaceCleanupCutoffs;
 };
@@ -33,6 +36,7 @@ export type WorkspaceCleanupExecutionSummary = WorkspaceCleanupPreview & {
   expiredSharesRevoked: number;
   orphanedArtifactsDeleted: number;
   coldTimelineEventsDeleted: number;
+  staleKnowledgeSourcesDeleted: number;
 };
 
 type LatestCleanupExecution = {
@@ -48,6 +52,7 @@ export function buildWorkspaceCleanupPolicy(): WorkspaceCleanupPolicy {
     archivedConversationRetentionDays: 30,
     shareExpiryDays: 14,
     timelineRetentionDays: 14,
+    staleKnowledgeSourceRetentionDays: 30,
   };
 }
 
@@ -65,6 +70,9 @@ export function buildWorkspaceCleanupCutoffs(
     timelineCreatedBefore: new Date(
       now.getTime() - policy.timelineRetentionDays * DAY_MS,
     ).toISOString(),
+    staleKnowledgeSourceBefore: new Date(
+      now.getTime() - policy.staleKnowledgeSourceRetentionDays * DAY_MS,
+    ).toISOString(),
   };
 }
 
@@ -72,13 +80,15 @@ export function countWorkspaceCleanupCandidates(
   preview: Pick<
     WorkspaceCleanupPreview,
     "archivedConversations" | "coldTimelineEvents" | "expiredShares" | "orphanedArtifacts"
+    | "staleKnowledgeSources"
   >,
 ) {
   return (
     preview.archivedConversations +
     preview.expiredShares +
     preview.orphanedArtifacts +
-    preview.coldTimelineEvents
+    preview.coldTimelineEvents +
+    preview.staleKnowledgeSources
   );
 }
 
@@ -116,6 +126,7 @@ export async function previewWorkspaceCleanup(
     expiredShareRow,
     orphanedArtifactRow,
     coldTimelineRow,
+    staleKnowledgeSourceRow,
   ] = await Promise.all([
     database<{ count: number | string }[]>`
       select count(*)::int as count
@@ -150,6 +161,16 @@ export async function previewWorkspaceCleanup(
         and r.finished_at < ${cutoffs.timelineCreatedBefore}::timestamptz
         and rte.created_at < ${cutoffs.timelineCreatedBefore}::timestamptz
     `,
+    database<{ count: number | string }[]>`
+      select count(*)::int as count
+      from knowledge_sources
+      where tenant_id = ${tenantId}
+        and updated_at < ${cutoffs.staleKnowledgeSourceBefore}::timestamptz
+        and (
+          status in ('queued', 'processing', 'failed')
+          or (status = 'succeeded' and (coalesce(chunk_count, 0) = 0 or source_content is null))
+        )
+    `,
   ]);
 
   const preview = {
@@ -157,6 +178,7 @@ export async function previewWorkspaceCleanup(
     expiredShares: toCount(expiredShareRow[0]?.count),
     orphanedArtifacts: toCount(orphanedArtifactRow[0]?.count),
     coldTimelineEvents: toCount(coldTimelineRow[0]?.count),
+    staleKnowledgeSources: toCount(staleKnowledgeSourceRow[0]?.count),
     cutoffs,
   };
 
@@ -231,6 +253,7 @@ export async function runWorkspaceCleanup(input: {
     expiredSharesRevoked: 0,
     orphanedArtifactsDeleted: 0,
     coldTimelineEventsDeleted: 0,
+    staleKnowledgeSourcesDeleted: 0,
   };
 
   if (input.mode === "dry_run") {
@@ -276,6 +299,17 @@ export async function runWorkspaceCleanup(input: {
       returning rte.id
     `;
 
+    const staleKnowledgeRows = await sql<{ id: string }[]>`
+      delete from knowledge_sources
+      where tenant_id = ${input.tenantId}
+        and updated_at < ${preview.cutoffs.staleKnowledgeSourceBefore}::timestamptz
+        and (
+          status in ('queued', 'processing', 'failed')
+          or (status = 'succeeded' and (coalesce(chunk_count, 0) = 0 or source_content is null))
+        )
+      returning id
+    `;
+
     const archivedConversationRows = await sql<{ id: string }[]>`
       delete from conversations
       where tenant_id = ${input.tenantId}
@@ -287,6 +321,7 @@ export async function runWorkspaceCleanup(input: {
     summary.expiredSharesRevoked = expiredShareRows.length;
     summary.orphanedArtifactsDeleted = orphanedArtifactRows.length;
     summary.coldTimelineEventsDeleted = coldTimelineRows.length;
+    summary.staleKnowledgeSourcesDeleted = staleKnowledgeRows.length;
     summary.archivedConversationsDeleted = archivedConversationRows.length;
 
     return expiredShareRows.map((row) => row.id);

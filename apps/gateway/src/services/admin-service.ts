@@ -698,11 +698,13 @@ export function createAdminService(): AdminService {
           expiredShares: 0,
           orphanedArtifacts: 0,
           coldTimelineEvents: 0,
+          staleKnowledgeSources: 0,
           totalCandidates: 0,
           cutoffs: {
             archivedConversationBefore: now,
             shareCreatedBefore: now,
             timelineCreatedBefore: now,
+            staleKnowledgeSourceBefore: now,
           },
         },
         lastRun: null,

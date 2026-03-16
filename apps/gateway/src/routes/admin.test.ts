@@ -180,17 +180,20 @@ const cleanupStatus = {
     archivedConversationRetentionDays: 30,
     shareExpiryDays: 14,
     timelineRetentionDays: 14,
+    staleKnowledgeSourceRetentionDays: 30,
   },
   preview: {
     archivedConversations: 2,
     expiredShares: 1,
     orphanedArtifacts: 0,
     coldTimelineEvents: 8,
-    totalCandidates: 11,
+    staleKnowledgeSources: 3,
+    totalCandidates: 14,
     cutoffs: {
       archivedConversationBefore: '2026-02-10T00:00:00.000Z',
       shareCreatedBefore: '2026-02-26T00:00:00.000Z',
       timelineCreatedBefore: '2026-02-26T00:00:00.000Z',
+      staleKnowledgeSourceBefore: '2026-02-10T00:00:00.000Z',
     },
   },
   lastRun: null,
@@ -346,11 +349,13 @@ describe('admin routes', () => {
       expect(response.statusCode).toBe(200);
       expect((response.json() as AdminCleanupResponse).data).toMatchObject({
         preview: {
-          totalCandidates: 11,
+          totalCandidates: 14,
           expiredShares: 1,
+          staleKnowledgeSources: 3,
         },
         policy: {
           shareExpiryDays: 14,
+          staleKnowledgeSourceRetentionDays: 30,
         },
       });
       expect(adminService.getCleanupStatusForUser).toHaveBeenCalledWith(

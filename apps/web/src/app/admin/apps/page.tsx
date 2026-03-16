@@ -178,14 +178,18 @@ export default function AdminAppsPage() {
             <strong>{cleanupStatus.data.preview.totalCandidates}</strong>
             <p>
               {cleanupStatus.data.preview.archivedConversations} archived conversations ·{' '}
-              {cleanupStatus.data.preview.expiredShares} expired shares
+              {cleanupStatus.data.preview.expiredShares} expired shares ·{' '}
+              {cleanupStatus.data.preview.staleKnowledgeSources} stale sources
             </p>
           </article>
           <article className="admin-stat-card">
-            <span>Cold timeline events</span>
-            <strong>{cleanupStatus.data.preview.coldTimelineEvents}</strong>
+            <span>Cold timeline / stale sources</span>
+            <strong>
+              {cleanupStatus.data.preview.coldTimelineEvents + cleanupStatus.data.preview.staleKnowledgeSources}
+            </strong>
             <p>
-              Retention {cleanupStatus.data.policy.timelineRetentionDays} days
+              Timeline {cleanupStatus.data.policy.timelineRetentionDays} days · Sources{' '}
+              {cleanupStatus.data.policy.staleKnowledgeSourceRetentionDays} days
             </p>
           </article>
           <article className="admin-stat-card">

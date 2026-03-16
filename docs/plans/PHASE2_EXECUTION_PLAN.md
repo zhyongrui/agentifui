@@ -126,7 +126,7 @@ Execution status:
 | completed | `P2-E2` | perf seed/smoke、JSON artifact、预算门槛和 release gate 已闭环 |
 | completed | `P2-E3` | tenant usage analytics、per-app/quota/export、tests 和 browser QA 已闭环 |
 | completed | `P2-E4` | backup/export 脚本、restore sanity 校验、checksum 和 post-restore HTTP smoke 已闭环 |
-| active    | `P3-A`  | 进行中，source management browser coverage 已补齐，下一项是 stale indexed document retention |
+| active    | `P3-B`  | 下一项，开始 tool invocation 和 structured action boundary |
 
 ## 5. First Batch Definition
 
@@ -170,7 +170,7 @@ Current batch status:
 - `P2-D3` complete
 - `P2-D4` complete
 - `P2-E3` complete
-- the active follow-on item is `P3-A-11`
+- the active follow-on item is `P3-B-01`
 
 ## 6. Detailed Execution Notes
 
@@ -702,8 +702,8 @@ Legend:
 - [x] `P3-A-08` Add tenant/group access controls for indexed knowledge sources
 - [x] `P3-A-09` Add unit and persistence coverage for ingestion state transitions
 - [x] `P3-A-10` Add browser coverage for source management and retrieval-backed chat results
-- [ ] `P3-A-11` Add retention/cleanup rules for stale indexed documents
-- [ ] `P3-A-12` Document the ingestion pipeline and local development setup
+- [x] `P3-A-11` Add retention/cleanup rules for stale indexed documents
+- [x] `P3-A-12` Document the ingestion pipeline and local development setup
 
 ### 7.11 Future Delivery Queue: `P3-B` Tool Invocation And Structured Actions
 

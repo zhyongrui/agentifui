@@ -15,11 +15,13 @@ describe("workspace cleanup helpers", () => {
       archivedConversationRetentionDays: 30,
       shareExpiryDays: 14,
       timelineRetentionDays: 14,
+      staleKnowledgeSourceRetentionDays: 30,
     });
     expect(buildWorkspaceCleanupCutoffs(now, policy)).toEqual({
       archivedConversationBefore: "2026-02-13T12:00:00.000Z",
       shareCreatedBefore: "2026-03-01T12:00:00.000Z",
       timelineCreatedBefore: "2026-03-01T12:00:00.000Z",
+      staleKnowledgeSourceBefore: "2026-02-13T12:00:00.000Z",
     });
   });
 
@@ -30,7 +32,8 @@ describe("workspace cleanup helpers", () => {
         expiredShares: 2,
         orphanedArtifacts: 1,
         coldTimelineEvents: 5,
+        staleKnowledgeSources: 4,
       }),
-    ).toBe(11);
+    ).toBe(15);
   });
 });
