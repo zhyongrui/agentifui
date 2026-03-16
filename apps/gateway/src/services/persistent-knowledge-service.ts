@@ -9,7 +9,7 @@ import type {
 import { randomUUID } from 'node:crypto';
 
 import {
-  buildStatusCounts,
+  STATUSES,
   normalizeLabels,
   normalizeSourceUri,
   normalizeTitle,
@@ -18,6 +18,7 @@ import {
   type KnowledgeMutationResult,
   type KnowledgeService,
 } from './knowledge-service.js';
+import { buildKnowledgeChunkPlan } from './knowledge-chunking.js';
 
 type KnowledgeSourceRow = {
   id: string;
@@ -29,10 +30,15 @@ type KnowledgeSourceRow = {
   title: string;
   source_kind: KnowledgeSource['sourceKind'];
   source_uri: string | null;
+  source_content: string | null;
   scope: KnowledgeSource['scope'];
   labels: string[] | string;
   status: KnowledgeSource['status'];
+  chunking_strategy: KnowledgeSource['chunking']['strategy'];
+  chunk_target_chars: number;
+  chunk_overlap_chars: number;
   chunk_count: number;
+  last_chunked_at: Date | string | null;
   last_error: string | null;
   updated_source_at: Date | string | null;
   created_at: Date | string;
@@ -77,7 +83,14 @@ function toKnowledgeSource(row: KnowledgeSourceRow): KnowledgeSource {
       displayName: row.owner_display_name,
     },
     status: row.status,
+    hasContent: Boolean(row.source_content?.trim()),
     chunkCount: row.chunk_count,
+    chunking: {
+      strategy: row.chunking_strategy,
+      targetChunkChars: row.chunk_target_chars,
+      overlapChars: row.chunk_overlap_chars,
+      lastChunkedAt: toIsoString(row.last_chunked_at),
+    },
     lastError: row.last_error,
     updatedSourceAt: toIsoString(row.updated_source_at),
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
@@ -97,10 +110,15 @@ async function getSourceById(database: DatabaseClient, tenantId: string, sourceI
       ks.title,
       ks.source_kind,
       ks.source_uri,
+      ks.source_content,
       ks.scope,
       ks.labels,
       ks.status,
+      ks.chunking_strategy,
+      ks.chunk_target_chars,
+      ks.chunk_overlap_chars,
       ks.chunk_count,
+      ks.last_chunked_at,
       ks.last_error,
       ks.updated_source_at,
       ks.created_at,
@@ -113,6 +131,52 @@ async function getSourceById(database: DatabaseClient, tenantId: string, sourceI
   `;
 
   return row ? toKnowledgeSource(row) : null;
+}
+
+async function replaceSourceChunks(
+  database: DatabaseClient,
+  tenantId: string,
+  sourceId: string,
+  chunks: ReturnType<typeof buildKnowledgeChunkPlan>['chunks'],
+) {
+  await database`
+    delete from knowledge_source_chunks
+    where tenant_id = ${tenantId}
+      and source_id = ${sourceId}
+  `;
+
+  for (const chunk of chunks) {
+    await database`
+      insert into knowledge_source_chunks (
+        id,
+        tenant_id,
+        source_id,
+        sequence,
+        strategy,
+        heading_path,
+        preview,
+        content,
+        char_count,
+        token_estimate,
+        created_at,
+        updated_at
+      )
+      values (
+        ${`chunk_${randomUUID()}`},
+        ${tenantId},
+        ${sourceId},
+        ${chunk.sequence},
+        ${chunk.strategy},
+        ${chunk.headingPath}::jsonb,
+        ${chunk.preview},
+        ${chunk.content},
+        ${chunk.charCount},
+        ${chunk.tokenEstimate},
+        now(),
+        now()
+      )
+    `;
+  }
 }
 
 export function createPersistentKnowledgeService(database: DatabaseClient): KnowledgeService {
@@ -131,10 +195,15 @@ export function createPersistentKnowledgeService(database: DatabaseClient): Know
           ks.title,
           ks.source_kind,
           ks.source_uri,
+          ks.source_content,
           ks.scope,
           ks.labels,
           ks.status,
+          ks.chunking_strategy,
+          ks.chunk_target_chars,
+          ks.chunk_overlap_chars,
           ks.chunk_count,
+          ks.last_chunked_at,
           ks.last_error,
           ks.updated_source_at,
           ks.created_at,
@@ -154,40 +223,21 @@ export function createPersistentKnowledgeService(database: DatabaseClient): Know
         order by ks.updated_at desc
       `;
       const sources = rows.map(toKnowledgeSource);
-      const statusCounts = buildStatusCounts(
-        (
-          await database<{ status: KnowledgeIngestionStatus; count: number }[]>`
-            select
-              status,
-              count(*)::int as count
-            from knowledge_sources
-            where tenant_id = ${user.tenantId}
-            group by status
-          `
-        ).flatMap(entry =>
-          Array.from({ length: entry.count }, () => ({
-            id: '',
-            tenantId: user.tenantId,
-            scope: 'tenant',
-            groupId: null,
-            title: '',
-            sourceKind: 'url',
-            sourceUri: null,
-            labels: [],
-            owner: {
-              userId: user.id,
-              email: user.email,
-              displayName: user.displayName,
-            },
-            status: entry.status,
-            chunkCount: 0,
-            lastError: null,
-            updatedSourceAt: null,
-            createdAt: '',
-            updatedAt: '',
-          }))
-        )
+      const statusCountRows = await database<{ status: KnowledgeIngestionStatus; count: number }[]>`
+        select
+          status,
+          count(*)::int as count
+        from knowledge_sources
+        where tenant_id = ${user.tenantId}
+        group by status
+      `;
+      const statusCountMap = new Map(
+        statusCountRows.map(entry => [entry.status, entry.count] as const),
       );
+      const statusCounts = STATUSES.map(status => ({
+        status,
+        count: statusCountMap.get(status) ?? 0,
+      }));
 
       return {
         filters,
@@ -240,6 +290,12 @@ export function createPersistentKnowledgeService(database: DatabaseClient): Know
       }
 
       const sourceId = `src_${randomUUID()}`;
+      const content = typeof input.content === 'string' ? input.content : null;
+      const plan = buildKnowledgeChunkPlan({
+        sourceKind: input.sourceKind,
+        content: content ?? '',
+      });
+      const lastChunkedAt = content?.trim() ? new Date().toISOString() : null;
 
       await database`
         insert into knowledge_sources (
@@ -250,10 +306,15 @@ export function createPersistentKnowledgeService(database: DatabaseClient): Know
           title,
           source_kind,
           source_uri,
+          source_content,
           scope,
           labels,
           status,
+          chunking_strategy,
+          chunk_target_chars,
+          chunk_overlap_chars,
           chunk_count,
+          last_chunked_at,
           last_error,
           updated_source_at,
           created_at,
@@ -267,16 +328,23 @@ export function createPersistentKnowledgeService(database: DatabaseClient): Know
           ${title},
           ${input.sourceKind},
           ${sourceUri},
+          ${content?.trim() ? content : null},
           ${input.scope},
           ${normalizeLabels(input.labels)}::jsonb,
           'queued',
-          0,
+          ${plan.strategy},
+          ${plan.targetChunkChars},
+          ${plan.overlapChars},
+          ${plan.chunks.length},
+          ${lastChunkedAt}::timestamptz,
           null,
           ${normalizeUpdatedSourceAt(input.updatedSourceAt)}::timestamptz,
           now(),
           now()
         )
       `;
+
+      await replaceSourceChunks(database, user.tenantId, sourceId, plan.chunks);
 
       return {
         ok: true,
@@ -295,11 +363,34 @@ export function createPersistentKnowledgeService(database: DatabaseClient): Know
         };
       }
 
+      const content = typeof input.content === 'string' ? input.content : null;
+      const plan =
+        typeof input.content === 'string'
+          ? buildKnowledgeChunkPlan({
+              sourceKind: existingSource.sourceKind,
+              content: content ?? '',
+            })
+          : null;
+      const lastChunkedAt =
+        typeof input.content === 'string'
+          ? content?.trim()
+            ? new Date().toISOString()
+            : null
+          : existingSource.chunking.lastChunkedAt;
+
       await database`
         update knowledge_sources
         set
           status = ${input.status},
-          chunk_count = ${input.chunkCount ?? existingSource.chunkCount},
+          source_content = case
+            when ${typeof input.content === 'string'} then ${content?.trim() ? content : null}::text
+            else source_content
+          end,
+          chunking_strategy = ${plan?.strategy ?? existingSource.chunking.strategy},
+          chunk_target_chars = ${plan?.targetChunkChars ?? existingSource.chunking.targetChunkChars},
+          chunk_overlap_chars = ${plan?.overlapChars ?? existingSource.chunking.overlapChars},
+          chunk_count = ${plan?.chunks.length ?? input.chunkCount ?? existingSource.chunkCount},
+          last_chunked_at = ${lastChunkedAt}::timestamptz,
           last_error = ${
             input.status === 'failed' ? input.lastError?.trim() || 'Ingestion failed.' : null
           },
@@ -307,6 +398,10 @@ export function createPersistentKnowledgeService(database: DatabaseClient): Know
         where tenant_id = ${user.tenantId}
           and id = ${sourceId}
       `;
+
+      if (plan) {
+        await replaceSourceChunks(database, user.tenantId, sourceId, plan.chunks);
+      }
 
       return {
         ok: true,

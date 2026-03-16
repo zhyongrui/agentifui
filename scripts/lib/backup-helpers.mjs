@@ -33,6 +33,8 @@ const BACKUP_TABLES = [
   'run_timeline_events',
   'workspace_uploaded_files',
   'workspace_artifacts',
+  'knowledge_sources',
+  'knowledge_source_chunks',
   'workspace_app_launches',
   'workspace_conversation_shares',
 ];

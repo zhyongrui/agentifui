@@ -71,6 +71,10 @@ describe('admin knowledge sources routes', () => {
           {
             id: 'src_policy_watch_handbook',
             status: 'succeeded',
+            hasContent: true,
+            chunking: {
+              strategy: 'markdown_sections',
+            },
           },
         ],
       },
@@ -82,8 +86,9 @@ describe('admin knowledge sources routes', () => {
       headers,
       payload: {
         title: 'Dorm policy digest',
-        sourceKind: 'url',
-        sourceUri: 'https://example.com/dorm-policy',
+        sourceKind: 'markdown',
+        sourceUri: null,
+        content: '# Dorm policy digest\n\nWeekday quiet hours start at 23:00.\n\n## Exceptions\n\nLate lab access requires approval.',
         scope: 'group',
         groupId: 'grp_research',
         labels: ['Policy', 'Dormitory'],
@@ -100,6 +105,13 @@ describe('admin knowledge sources routes', () => {
         groupId: 'grp_research',
         labels: ['policy', 'dormitory'],
         status: 'queued',
+        hasContent: true,
+        chunkCount: 2,
+        chunking: {
+          strategy: 'markdown_sections',
+          targetChunkChars: 1200,
+          overlapChars: 160,
+        },
       },
     });
 
@@ -110,6 +122,19 @@ describe('admin knowledge sources routes', () => {
       headers,
       payload: {
         status: 'succeeded',
+        content: [
+          '# Dorm policy digest',
+          '',
+          'Weekday quiet hours start at 23:00 and weekend quiet hours start at 00:00.',
+          '',
+          '## Exceptions',
+          '',
+          'Late lab access requires approval and badge logging.',
+          '',
+          '## Enforcement',
+          '',
+          'Repeated violations trigger RA follow-up.',
+        ].join('\n'),
         chunkCount: 18,
         lastError: null,
       },
@@ -121,7 +146,13 @@ describe('admin knowledge sources routes', () => {
       data: {
         id: createdSourceId,
         status: 'succeeded',
-        chunkCount: 18,
+        hasContent: true,
+        chunkCount: 3,
+        chunking: {
+          strategy: 'markdown_sections',
+          targetChunkChars: 1200,
+          overlapChars: 160,
+        },
       },
     });
 

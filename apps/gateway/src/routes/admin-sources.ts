@@ -178,6 +178,7 @@ export async function registerAdminSourceRoutes(
       title: body.title ?? '',
       sourceKind: body.sourceKind,
       sourceUri: typeof body.sourceUri === 'string' ? body.sourceUri : null,
+      content: typeof body.content === 'string' ? body.content : null,
       scope: body.scope,
       groupId: typeof body.groupId === 'string' ? body.groupId : null,
       labels: Array.isArray(body.labels)
@@ -239,6 +240,7 @@ export async function registerAdminSourceRoutes(
       const result = await knowledgeService.updateSourceStatusForUser(session.user, sourceId, {
         status: body.status,
         chunkCount: typeof body.chunkCount === 'number' ? body.chunkCount : null,
+        content: typeof body.content === 'string' ? body.content : undefined,
         lastError: typeof body.lastError === 'string' ? body.lastError : null,
       });
 

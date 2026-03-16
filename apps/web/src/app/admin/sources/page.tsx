@@ -34,6 +34,7 @@ function buildInitialDraft(): KnowledgeSourceCreateRequest {
     title: '',
     sourceKind: 'url',
     sourceUri: '',
+    content: '',
     scope: 'tenant',
     groupId: null,
     labels: [],
@@ -82,6 +83,7 @@ export default function AdminSourcesPage() {
     const result = await createAdminSource(session.sessionToken, {
       ...draft,
       sourceUri: draft.sourceUri?.trim() || null,
+      content: draft.content?.trim() || null,
       groupId: draft.scope === 'group' ? draft.groupId?.trim() || null : null,
       labels: labelInput
         .split(',')
@@ -208,6 +210,21 @@ export default function AdminSourcesPage() {
             value={draft.sourceUri ?? ''}
           />
         </label>
+        <label className="field">
+          <span>Source content</span>
+          <textarea
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+              updateDraft('content', event.target.value)
+            }
+            placeholder={
+              draft.sourceKind === 'markdown'
+                ? '# Policy digest\n\nWrite markdown content that will be chunked by sections.'
+                : 'Paste source text to preview chunking and indexing metadata.'
+            }
+            rows={8}
+            value={draft.content ?? ''}
+          />
+        </label>
         <label className="stack">
           <span>Scope</span>
           <select
@@ -297,14 +314,21 @@ export default function AdminSourcesPage() {
               </p>
             </div>
             <p>
-              Status <strong>{source.status}</strong> · chunks {source.chunkCount}
+              Status <strong>{source.status}</strong> · chunks {source.chunkCount} · strategy{' '}
+              {source.chunking.strategy}
             </p>
             <p>URI: {source.sourceUri ?? 'Not provided'}</p>
+            <p>Content: {source.hasContent ? 'Stored for indexing' : 'Metadata-only source'}</p>
             <p>Labels: {source.labels.length > 0 ? source.labels.join(', ') : 'None'}</p>
             <p>
               Owner: {source.owner.email}
               {source.owner.displayName ? ` (${source.owner.displayName})` : ''}
             </p>
+            <p>
+              Chunk profile: target {source.chunking.targetChunkChars} chars · overlap{' '}
+              {source.chunking.overlapChars} chars
+            </p>
+            <p>Last chunked: {formatTimestamp(source.chunking.lastChunkedAt)}</p>
             <p>Source updated: {formatTimestamp(source.updatedSourceAt)}</p>
             <p>Ingestion updated: {formatTimestamp(source.updatedAt)}</p>
             {source.lastError ? <div className="notice error">{source.lastError}</div> : null}

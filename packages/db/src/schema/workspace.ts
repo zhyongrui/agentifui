@@ -84,6 +84,10 @@ export const knowledgeIngestionStatusEnum = pgEnum('knowledge_ingestion_status',
   'succeeded',
   'failed',
 ]);
+export const knowledgeChunkingStrategyEnum = pgEnum('knowledge_chunking_strategy', [
+  'markdown_sections',
+  'paragraph_windows',
+]);
 
 export const workspaceApps = pgTable(
   'workspace_apps',
@@ -391,10 +395,17 @@ export const knowledgeSources = pgTable(
     title: varchar('title', { length: 255 }).notNull(),
     sourceKind: knowledgeSourceKindEnum('source_kind').notNull(),
     sourceUri: text('source_uri'),
+    sourceContent: text('source_content'),
     scope: knowledgeSourceScopeEnum('scope').notNull(),
     labels: jsonb('labels').$type<string[]>().notNull().default([]),
     status: knowledgeIngestionStatusEnum('status').notNull().default('queued'),
+    chunkingStrategy: knowledgeChunkingStrategyEnum('chunking_strategy')
+      .notNull()
+      .default('paragraph_windows'),
+    chunkTargetChars: integer('chunk_target_chars').notNull().default(1000),
+    chunkOverlapChars: integer('chunk_overlap_chars').notNull().default(120),
     chunkCount: integer('chunk_count').notNull().default(0),
+    lastChunkedAt: timestamp('last_chunked_at', { withTimezone: true }),
     lastError: text('last_error'),
     updatedSourceAt: timestamp('updated_source_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -408,6 +419,35 @@ export const knowledgeSources = pgTable(
       table.tenantId,
       table.status,
       table.updatedAt
+    ),
+  })
+);
+
+export const knowledgeSourceChunks = pgTable(
+  'knowledge_source_chunks',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    sourceId: varchar('source_id', { length: 120 })
+      .notNull()
+      .references(() => knowledgeSources.id, { onDelete: 'cascade' }),
+    sequence: integer('sequence').notNull(),
+    strategy: knowledgeChunkingStrategyEnum('strategy').notNull(),
+    headingPath: jsonb('heading_path').$type<string[]>().notNull().default([]),
+    preview: text('preview').notNull(),
+    content: text('content').notNull(),
+    charCount: integer('char_count').notNull(),
+    tokenEstimate: integer('token_estimate').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    knowledgeSourceChunksTenantIndex: index('knowledge_source_chunks_tenant_idx').on(table.tenantId),
+    knowledgeSourceChunksSourceIndex: index('knowledge_source_chunks_source_idx').on(
+      table.sourceId,
+      table.sequence
     ),
   })
 );

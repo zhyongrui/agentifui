@@ -11,6 +11,7 @@ import type {
   KnowledgeSourceStatusUpdateRequest,
 } from '@agentifui/shared';
 
+import { buildKnowledgeChunkPlan } from './knowledge-chunking.js';
 import { WORKSPACE_GROUPS } from './workspace-catalog-fixtures.js';
 
 type KnowledgeMutationErrorResult = {
@@ -135,6 +136,7 @@ function validateGroupScope(scope: KnowledgeSourceCreateRequest['scope'], groupI
 }
 
 export function createKnowledgeService(): KnowledgeService {
+  const sourceContent = new Map<string, string | null>();
   const sources: KnowledgeSource[] = [
     {
       id: 'src_policy_watch_handbook',
@@ -151,13 +153,24 @@ export function createKnowledgeService(): KnowledgeService {
         displayName: 'Admin User',
       },
       status: 'succeeded',
+      hasContent: true,
       chunkCount: 24,
+      chunking: {
+        strategy: 'markdown_sections',
+        targetChunkChars: 1200,
+        overlapChars: 160,
+        lastChunkedAt: '2026-03-15T00:30:00.000Z',
+      },
       lastError: null,
       updatedSourceAt: '2026-03-15T00:00:00.000Z',
       createdAt: '2026-03-15T00:00:00.000Z',
       updatedAt: '2026-03-15T00:30:00.000Z',
     },
   ];
+  sourceContent.set(
+    'src_policy_watch_handbook',
+    '# Policy Watch handbook\n\nUse section-aware ingestion for governance updates.\n\n## Operations\n\nSummarize deltas and supporting evidence.',
+  );
 
   return {
     listSourcesForUser(user, filters = {}) {
@@ -217,6 +230,11 @@ export function createKnowledgeService(): KnowledgeService {
       }
 
       const now = new Date().toISOString();
+      const content = typeof input.content === 'string' ? input.content : null;
+      const plan = buildKnowledgeChunkPlan({
+        sourceKind: input.sourceKind,
+        content: content ?? '',
+      });
       const source: KnowledgeSource = {
         id: `src_${randomUUID()}`,
         tenantId: user.tenantId,
@@ -232,7 +250,14 @@ export function createKnowledgeService(): KnowledgeService {
           displayName: user.displayName,
         },
         status: 'queued',
-        chunkCount: 0,
+        hasContent: Boolean(content?.trim()),
+        chunkCount: plan.chunks.length,
+        chunking: {
+          strategy: plan.strategy,
+          targetChunkChars: plan.targetChunkChars,
+          overlapChars: plan.overlapChars,
+          lastChunkedAt: content?.trim() ? now : null,
+        },
         lastError: null,
         updatedSourceAt: normalizeUpdatedSourceAt(input.updatedSourceAt),
         createdAt: now,
@@ -240,6 +265,7 @@ export function createKnowledgeService(): KnowledgeService {
       };
 
       sources.unshift(source);
+      sourceContent.set(source.id, content?.trim() ? content : null);
 
       return {
         ok: true,
@@ -258,16 +284,37 @@ export function createKnowledgeService(): KnowledgeService {
         };
       }
 
+      const nextContent =
+        typeof input.content === 'string' ? input.content : sourceContent.get(source.id) ?? null;
+      const plan =
+        typeof input.content === 'string'
+          ? buildKnowledgeChunkPlan({
+              sourceKind: source.sourceKind,
+              content: nextContent ?? '',
+            })
+          : null;
       const nextSource: KnowledgeSource = {
         ...source,
         status: input.status,
-        chunkCount: input.chunkCount ?? source.chunkCount,
+        hasContent: Boolean(nextContent?.trim()),
+        chunkCount: plan?.chunks.length ?? input.chunkCount ?? source.chunkCount,
+        chunking: plan
+          ? {
+              strategy: plan.strategy,
+              targetChunkChars: plan.targetChunkChars,
+              overlapChars: plan.overlapChars,
+              lastChunkedAt: nextContent?.trim() ? new Date().toISOString() : source.chunking.lastChunkedAt,
+            }
+          : source.chunking,
         lastError: input.status === 'failed' ? input.lastError?.trim() || 'Ingestion failed.' : null,
         updatedAt: new Date().toISOString(),
       };
       const index = sources.findIndex(candidate => candidate.id === source.id);
 
       sources.splice(index, 1, nextSource);
+      if (typeof input.content === 'string') {
+        sourceContent.set(source.id, nextContent?.trim() ? nextContent : null);
+      }
 
       return {
         ok: true,
@@ -278,6 +325,7 @@ export function createKnowledgeService(): KnowledgeService {
 }
 
 export {
+  STATUSES,
   buildStatusCounts,
   normalizeLabels,
   normalizeSourceUri,

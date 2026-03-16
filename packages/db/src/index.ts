@@ -25,6 +25,7 @@ export const schemaModules = [
   'workspace_uploaded_files',
   'workspace_artifacts',
   'knowledge_sources',
+  'knowledge_source_chunks',
   'workspace_app_launches',
   'workspace_conversation_shares',
 ] as const;
