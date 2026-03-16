@@ -496,12 +496,16 @@ Current batch status:
   - `npm run test:e2e` does not forward extra CLI args on this host
     - `scripts/run-e2e.mjs` always executes `npx playwright test` without passing through `--grep`
     - use raw Playwright for targeted browser verification when you only need one scenario
+  - the `2026-03-16` CI failures on GitHub Actions run `23126078415` were isolated to `e2e`
+    - `typecheck`, `build`, `db-validate`, and `unit` were green
+    - the failing layer was the browser suite only
   - for raw Playwright on this host:
     - first run `node scripts/prepare-playwright-runtime.mjs`
     - then export `LD_LIBRARY_PATH` with the printed runtime-lib path
     - then run `PLAYWRIGHT_BASE_URL=http://127.0.0.1:<port> npx playwright test ... --grep ...`
-  - if `3111/4111` are already occupied, start an isolated test stack on alternate ports
-    - this round used gateway `4000` and web `3116`
+  - `scripts/run-e2e.mjs` now auto-selects free gateway/web ports when `4111/3111` are occupied
+    - this avoids local `EADDRINUSE` collisions with long-lived dev servers
+    - raw Playwright still needs an explicit `PLAYWRIGHT_BASE_URL`
   - the run replay panel now renders the same source title twice:
     - once in the citation chip list
     - once in the source block card title
@@ -521,6 +525,14 @@ Current batch status:
 - use `npm run test:e2e` instead of raw `npx playwright test` on this host
   - the wrapper brings the project up in the expected environment
   - direct Playwright launches can fail on this machine with missing browser runtime libs such as `libatk-1.0.so.0`
+- the browser suite shares quota-bearing tenant/group state across many specs
+  - `scripts/run-e2e.mjs` now seeds large `workspace_quota_limits` rows after gateway health succeeds
+  - do not remove that seed step unless the suite also stops sharing launch/run usage state
+- if a late `/apps` spec fails because `Policy Watch` shows `配额不足` instead of `打开应用`
+  - treat it as suite-state quota exhaustion first, not as a product regression
+- replay source titles are not guaranteed to be unique
+  - retrieval-backed citations and source cards can legitimately repeat the same title in one panel
+  - browser assertions should scope by container and use `.first()` or other disambiguation instead of strict unique-text assumptions
 - if persistence or targeted vitest runs seem hung with no output
   - check for orphaned `node (vitest*)` workers with `pgrep -af vitest`
   - stale workers can survive interrupted sessions on this host and block later persistence reruns until they are killed
