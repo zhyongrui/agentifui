@@ -224,6 +224,7 @@ export async function buildApp(
     authService,
     workspaceService,
     auditService,
+    knowledgeService,
     runtimeService,
   );
 

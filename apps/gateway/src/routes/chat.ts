@@ -31,6 +31,7 @@ import { Readable } from "node:stream";
 
 import type { AuditService } from "../services/audit-service.js";
 import type { AuthService } from "../services/auth-service.js";
+import type { KnowledgeService } from "../services/knowledge-service.js";
 import { buildPlaceholderHitlSteps } from "../services/workspace-hitl.js";
 import {
   hasCriticalSafetySignal,
@@ -1374,6 +1375,7 @@ export async function registerChatRoutes(
   authService: AuthService,
   workspaceService: WorkspaceService,
   auditService: AuditService,
+  knowledgeService: KnowledgeService,
   runtimeService: WorkspaceRuntimeService,
 ) {
   app.get("/v1/models", async (request, reply) => {
@@ -1560,6 +1562,12 @@ export async function registerChatRoutes(
     const traceId = conversation.run.traceId || fallbackTraceId;
     const startedAt = Date.now();
     const latestPrompt = summarizeRuntimePrompt(body.messages);
+    const retrieval = await knowledgeService.buildRetrievalForUser(access.user, {
+      appId,
+      conversationId: conversation.id,
+      groupId: conversation.activeGroup.id,
+      latestPrompt,
+    });
     const runtimeInput =
       body.inputs && typeof body.inputs === "object"
         ? (body.inputs as Record<string, unknown>)
@@ -1599,6 +1607,7 @@ export async function registerChatRoutes(
           variables: body.inputs ?? {},
           files: body.files ?? [],
           attachments: attachmentResult.attachments,
+          retrieval,
         },
         totalSteps: 1,
       },
@@ -1620,6 +1629,7 @@ export async function registerChatRoutes(
       latestPrompt,
       messages: body.messages,
       requestedModel: model,
+      retrieval,
       runtimeInput,
     });
 

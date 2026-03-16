@@ -37,6 +37,34 @@ export type KnowledgeSourceChunk = {
   updatedAt: string;
 };
 
+export type KnowledgeRetrievalQuery = {
+  appId: string;
+  conversationId: string | null;
+  groupId: string | null;
+  queryText: string;
+  limit: number;
+};
+
+export type KnowledgeRetrievalMatch = {
+  sourceId: string;
+  chunkId: string;
+  title: string;
+  sourceKind: KnowledgeSourceKind;
+  sourceUri: string | null;
+  scope: KnowledgeSourceScope;
+  groupId: string | null;
+  labels: string[];
+  headingPath: string[];
+  preview: string;
+  content: string;
+  score: number;
+};
+
+export type KnowledgeRetrievalResult = {
+  query: KnowledgeRetrievalQuery;
+  matches: KnowledgeRetrievalMatch[];
+};
+
 export type KnowledgeSource = {
   id: string;
   tenantId: string;

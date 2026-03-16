@@ -2,6 +2,7 @@ import type { DatabaseClient } from '@agentifui/db';
 import type { AuthUser } from '@agentifui/shared/auth';
 import type {
   KnowledgeIngestionStatus,
+  KnowledgeRetrievalResult,
   KnowledgeSource,
   KnowledgeSourceListFilters,
   KnowledgeSourceStatusCount,
@@ -19,6 +20,7 @@ import {
   type KnowledgeService,
 } from './knowledge-service.js';
 import { buildKnowledgeChunkPlan } from './knowledge-chunking.js';
+import { buildKnowledgeRetrievalQuery, rankKnowledgeMatches } from './knowledge-retrieval.js';
 
 type KnowledgeSourceRow = {
   id: string;
@@ -45,7 +47,35 @@ type KnowledgeSourceRow = {
   updated_at: Date | string;
 };
 
+type KnowledgeChunkRow = {
+  source_id: string;
+  chunk_id: string;
+  title: string;
+  source_kind: KnowledgeSource['sourceKind'];
+  source_uri: string | null;
+  scope: KnowledgeSource['scope'];
+  group_id: string | null;
+  labels: string[] | string;
+  heading_path: string[] | string;
+  preview: string;
+  content: string;
+};
+
 function normalizeLabelArray(value: string[] | string) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    return Array.isArray(parsed) ? parsed.filter(entry => typeof entry === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeHeadingPath(value: string[] | string) {
   if (Array.isArray(value)) {
     return value;
   }
@@ -406,6 +436,60 @@ export function createPersistentKnowledgeService(database: DatabaseClient): Know
       return {
         ok: true,
         data: (await getSourceById(database, user.tenantId, sourceId))!,
+      };
+    },
+    async buildRetrievalForUser(user, input): Promise<KnowledgeRetrievalResult> {
+      const query = buildKnowledgeRetrievalQuery({
+        appId: input.appId,
+        conversationId: input.conversationId,
+        groupId: input.groupId,
+        latestPrompt: input.latestPrompt,
+        limit: input.limit,
+      });
+      const rows = await database<KnowledgeChunkRow[]>`
+        select
+          ks.id as source_id,
+          ksc.id as chunk_id,
+          ks.title,
+          ks.source_kind,
+          ks.source_uri,
+          ks.scope,
+          ks.group_id,
+          ks.labels,
+          ksc.heading_path,
+          ksc.preview,
+          ksc.content
+        from knowledge_source_chunks ksc
+        join knowledge_sources ks
+          on ks.id = ksc.source_id
+         and ks.tenant_id = ksc.tenant_id
+        where ks.tenant_id = ${user.tenantId}
+          and ks.status = 'succeeded'
+          and (
+            ks.scope = 'tenant'
+            or (${query.groupId}::varchar is not null and ks.group_id = ${query.groupId})
+          )
+      `;
+
+      return {
+        query,
+        matches: rankKnowledgeMatches(
+          query,
+          rows.map(row => ({
+            sourceId: row.source_id,
+            chunkId: row.chunk_id,
+            title: row.title,
+            sourceKind: row.source_kind,
+            sourceUri: row.source_uri,
+            scope: row.scope,
+            groupId: row.group_id,
+            labels: normalizeLabelArray(row.labels),
+            headingPath: normalizeHeadingPath(row.heading_path),
+            preview: row.preview,
+            content: row.content,
+            score: 0,
+          })),
+        ),
       };
     },
   };

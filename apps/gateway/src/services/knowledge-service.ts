@@ -4,7 +4,9 @@ import type { AdminErrorCode } from '@agentifui/shared/admin';
 import type { AuthUser } from '@agentifui/shared/auth';
 import type {
   KnowledgeIngestionStatus,
+  KnowledgeRetrievalResult,
   KnowledgeSource,
+  KnowledgeSourceChunk,
   KnowledgeSourceCreateRequest,
   KnowledgeSourceListFilters,
   KnowledgeSourceStatusCount,
@@ -12,6 +14,7 @@ import type {
 } from '@agentifui/shared';
 
 import { buildKnowledgeChunkPlan } from './knowledge-chunking.js';
+import { buildKnowledgeRetrievalQuery, rankKnowledgeMatches } from './knowledge-retrieval.js';
 import { WORKSPACE_GROUPS } from './workspace-catalog-fixtures.js';
 
 type KnowledgeMutationErrorResult = {
@@ -51,6 +54,16 @@ type KnowledgeService = {
     sourceId: string,
     input: KnowledgeSourceStatusUpdateRequest
   ): Promise<KnowledgeMutationResult<KnowledgeSource>> | KnowledgeMutationResult<KnowledgeSource>;
+  buildRetrievalForUser(
+    user: AuthUser,
+    input: {
+      appId: string;
+      conversationId: string | null;
+      groupId: string | null;
+      latestPrompt: string;
+      limit?: number | null;
+    }
+  ): Promise<KnowledgeRetrievalResult> | KnowledgeRetrievalResult;
 };
 
 const STATUSES: KnowledgeIngestionStatus[] = ['queued', 'processing', 'succeeded', 'failed'];
@@ -135,8 +148,29 @@ function validateGroupScope(scope: KnowledgeSourceCreateRequest['scope'], groupI
   return WORKSPACE_GROUPS.some(group => group.id === groupId) ? groupId : '__invalid__';
 }
 
+function materializeKnowledgeChunks(input: {
+  sourceId: string;
+  createdAt: string;
+  chunks: ReturnType<typeof buildKnowledgeChunkPlan>['chunks'];
+}): KnowledgeSourceChunk[] {
+  return input.chunks.map(chunk => ({
+    id: `chunk_${randomUUID()}`,
+    sourceId: input.sourceId,
+    sequence: chunk.sequence,
+    strategy: chunk.strategy,
+    headingPath: chunk.headingPath,
+    preview: chunk.preview,
+    content: chunk.content,
+    charCount: chunk.charCount,
+    tokenEstimate: chunk.tokenEstimate,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  }));
+}
+
 export function createKnowledgeService(): KnowledgeService {
   const sourceContent = new Map<string, string | null>();
+  const sourceChunks = new Map<string, KnowledgeSourceChunk[]>();
   const sources: KnowledgeSource[] = [
     {
       id: 'src_policy_watch_handbook',
@@ -170,6 +204,19 @@ export function createKnowledgeService(): KnowledgeService {
   sourceContent.set(
     'src_policy_watch_handbook',
     '# Policy Watch handbook\n\nUse section-aware ingestion for governance updates.\n\n## Operations\n\nSummarize deltas and supporting evidence.',
+  );
+  sourceChunks.set(
+    'src_policy_watch_handbook',
+    materializeKnowledgeChunks({
+      sourceId: 'src_policy_watch_handbook',
+      createdAt: '2026-03-15T00:30:00.000Z',
+      chunks: buildKnowledgeChunkPlan({
+        sourceKind: 'markdown',
+        content:
+          sourceContent.get('src_policy_watch_handbook') ??
+          '',
+      }).chunks,
+    }),
   );
 
   return {
@@ -266,6 +313,14 @@ export function createKnowledgeService(): KnowledgeService {
 
       sources.unshift(source);
       sourceContent.set(source.id, content?.trim() ? content : null);
+      sourceChunks.set(
+        source.id,
+        materializeKnowledgeChunks({
+          sourceId: source.id,
+          createdAt: now,
+          chunks: plan.chunks,
+        }),
+      );
 
       return {
         ok: true,
@@ -314,11 +369,59 @@ export function createKnowledgeService(): KnowledgeService {
       sources.splice(index, 1, nextSource);
       if (typeof input.content === 'string') {
         sourceContent.set(source.id, nextContent?.trim() ? nextContent : null);
+        sourceChunks.set(
+          source.id,
+          materializeKnowledgeChunks({
+            sourceId: source.id,
+            createdAt: nextSource.updatedAt,
+            chunks: plan?.chunks ?? [],
+          }),
+        );
       }
 
       return {
         ok: true,
         data: nextSource,
+      };
+    },
+    buildRetrievalForUser(user, input) {
+      const query = buildKnowledgeRetrievalQuery({
+        appId: input.appId,
+        conversationId: input.conversationId,
+        groupId: input.groupId,
+        latestPrompt: input.latestPrompt,
+        limit: input.limit,
+      });
+      const matches = rankKnowledgeMatches(
+        query,
+        sources
+          .filter(source => source.tenantId === user.tenantId)
+          .filter(source => source.status === 'succeeded')
+          .filter(
+            source =>
+              source.scope === 'tenant' || (query.groupId !== null && source.groupId === query.groupId),
+          )
+          .flatMap(source =>
+            (sourceChunks.get(source.id) ?? []).map(chunk => ({
+              sourceId: source.id,
+              chunkId: chunk.id,
+              title: source.title,
+              sourceKind: source.sourceKind,
+              sourceUri: source.sourceUri,
+              scope: source.scope,
+              groupId: source.groupId,
+              labels: source.labels,
+              headingPath: chunk.headingPath,
+              preview: chunk.preview,
+              content: chunk.content,
+              score: 0,
+            })),
+          ),
+      );
+
+      return {
+        query,
+        matches,
       };
     },
   };

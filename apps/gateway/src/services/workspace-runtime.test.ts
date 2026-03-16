@@ -84,6 +84,31 @@ describe("workspace runtime service", () => {
         },
       ],
       requestedModel: "runbook-mentor",
+      retrieval: {
+        query: {
+          appId: "app_runbook_mentor",
+          conversationId: "conv_runtime",
+          groupId: "grp_research",
+          queryText: "Turn this SOP into ordered steps.",
+          limit: 4,
+        },
+        matches: [
+          {
+            sourceId: "src_1",
+            chunkId: "chunk_1",
+            title: "Runbook policy",
+            sourceKind: "markdown",
+            sourceUri: null,
+            scope: "group",
+            groupId: "grp_research",
+            labels: ["runbook"],
+            headingPath: ["Runbook policy", "Steps"],
+            preview: "Confirm prerequisites before proceeding.",
+            content: "Confirm prerequisites before proceeding.",
+            score: 12,
+          },
+        ],
+      },
       runtimeInput: null,
     });
 
@@ -94,8 +119,8 @@ describe("workspace runtime service", () => {
     }
 
     expect(result.data).toMatchObject({
-      assistantText: expect.stringContaining(
-        "structured execution outline",
+      assistantText: expect.stringMatching(
+        /structured execution outline[\s\S]*Grounding: retrieved 1 knowledge chunk/i,
       ),
       runtime: {
         id: "placeholder_structured",

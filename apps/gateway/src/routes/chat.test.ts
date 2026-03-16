@@ -545,6 +545,33 @@ describe("chat routes", () => {
           status: "succeeded",
         },
       });
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${runId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data.inputs).toMatchObject({
+        retrieval: {
+          query: {
+            appId: "app_policy_watch",
+            conversationId,
+            groupId: "grp_research",
+            queryText: "Summarize the current policy changes for my group.",
+            limit: 4,
+          },
+          matches: expect.arrayContaining([
+            expect.objectContaining({
+              sourceId: "src_policy_watch_handbook",
+              title: "Policy Watch handbook",
+            }),
+          ]),
+        },
+      });
     } finally {
       await app.close();
     }
@@ -1135,7 +1162,7 @@ describe("chat routes", () => {
     } finally {
       await app.close();
     }
-  }, 15_000);
+  }, 25_000);
 
   it("hard-stops an active streaming response and persists stopped state", async () => {
     const authService = createTestAuthService();

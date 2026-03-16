@@ -10,6 +10,7 @@ import type {
   WorkspaceSourceBlock,
 } from "@agentifui/shared/apps";
 import type { ChatCompletionMessage } from "@agentifui/shared/chat";
+import type { KnowledgeRetrievalResult } from "@agentifui/shared";
 import { randomUUID } from "node:crypto";
 
 import { resolveWorkspaceAppRuntimeId } from "./workspace-catalog-fixtures.js";
@@ -39,6 +40,7 @@ export type WorkspaceRuntimeInvocationInput = {
   latestPrompt: string;
   messages: ChatCompletionMessage[];
   requestedModel: string;
+  retrieval: KnowledgeRetrievalResult | null;
   runtimeInput: Record<string, unknown> | null;
 };
 
@@ -271,12 +273,18 @@ function buildPlaceholderAssistantText(
 function buildStructuredAssistantText(
   conversation: WorkspaceConversation,
   latestPrompt: string,
+  retrieval: KnowledgeRetrievalResult | null,
 ) {
   const requestSummary = latestPrompt || "Continue the current runbook task.";
+  const retrievalSummary =
+    retrieval && retrieval.matches.length > 0
+      ? `Grounding: retrieved ${retrieval.matches.length} knowledge chunk${retrieval.matches.length === 1 ? '' : 's'} for this request.`
+      : null;
 
   return [
     `${conversation.app.name} translated the request into a structured execution outline.`,
     `Request: ${requestSummary}`,
+    retrievalSummary,
     `Context: attributed group ${conversation.activeGroup.name}, trace ${conversation.run.traceId}.`,
     "Plan:",
     "1. Confirm prerequisites and owners.",
@@ -322,7 +330,11 @@ function createPlaceholderAdapter(input: {
     async invoke(runtimeInput) {
       const latestPrompt = runtimeInput.latestPrompt;
       const assistantText = input.structured
-        ? buildStructuredAssistantText(runtimeInput.conversation, latestPrompt)
+        ? buildStructuredAssistantText(
+            runtimeInput.conversation,
+            latestPrompt,
+            runtimeInput.retrieval,
+          )
         : buildPlaceholderAssistantText(
             runtimeInput.conversation,
             runtimeInput.messages,
