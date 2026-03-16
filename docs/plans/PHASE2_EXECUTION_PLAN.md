@@ -131,7 +131,8 @@ Execution status:
 | completed | `P3-B-03` | runtime tool call requests、tool result transcript persistence、route/persistence coverage 已闭环         |
 | completed | `P3-B-04` | `WorkspaceRun.toolExecutions`、latency、legacy fallback 和 replay surface 已闭环                          |
 | completed | `P3-B-05` | approval-required tool execution 已复用 HITL contract，approval response 会写回 transcript/run/tool replay |
-| active    | `P3-B-06` | 下一项，补齐 tool execution 和 operator approval audit coverage                                            |
+| completed | `P3-B-06` | tool execution / approval audit actions 已补齐到 chat、workspace route 和 persisted admin audit           |
+| active    | `P3-B-07` | 下一项，补 timeout、retry 和 idempotency handling                                                         |
 
 ## 5. First Batch Definition
 
@@ -178,7 +179,8 @@ Current batch status:
 - `P3-B-03` complete
 - `P3-B-04` complete
 - `P3-B-05` complete
-- the active follow-on item is `P3-B-06`
+- `P3-B-06` complete
+- the active follow-on item is `P3-B-07`
 
 ## 6. Detailed Execution Notes
 
@@ -732,7 +734,7 @@ Legend:
 - [x] `P3-B-03` Add runtime support for tool call requests and tool result messages
 - [x] `P3-B-04` Persist tool call attempts, results, and latency into the run boundary
 - [x] `P3-B-05` Add approval-required tool execution paths that reuse HITL contracts where needed
-- [ ] `P3-B-06` Add audit coverage for tool execution and operator approval decisions
+- [x] `P3-B-06` Add audit coverage for tool execution and operator approval decisions
 - [ ] `P3-B-07` Add timeout, retry, and idempotency handling for tool calls
 - [ ] `P3-B-08` Add tool policy controls on admin surfaces
 - [ ] `P3-B-09` Render tool-call summaries in transcript and replay panels

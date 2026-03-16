@@ -51,6 +51,7 @@ import {
   type WorkspaceRuntimeService,
 } from "../services/workspace-runtime.js";
 import { type ToolRegistryService } from "../services/tool-registry-service.js";
+import { readWorkspaceToolApprovalMetadata } from "../services/workspace-tool-approval.js";
 import { buildWorkspaceRunFailure } from "../services/workspace-run-failure.js";
 import { calculateCompletionQuotaCost } from "../services/workspace-quota.js";
 import type { WorkspaceService } from "../services/workspace-service.js";
@@ -346,6 +347,78 @@ async function recordSafetySignalsAudit(input: {
       ).length,
     },
   });
+}
+
+async function recordToolExecutionAudit(input: {
+  auditService: AuditService;
+  conversation: WorkspaceConversation;
+  ipAddress: string;
+  pendingActions: WorkspaceHitlStep[];
+  runId: string;
+  toolExecutions: WorkspaceRunToolExecution[];
+  traceId: string;
+  user: AuthUser;
+}) {
+  for (const step of input.pendingActions) {
+    const metadata = readWorkspaceToolApprovalMetadata(step);
+
+    if (!metadata) {
+      continue;
+    }
+
+    await input.auditService.recordEvent({
+      tenantId: input.user.tenantId,
+      actorUserId: input.user.id,
+      action: "workspace.tool_execution.approval_requested",
+      entityType: "pending_action",
+      entityId: step.id,
+      ipAddress: input.ipAddress,
+      payload: {
+        conversationId: input.conversation.id,
+        runId: input.runId,
+        traceId: input.traceId,
+        stepId: step.id,
+        toolCallId: metadata.toolCallId,
+        toolName: metadata.toolName,
+        policyTag: metadata.policyTag,
+        expiresAt: step.expiresAt,
+        appId: input.conversation.app.id,
+        appName: input.conversation.app.name,
+        activeGroupId: input.conversation.activeGroup.id,
+        activeGroupName: input.conversation.activeGroup.name,
+      },
+    });
+  }
+
+  for (const execution of input.toolExecutions) {
+    await input.auditService.recordEvent({
+      tenantId: input.user.tenantId,
+      actorUserId: input.user.id,
+      action:
+        execution.status === "failed"
+          ? "workspace.tool_execution.failed"
+          : "workspace.tool_execution.completed",
+      entityType: "run",
+      entityId: input.runId,
+      ipAddress: input.ipAddress,
+      level: execution.status === "failed" ? "warning" : "info",
+      payload: {
+        conversationId: input.conversation.id,
+        runId: input.runId,
+        traceId: input.traceId,
+        executionId: execution.id,
+        toolCallId: execution.request.id,
+        toolName: execution.request.function.name,
+        attempt: execution.attempt,
+        status: execution.status,
+        latencyMs: execution.latencyMs,
+        appId: input.conversation.app.id,
+        appName: input.conversation.app.name,
+        activeGroupId: input.conversation.activeGroup.id,
+        activeGroupName: input.conversation.activeGroup.name,
+      },
+    });
+  }
 }
 
 function readBearerToken(value: string | undefined): string | null {
@@ -1702,6 +1775,17 @@ async function* streamCompletionEvents(input: {
       return;
     }
 
+    await recordToolExecutionAudit({
+      auditService: input.auditService,
+      conversation: updateResult.data,
+      ipAddress: input.ipAddress,
+      pendingActions,
+      runId: input.conversation.run.id,
+      toolExecutions: input.toolExecutions,
+      traceId: input.conversation.run.traceId,
+      user: input.user,
+    });
+
     await recordArtifactGeneratedAudit({
       artifacts,
       auditService: input.auditService,
@@ -2406,6 +2490,17 @@ export async function registerChatRoutes(
           "The conversation run could not be persisted after completion.",
       });
     }
+
+    await recordToolExecutionAudit({
+      auditService,
+      conversation: updateResult.data,
+      ipAddress: request.ip,
+      pendingActions,
+      runId: conversation.run.id,
+      toolExecutions,
+      traceId,
+      user: access.user,
+    });
 
     await recordArtifactGeneratedAudit({
       artifacts,

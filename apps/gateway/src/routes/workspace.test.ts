@@ -2356,7 +2356,8 @@ describe("workspace routes", () => {
 
   it("records transcript and tool execution details when approval-required tools are approved", async () => {
     const authService = createTestAuthService();
-    const { app } = await createTestApp(authService);
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
 
     authService.register({
       email: "admin@iflabx.com",
@@ -2528,6 +2529,44 @@ describe("workspace routes", () => {
           }),
         }),
       });
+
+      expect(await auditService.listEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.tool_execution.approval_requested",
+            entityType: "pending_action",
+            entityId: pendingActionId,
+            payload: expect.objectContaining({
+              conversationId,
+              runId: completionRunId,
+              toolName: "tenant.access.review",
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.tool_execution.approval_decided",
+            entityType: "pending_action",
+            entityId: pendingActionId,
+            payload: expect.objectContaining({
+              conversationId,
+              runId: completionRunId,
+              decisionAction: "approve",
+              decisionStatus: "approved",
+              toolName: "tenant.access.review",
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.tool_execution.completed",
+            entityType: "run",
+            entityId: completionRunId,
+            payload: expect.objectContaining({
+              conversationId,
+              runId: completionRunId,
+              decisionAction: "approve",
+              toolName: "tenant.access.review",
+            }),
+          }),
+        ]),
+      );
     } finally {
       await app.close();
     }

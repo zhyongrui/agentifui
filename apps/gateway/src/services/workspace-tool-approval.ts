@@ -34,7 +34,9 @@ function buildConversationMessageId() {
   return `msg_${randomUUID()}`;
 }
 
-function parseToolApprovalMetadata(step: WorkspaceHitlStep): ToolApprovalMetadata | null {
+export function readWorkspaceToolApprovalMetadata(
+  step: WorkspaceHitlStep,
+): ToolApprovalMetadata | null {
   const metadata = step.metadata;
 
   if (!metadata || metadata.kind !== TOOL_APPROVAL_KIND) {
@@ -208,7 +210,7 @@ export function buildWorkspaceToolApprovalResolution(input: {
       toolMessage: WorkspaceConversationMessage;
     }
   | null {
-  const metadata = parseToolApprovalMetadata(input.step);
+  const metadata = readWorkspaceToolApprovalMetadata(input.step);
   const outcome = buildOutcomeLabel(input.step);
   const response = input.step.response;
 

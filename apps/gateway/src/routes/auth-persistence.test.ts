@@ -3488,6 +3488,52 @@ describe.sequential('persistent auth runtime', () => {
               }),
             }),
           });
+
+          const approvalAudit = await restartedApp.inject({
+            method: 'GET',
+            url: `/admin/audit?action=workspace.tool_execution.approval_decided&traceId=${completionBody.trace_id}`,
+            headers: {
+              authorization: `Bearer ${sessionToken}`,
+            },
+          });
+
+          expect(approvalAudit.statusCode).toBe(200);
+          expect((approvalAudit.json() as AdminAuditResponse).data.events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                action: 'workspace.tool_execution.approval_decided',
+                payload: expect.objectContaining({
+                  conversationId,
+                  runId,
+                  decisionAction: 'approve',
+                  toolName: 'tenant.access.review',
+                }),
+              }),
+            ])
+          );
+
+          const executionAudit = await restartedApp.inject({
+            method: 'GET',
+            url: `/admin/audit?action=workspace.tool_execution.completed&traceId=${completionBody.trace_id}`,
+            headers: {
+              authorization: `Bearer ${sessionToken}`,
+            },
+          });
+
+          expect(executionAudit.statusCode).toBe(200);
+          expect((executionAudit.json() as AdminAuditResponse).data.events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                action: 'workspace.tool_execution.completed',
+                payload: expect.objectContaining({
+                  conversationId,
+                  runId,
+                  decisionAction: 'approve',
+                  toolName: 'tenant.access.review',
+                }),
+              }),
+            ])
+          );
         } finally {
           await restartedApp.close();
         }

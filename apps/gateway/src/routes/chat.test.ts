@@ -163,7 +163,8 @@ describe("chat routes", () => {
 
   it("accepts typed tool descriptors and function tool choice payloads", async () => {
     const authService = createTestAuthService();
-    const { app } = await createTestApp(authService);
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
 
     authService.register({
       email: "developer@iflabx.com",
@@ -357,6 +358,20 @@ describe("chat routes", () => {
           }),
         ],
       });
+
+      expect(await auditService.listEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.tool_execution.completed",
+            entityType: "run",
+            entityId: responseBody.metadata?.run_id,
+            payload: expect.objectContaining({
+              conversationId: responseBody.conversation_id,
+              toolName: "workspace.search",
+            }),
+          }),
+        ]),
+      );
     } finally {
       await app.close();
     }

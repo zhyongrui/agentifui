@@ -39,6 +39,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 import type { WorkspaceRuntimeService } from '../services/workspace-runtime.js';
+import { readWorkspaceToolApprovalMetadata } from '../services/workspace-tool-approval.js';
 import type { WorkspaceService } from '../services/workspace-service.js';
 
 function buildErrorResponse(
@@ -868,6 +869,69 @@ export async function registerWorkspaceRoutes(
         values: body.action === 'submit' ? body.values : null,
       },
     });
+
+    const toolApprovalMetadata = readWorkspaceToolApprovalMetadata(result.data.item);
+
+    if (toolApprovalMetadata) {
+      const runResult = await workspaceService.getRunForUser(
+        access.user,
+        result.data.runId,
+      );
+      const runContext = runResult.ok ? runResult.data : null;
+
+      await auditService.recordEvent({
+        tenantId: access.user.tenantId,
+        actorUserId: access.user.id,
+        action: 'workspace.tool_execution.approval_decided',
+        entityType: 'pending_action',
+        entityId: stepId,
+        ipAddress: request.ip,
+        level: body.action === 'approve' ? 'info' : 'warning',
+        payload: {
+          conversationId,
+          runId: result.data.runId,
+          stepId,
+          toolCallId: toolApprovalMetadata.toolCallId,
+          toolName: toolApprovalMetadata.toolName,
+          policyTag: toolApprovalMetadata.policyTag,
+          decisionAction: body.action,
+          decisionStatus: result.data.item.status,
+          traceId: runContext?.traceId ?? null,
+          appId: runContext?.app.id ?? null,
+          appName: runContext?.app.name ?? null,
+          activeGroupId: runContext?.activeGroup.id ?? null,
+          activeGroupName: runContext?.activeGroup.name ?? null,
+        },
+      });
+
+      await auditService.recordEvent({
+        tenantId: access.user.tenantId,
+        actorUserId: access.user.id,
+        action:
+          body.action === 'approve'
+            ? 'workspace.tool_execution.completed'
+            : 'workspace.tool_execution.blocked',
+        entityType: 'run',
+        entityId: result.data.runId,
+        ipAddress: request.ip,
+        level: body.action === 'approve' ? 'info' : 'warning',
+        payload: {
+          conversationId,
+          runId: result.data.runId,
+          stepId,
+          toolCallId: toolApprovalMetadata.toolCallId,
+          toolName: toolApprovalMetadata.toolName,
+          policyTag: toolApprovalMetadata.policyTag,
+          decisionAction: body.action,
+          decisionStatus: result.data.item.status,
+          traceId: runContext?.traceId ?? null,
+          appId: runContext?.app.id ?? null,
+          appName: runContext?.app.name ?? null,
+          activeGroupId: runContext?.activeGroup.id ?? null,
+          activeGroupName: runContext?.activeGroup.name ?? null,
+        },
+      });
+    }
 
     return response;
   });
