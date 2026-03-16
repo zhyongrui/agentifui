@@ -127,7 +127,8 @@ Execution status:
 | completed | `P2-E3`   | tenant usage analytics、per-app/quota/export、tests 和 browser QA 已闭环                                  |
 | completed | `P2-E4`   | backup/export 脚本、restore sanity 校验、checksum 和 post-restore HTTP smoke 已闭环                       |
 | completed | `P3-B-01` | shared tool descriptor contract、auth scope、input schema 和 gateway request validation 已落地            |
-| active    | `P3-B-02` | 下一项，开始 per-app / per-tenant enabled tool registry surface                                           |
+| completed | `P3-B-02` | per-app / per-tenant enabled tool registry surface、registry persistence 和 browser/admin coverage 已闭环 |
+| active    | `P3-B-03` | 下一项，开始 runtime tool call requests / tool result messages                                            |
 
 ## 5. First Batch Definition
 
@@ -171,7 +172,7 @@ Current batch status:
 - `P2-D3` complete
 - `P2-D4` complete
 - `P2-E3` complete
-- the active follow-on item is `P3-B-02`
+- the active follow-on item is `P3-B-03`
 
 ## 6. Detailed Execution Notes
 
@@ -721,7 +722,7 @@ Legend:
 ### 7.11 Future Delivery Queue: `P3-B` Tool Invocation And Structured Actions
 
 - [x] `P3-B-01` Define a shared tool descriptor contract including auth scope and input schema
-- [ ] `P3-B-02` Build a registry surface for enabled tools per app and tenant
+- [x] `P3-B-02` Build a registry surface for enabled tools per app and tenant
 - [ ] `P3-B-03` Add runtime support for tool call requests and tool result messages
 - [ ] `P3-B-04` Persist tool call attempts, results, and latency into the run boundary
 - [ ] `P3-B-05` Add approval-required tool execution paths that reuse HITL contracts where needed

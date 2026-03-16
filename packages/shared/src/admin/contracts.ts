@@ -6,6 +6,7 @@ import type {
   AuthUserStatus,
 } from '../auth/contracts.js';
 import type { WorkspaceApp, WorkspaceGroup } from '../apps/contracts.js';
+import type { WorkspaceAppToolSummary } from '../tools/contracts.js';
 
 export type AdminErrorCode =
   | 'ADMIN_UNAUTHORIZED'
@@ -179,6 +180,9 @@ export type AdminAppSummary = Pick<
   launchCount: number;
   lastLaunchedAt: string | null;
   userGrants: AdminAppUserGrant[];
+  tools: WorkspaceAppToolSummary[];
+  enabledToolCount: number;
+  toolOverrideCount: number;
 };
 
 export type AdminAppsResponse = {
@@ -331,6 +335,18 @@ export type AdminAppGrantDeleteResponse = {
   data: {
     app: AdminAppSummary;
     revokedGrantId: string;
+  };
+};
+
+export type AdminAppToolUpdateRequest = {
+  enabledToolNames: string[];
+};
+
+export type AdminAppToolUpdateResponse = {
+  ok: true;
+  data: {
+    app: AdminAppSummary;
+    enabledToolNames: string[];
   };
 };
 

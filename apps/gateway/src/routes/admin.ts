@@ -2,6 +2,8 @@ import type {
   AdminAppGrantCreateRequest,
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
+  AdminAppToolUpdateRequest,
+  AdminAppToolUpdateResponse,
   AdminAppsResponse,
   AdminCleanupResponse,
   AdminContextResponse,
@@ -30,6 +32,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AdminService } from '../services/admin-service.js';
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
+import { resolveEnabledToolNames, type ToolRegistryService } from '../services/tool-registry-service.js';
 
 function buildErrorResponse(
   code: AdminErrorResponse['error']['code'],
@@ -586,6 +589,28 @@ async function resolveAdminCapabilities(adminService: AdminService, user: AuthUs
   };
 }
 
+async function enrichAdminApps(
+  toolRegistryService: ToolRegistryService,
+  user: AuthUser,
+  apps: Awaited<ReturnType<AdminService['listAppsForUser']>>
+) {
+  const toolsByAppId = await toolRegistryService.listAppToolsForTenant(
+    user.tenantId,
+    apps.map(app => app.id)
+  );
+
+  return apps.map(app => {
+    const tools = toolsByAppId[app.id] ?? [];
+
+    return {
+      ...app,
+      tools,
+      enabledToolCount: tools.filter(tool => tool.enabled).length,
+      toolOverrideCount: tools.filter(tool => tool.isOverridden).length,
+    };
+  });
+}
+
 async function recordGrantRejectedEvent(
   auditService: AuditService,
   input: {
@@ -628,7 +653,8 @@ export async function registerAdminRoutes(
   app: FastifyInstance,
   authService: AuthService,
   adminService: AdminService,
-  auditService: AuditService
+  auditService: AuditService,
+  toolRegistryService: ToolRegistryService
 ) {
   app.post('/admin/tenants', async (request, reply) => {
     const session = await requirePlatformAdminSession(
@@ -885,11 +911,17 @@ export async function registerAdminRoutes(
       return session.response;
     }
 
+    const apps = await enrichAdminApps(
+      toolRegistryService,
+      session.user,
+      await adminService.listAppsForUser(session.user)
+    );
+
     const response: AdminAppsResponse = {
       ok: true,
       data: {
         generatedAt: new Date().toISOString(),
-        apps: await adminService.listAppsForUser(session.user),
+        apps,
       },
     };
 
@@ -1306,7 +1338,12 @@ export async function registerAdminRoutes(
 
     const response: AdminAppGrantCreateResponse = {
       ok: true,
-      data: result.data,
+      data: {
+        ...result.data,
+        app: (
+          await enrichAdminApps(toolRegistryService, session.user, [result.data.app])
+        )[0]!,
+      },
     };
 
     return response;
@@ -1385,8 +1422,92 @@ export async function registerAdminRoutes(
     const response: AdminAppGrantDeleteResponse = {
       ok: true,
       data: {
-        app: result.data.app,
+        app: (
+          await enrichAdminApps(toolRegistryService, session.user, [result.data.app])
+        )[0]!,
         revokedGrantId: result.data.revokedGrantId,
+      },
+    };
+
+    return response;
+  });
+
+  app.put('/admin/apps/:appId/tools', async (request, reply) => {
+    const session = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const params = request.params as { appId?: string };
+    const body = (request.body ?? {}) as Partial<AdminAppToolUpdateRequest>;
+    const appId = params.appId?.trim();
+    const enabledToolNames =
+      Array.isArray(body.enabledToolNames) &&
+      body.enabledToolNames.every((value): value is string => typeof value === 'string')
+        ? body.enabledToolNames
+      : null;
+
+    if (!appId || enabledToolNames === null) {
+      reply.code(400);
+      return buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Admin app tool updates require an app id and enabledToolNames array.'
+      );
+    }
+
+    const result = await toolRegistryService.updateAppToolsForUser(session.user, {
+      appId,
+      enabledToolNames,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const targetApp = (await adminService.listAppsForUser(session.user)).find(
+      candidate => candidate.id === appId
+    );
+
+    if (!targetApp) {
+      reply.code(404);
+      return buildErrorResponse(
+        'ADMIN_NOT_FOUND',
+        'The target workspace app could not be found.',
+        { appId }
+      );
+    }
+
+    const enrichedApp = (
+      await enrichAdminApps(toolRegistryService, session.user, [targetApp])
+    )[0]!;
+
+    await auditService.recordEvent({
+      tenantId: session.user.tenantId,
+      actorUserId: session.user.id,
+      action: 'admin.workspace_tool_registry.updated',
+      entityType: 'workspace_app',
+      entityId: enrichedApp.id,
+      ipAddress: request.ip,
+      payload: {
+        appId: enrichedApp.id,
+        appName: enrichedApp.name,
+        enabledToolNames: resolveEnabledToolNames(enrichedApp.tools),
+        toolOverrideCount: enrichedApp.toolOverrideCount,
+      },
+    });
+
+    const response: AdminAppToolUpdateResponse = {
+      ok: true,
+      data: {
+        app: enrichedApp,
+        enabledToolNames: resolveEnabledToolNames(enrichedApp.tools),
       },
     };
 

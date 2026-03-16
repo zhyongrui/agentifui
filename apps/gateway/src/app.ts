@@ -49,6 +49,11 @@ import {
   createWorkspaceRuntimeService,
   type WorkspaceRuntimeService,
 } from './services/workspace-runtime.js';
+import {
+  createToolRegistryService,
+  type ToolRegistryService,
+} from './services/tool-registry-service.js';
+import { createPersistentToolRegistryService } from './services/persistent-tool-registry-service.js';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -59,6 +64,7 @@ type BuildAppOptions = {
   knowledgeService?: KnowledgeService;
   workspaceService?: WorkspaceService;
   runtimeService?: WorkspaceRuntimeService;
+  toolRegistryService?: ToolRegistryService;
 };
 
 const DEFAULT_BETTER_AUTH_SECRET = 'agentifui-dev-secret-change-me';
@@ -150,6 +156,11 @@ export async function buildApp(
     createWorkspaceRuntimeService({
       degradedRuntimeIds: env.degradedRuntimeIds,
     });
+  const toolRegistryService =
+    options.toolRegistryService ??
+    (database
+      ? createPersistentToolRegistryService(database)
+      : createToolRegistryService());
 
   if (ownsDatabase && database) {
     app.addHook('onClose', async () => {
@@ -210,7 +221,13 @@ export async function buildApp(
 
   await registerRootRoutes(app, env, observabilityService, runtimeService);
   await registerAuthRoutes(app, env, authService, auditService);
-  await registerAdminRoutes(app, authService, adminService, auditService);
+  await registerAdminRoutes(
+    app,
+    authService,
+    adminService,
+    auditService,
+    toolRegistryService,
+  );
   await registerAdminSourceRoutes(app, authService, adminService, knowledgeService, auditService);
   await registerWorkspaceRoutes(
     app,
@@ -226,6 +243,7 @@ export async function buildApp(
     auditService,
     knowledgeService,
     runtimeService,
+    toolRegistryService,
   );
 
   return app;

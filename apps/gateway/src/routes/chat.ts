@@ -49,6 +49,7 @@ import {
   summarizeRuntimePrompt,
   type WorkspaceRuntimeService,
 } from "../services/workspace-runtime.js";
+import { type ToolRegistryService } from "../services/tool-registry-service.js";
 import { buildWorkspaceRunFailure } from "../services/workspace-run-failure.js";
 import { calculateCompletionQuotaCost } from "../services/workspace-quota.js";
 import type { WorkspaceService } from "../services/workspace-service.js";
@@ -728,6 +729,69 @@ function isChatToolChoice(value: unknown): value is ChatToolChoice {
     typeof (toolFunction as Record<string, unknown>).name === "string" &&
     String((toolFunction as Record<string, unknown>).name).trim().length > 0
   );
+}
+
+function collectAssistantToolCallNames(messages: ChatCompletionMessage[]) {
+  return messages.flatMap((message) => {
+    if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) {
+      return [];
+    }
+
+    return message.tool_calls.map((toolCall) => toolCall.function.name.trim());
+  });
+}
+
+function validateToolRegistryRequest(input: {
+  enabledToolNames: string[];
+  messages: ChatCompletionMessage[];
+  tools?: ChatToolDescriptor[];
+  toolChoice?: ChatToolChoice;
+}) {
+  const enabledToolNameSet = new Set(input.enabledToolNames);
+  const invalidDescriptorNames =
+    input.tools?.flatMap((tool) =>
+      enabledToolNameSet.has(tool.function.name.trim())
+        ? []
+        : [tool.function.name.trim()],
+    ) ?? [];
+
+  if (invalidDescriptorNames.length > 0) {
+    return {
+      param: "tools",
+      invalidToolNames: invalidDescriptorNames,
+      message:
+        "The request references tools that are not enabled for this tenant and app.",
+    };
+  }
+
+  if (
+    input.toolChoice &&
+    input.toolChoice !== "auto" &&
+    input.toolChoice !== "none" &&
+    !enabledToolNameSet.has(input.toolChoice.function.name.trim())
+  ) {
+    return {
+      param: "tool_choice",
+      invalidToolNames: [input.toolChoice.function.name.trim()],
+      message:
+        "tool_choice references a function that is not enabled for this tenant and app.",
+    };
+  }
+
+  const invalidMessageToolNames = collectAssistantToolCallNames(input.messages).filter(
+    (name) => !enabledToolNameSet.has(name),
+  );
+
+  if (invalidMessageToolNames.length > 0) {
+    return {
+      param: "messages",
+      invalidToolNames: invalidMessageToolNames,
+      message:
+        "assistant tool_calls must reference functions that are enabled for this tenant and app.",
+    };
+  }
+
+  return null;
 }
 
 function extractMessageText(message: ChatCompletionMessage) {
@@ -1635,6 +1699,7 @@ export async function registerChatRoutes(
   auditService: AuditService,
   knowledgeService: KnowledgeService,
   runtimeService: WorkspaceRuntimeService,
+  toolRegistryService: ToolRegistryService,
 ) {
   app.get("/v1/models", async (request, reply) => {
     const traceId =
@@ -1782,6 +1847,52 @@ export async function registerChatRoutes(
         message: "Local workspace files require an existing conversation_id.",
         param: "conversation_id",
       });
+    }
+
+    let shouldValidateTools = false;
+
+    if (
+      body.tools !== undefined ||
+      (body.tool_choice !== undefined && body.tool_choice !== "auto" && body.tool_choice !== "none") ||
+      collectAssistantToolCallNames(body.messages).length > 0
+    ) {
+      if (body.conversation_id?.trim()) {
+        const conversationForValidation = await workspaceService.getConversationForUser(
+          access.user,
+          body.conversation_id.trim(),
+        );
+
+        shouldValidateTools =
+          conversationForValidation.ok &&
+          conversationForValidation.data.app.id === appId;
+      } else {
+        const catalog = await workspaceService.getCatalogForUser(access.user);
+        shouldValidateTools = catalog.apps.some((candidate) => candidate.id === appId);
+      }
+    }
+
+    if (shouldValidateTools) {
+      const enabledTools = await toolRegistryService.getEnabledToolsForUser(access.user, {
+        appId,
+      });
+      const toolValidationError = validateToolRegistryRequest({
+        enabledToolNames: enabledTools.map((tool) => tool.function.name),
+        messages: body.messages,
+        tools: body.tools,
+        toolChoice: body.tool_choice,
+      });
+
+      if (toolValidationError) {
+        reply.code(400);
+        return buildErrorResponse(fallbackTraceId, {
+          type: "invalid_request_error",
+          code: "invalid_messages",
+          message: `${toolValidationError.message} Invalid tools: ${[
+            ...new Set(toolValidationError.invalidToolNames),
+          ].join(", ")}.`,
+          param: toolValidationError.param,
+        });
+      }
     }
 
     const conversationResult = await resolveConversation(

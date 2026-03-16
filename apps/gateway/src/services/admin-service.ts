@@ -388,6 +388,9 @@ function buildAppSummary(
     denyGrantCount: grants.filter(grant => grant.effect === 'deny').length,
     launchCount: app.id === 'app_policy_watch' ? 4 : 0,
     lastLaunchedAt: app.id === 'app_policy_watch' ? new Date(Date.now() - 15 * 60_000).toISOString() : null,
+    tools: [],
+    enabledToolCount: 0,
+    toolOverrideCount: 0,
     userGrants: grants
       .slice()
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))

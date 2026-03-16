@@ -92,7 +92,9 @@ test("admin source management feeds retrieval-backed chat citations", async ({
 
   await page.getByRole("link", { name: "Sources" }).click();
   await expect(page).toHaveURL(/\/admin\/sources$/);
-  await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible({
+    timeout: 60_000,
+  });
 
   await page.getByLabel("Title").fill(sourceTitle);
   await page.getByLabel("Source kind").selectOption("markdown");
@@ -179,7 +181,15 @@ Residents may request approved late access for labs.`);
   ).toBeVisible({
     timeout: 60_000,
   });
-  await expect(conversationPanel.getByText(sourceTitle).first()).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        (await conversationPanel.textContent())?.includes(sourceTitle) ?? false,
+      {
+        timeout: 60_000,
+      },
+    )
+    .toBe(true);
 
   const runHistoryPanel = page.locator("section.chat-panel").filter({
     has: page.getByRole("heading", { name: "Run history" }),

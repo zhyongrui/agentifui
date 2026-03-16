@@ -26,6 +26,7 @@ const BACKUP_TABLES = [
   'workspace_apps',
   'workspace_app_access_grants',
   'workspace_group_app_grants',
+  'workspace_app_tool_overrides',
   'workspace_user_preferences',
   'workspace_quota_limits',
   'conversations',

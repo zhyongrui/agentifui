@@ -1,6 +1,10 @@
 'use client';
 
-import type { AdminAppGrantCreateRequest, AdminAppSummary } from '@agentifui/shared/admin';
+import type {
+  AdminAppGrantCreateRequest,
+  AdminAppSummary,
+  WorkspaceAppToolSummary,
+} from '@agentifui/shared';
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
@@ -12,6 +16,7 @@ import {
   fetchAdminApps,
   fetchAdminCleanup,
   revokeAdminAppGrant,
+  updateAdminAppTools,
 } from '../../../lib/admin-client';
 import {
   fetchGatewayHealth,
@@ -34,9 +39,37 @@ function readDraft(
   };
 }
 
+function readToolDraft(
+  drafts: Record<string, string[]>,
+  app: Pick<AdminAppSummary, 'id' | 'tools'>
+) {
+  return drafts[app.id] ?? app.tools.filter(tool => tool.enabled).map(tool => tool.name);
+}
+
+function toggleToolName(currentToolNames: string[], toolName: string) {
+  return currentToolNames.includes(toolName)
+    ? currentToolNames.filter(currentName => currentName !== toolName)
+    : [...currentToolNames, toolName].sort((left, right) => left.localeCompare(right));
+}
+
+function formatToolAuth(tool: WorkspaceAppToolSummary) {
+  const flags: string[] = [tool.auth.scope];
+
+  if (tool.auth.requiresFreshMfa) {
+    flags.push('fresh_mfa');
+  }
+
+  if (tool.auth.requiresApproval) {
+    flags.push('approval');
+  }
+
+  return flags.join(' · ');
+}
+
 export default function AdminAppsPage() {
   const { data, error, isLoading, reload, session } = useAdminPageData(fetchAdminApps);
   const [drafts, setDrafts] = useState<Record<string, AdminAppGrantCreateRequest>>({});
+  const [toolDrafts, setToolDrafts] = useState<Record<string, string[]>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
@@ -67,6 +100,18 @@ export default function AdminAppsPage() {
       cancelled = true;
     };
   }, [session]);
+
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+
+    setToolDrafts(currentDrafts =>
+      Object.fromEntries(
+        data.apps.map(app => [app.id, currentDrafts[app.id] ?? app.tools.filter(tool => tool.enabled).map(tool => tool.name)])
+      )
+    );
+  }, [data]);
 
   function updateDraft(
     appId: string,
@@ -156,6 +201,42 @@ export default function AdminAppsPage() {
     reload();
   }
 
+  async function handleSaveTools(app: AdminAppSummary) {
+    if (!session) {
+      return;
+    }
+
+    const enabledToolNames = readToolDraft(toolDrafts, app);
+
+    setPendingActionId(`tools:${app.id}`);
+    setMutationError(null);
+    setNotice(null);
+
+    let result: Awaited<ReturnType<typeof updateAdminAppTools>>;
+
+    try {
+      result = await updateAdminAppTools(session.sessionToken, app.id, {
+        enabledToolNames,
+      });
+    } catch {
+      setPendingActionId(null);
+      setMutationError('Saving tool registry changes failed. Please retry.');
+      return;
+    }
+
+    if (!result.ok) {
+      setPendingActionId(null);
+      setMutationError(result.error.message);
+      return;
+    }
+
+    setPendingActionId(null);
+    setNotice(
+      `${result.data.app.name} now exposes ${result.data.enabledToolNames.length} enabled tools in this tenant.`
+    );
+    reload();
+  }
+
   if (isLoading) {
     return <p className="lead">Loading admin apps...</p>;
   }
@@ -229,6 +310,10 @@ export default function AdminAppsPage() {
               <span>Deny overrides</span>
               <strong>{data.apps.reduce((total, app) => total + app.denyGrantCount, 0)}</strong>
             </article>
+            <article className="admin-stat-card">
+              <span>Enabled tools</span>
+              <strong>{data.apps.reduce((total, app) => total + app.enabledToolCount, 0)}</strong>
+            </article>
           </div>
 
           <div className="workspace-badges">
@@ -240,6 +325,7 @@ export default function AdminAppsPage() {
           <div className="app-grid">
             {data.apps.map(app => {
               const draft = readDraft(drafts, app.id);
+              const enabledToolDraft = readToolDraft(toolDrafts, app);
 
               return (
                 <article className="app-card admin-card" key={app.id}>
@@ -281,6 +367,12 @@ export default function AdminAppsPage() {
                       <span className="detail-label">Deny overrides</span>
                       <strong>{app.denyGrantCount}</strong>
                     </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Enabled tools</span>
+                      <strong>
+                        {app.enabledToolCount} / {app.tools.length}
+                      </strong>
+                    </div>
                   </div>
 
                   <div>
@@ -297,6 +389,63 @@ export default function AdminAppsPage() {
                       )}
                     </div>
                   </div>
+
+                  <section className="stack">
+                    <div>
+                      <strong>Tool registry</strong>
+                      <p className="helper-text">
+                        Configure which structured tools this tenant exposes to the app runtime.
+                      </p>
+                    </div>
+
+                    <div className="detail-list">
+                      {app.tools.length === 0 ? (
+                        <div className="detail-row">
+                          <span className="detail-label">Available tools</span>
+                          <strong>No tools assigned</strong>
+                        </div>
+                      ) : (
+                        app.tools.map(tool => {
+                          const checked = enabledToolDraft.includes(tool.name);
+
+                          return (
+                            <label className="detail-row" key={`${app.id}:${tool.name}`}>
+                              <div className="admin-grant-copy">
+                                <strong>{tool.name}</strong>
+                                <span>{tool.description ?? 'No description provided.'}</span>
+                                <span>
+                                  {formatToolAuth(tool)} · {tool.defaultEnabled ? 'default on' : 'default off'} ·{' '}
+                                  {tool.isOverridden ? 'tenant override' : 'catalog default'}
+                                </span>
+                              </div>
+                              <input
+                                aria-label={`${app.name} tool ${tool.name}`}
+                                checked={checked}
+                                onChange={() =>
+                                  setToolDrafts(currentDrafts => ({
+                                    ...currentDrafts,
+                                    [app.id]: toggleToolName(readToolDraft(currentDrafts, app), tool.name),
+                                  }))
+                                }
+                                type="checkbox"
+                              />
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {app.tools.length > 0 ? (
+                      <button
+                        className="secondary"
+                        disabled={pendingActionId === `tools:${app.id}`}
+                        onClick={() => handleSaveTools(app)}
+                        type="button"
+                      >
+                        {pendingActionId === `tools:${app.id}` ? 'Saving tools...' : 'Save tool registry'}
+                      </button>
+                    ) : null}
+                  </section>
 
                   <section className="stack">
                     <div>

@@ -143,6 +143,37 @@ export const workspaceGroupAppGrants = pgTable(
   })
 );
 
+export const workspaceAppToolOverrides = pgTable(
+  'workspace_app_tool_overrides',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    appId: varchar('app_id', { length: 120 })
+      .notNull()
+      .references(() => workspaceApps.id, { onDelete: 'cascade' }),
+    toolName: varchar('tool_name', { length: 160 }).notNull(),
+    enabled: boolean('enabled').notNull(),
+    updatedByUserId: varchar('updated_by_user_id', { length: 120 }).references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workspaceAppToolOverrideUnique: uniqueIndex('workspace_app_tool_overrides_tenant_app_tool_unique').on(
+      table.tenantId,
+      table.appId,
+      table.toolName
+    ),
+    workspaceAppToolOverrideTenantIndex: index('workspace_app_tool_overrides_tenant_idx').on(
+      table.tenantId
+    ),
+    workspaceAppToolOverrideAppIndex: index('workspace_app_tool_overrides_app_idx').on(table.appId),
+  })
+);
+
 export const workspaceUserPreferences = pgTable(
   'workspace_user_preferences',
   {

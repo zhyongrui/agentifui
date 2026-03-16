@@ -72,3 +72,17 @@ export type ChatToolCall = {
     arguments: string;
   };
 };
+
+export type WorkspaceAppToolSummary = {
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  defaultEnabled: boolean;
+  isOverridden: boolean;
+  auth: ToolAuthRequirement;
+  tags: string[];
+  inputSchema: ToolInputSchema;
+  strict: boolean;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+};

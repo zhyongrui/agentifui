@@ -15,6 +15,7 @@ import {
   fetchAdminUsage,
   fetchAdminUsers,
   revokeAdminAppGrant,
+  updateAdminAppTools,
   updateAdminSourceStatus,
   updateAdminTenantStatus,
 } from './admin-client.js';
@@ -608,6 +609,44 @@ describe('admin client', () => {
       ok: true,
       data: {
         revokedGrantId: 'grant-1',
+      },
+    });
+  });
+
+  it('updates admin app tool registry through the same-origin gateway proxy', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({
+        ok: true,
+        data: {
+          app: {
+            id: 'app_policy_watch',
+            enabledToolCount: 1,
+          },
+          enabledToolNames: ['workspace.search'],
+        },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await updateAdminAppTools('session-123', 'app_policy_watch', {
+      enabledToolNames: ['workspace.search'],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/gateway/admin/apps/app_policy_watch/tools', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        enabledToolNames: ['workspace.search'],
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        enabledToolNames: ['workspace.search'],
       },
     });
   });

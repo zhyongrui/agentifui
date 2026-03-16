@@ -25,8 +25,8 @@
     "backup:restore": "node scripts/backup-restore.mjs",
     "type-check": "turbo run type-check",
     "lint": "turbo run lint",
-    "test:unit": "vitest run --exclude apps/gateway/src/routes/auth-persistence.test.ts",
-    "test:persistence": "vitest run apps/gateway/src/routes/auth-persistence.test.ts",
+    "test:unit": "vitest run --exclude apps/gateway/src/routes/auth-persistence.test.ts --exclude apps/gateway/src/routes/knowledge-persistence.test.ts --exclude apps/gateway/src/routes/tool-registry-persistence.test.ts",
+    "test:persistence": "vitest run apps/gateway/src/routes/auth-persistence.test.ts && vitest run apps/gateway/src/routes/knowledge-persistence.test.ts && vitest run apps/gateway/src/routes/tool-registry-persistence.test.ts",
     "test": "npm run test:unit && npm run test:persistence",
     "test:watch": "vitest",
     "test:e2e": "node scripts/run-e2e.mjs"

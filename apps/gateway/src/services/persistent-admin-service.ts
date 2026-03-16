@@ -790,6 +790,9 @@ async function listAppSummariesForTenant(database: DatabaseClient, tenantId: str
       denyGrantCount: accessState?.denyGrantCount ?? 0,
       launchCount: launchStats?.launch_count ?? 0,
       lastLaunchedAt: toIso(launchStats?.last_launched_at ?? null),
+      tools: [],
+      enabledToolCount: 0,
+      toolOverrideCount: 0,
       userGrants: userGrantsByAppId.get(appRow.id) ?? [],
     };
   });

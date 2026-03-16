@@ -412,6 +412,99 @@ describe("chat routes", () => {
     }
   });
 
+  it("rejects tool names that are not enabled for the tenant app registry", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+          "x-active-group-id": "grp_research",
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          messages: [
+            {
+              role: "assistant",
+              content: "Calling an unauthorized tool.",
+              tool_calls: [
+                {
+                  id: "call_tenant_usage_read",
+                  type: "function",
+                  function: {
+                    name: "tenant.usage.read",
+                    arguments: "{}",
+                  },
+                },
+              ],
+            },
+            {
+              role: "user",
+              content: "hello",
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "tenant.usage.read",
+                description: "Read tenant-wide usage summaries.",
+                inputSchema: {
+                  type: "object",
+                },
+                strict: true,
+              },
+              auth: {
+                scope: "tenant_admin",
+              },
+              enabled: true,
+            },
+          ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "tenant.usage.read",
+            },
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({
+        error: {
+          message:
+            "The request references tools that are not enabled for this tenant and app. Invalid tools: tenant.usage.read.",
+          type: "invalid_request_error",
+          code: "invalid_messages",
+          param: "tools",
+          trace_id: expect.any(String),
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("routes runbook mentor through the structured runtime adapter", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);

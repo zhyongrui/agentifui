@@ -10,6 +10,7 @@ import type {
   AdminUsageResponse,
   AdminUserSummary,
 } from '@agentifui/shared/admin';
+import type { WorkspaceAppToolSummary } from '@agentifui/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from '../app.js';
@@ -115,6 +116,58 @@ const adminApps: AdminAppSummary[] = [
     launchCount: 1,
     lastLaunchedAt: '2026-03-12T00:10:00.000Z',
     userGrants: [],
+    tools: [
+      {
+        name: 'tenant.access.review',
+        description: 'Review pending access policy changes and summarize impacted subjects.',
+        enabled: true,
+        defaultEnabled: true,
+        isOverridden: false,
+        auth: {
+          scope: 'tenant_admin',
+          requiresFreshMfa: true,
+        },
+        tags: ['tenant', 'rbac', 'admin'],
+        inputSchema: {
+          type: 'object',
+          properties: {
+            subjectType: {
+              type: 'string',
+            },
+          },
+          additionalProperties: false,
+        },
+        strict: true,
+        updatedAt: null,
+        updatedByUserId: null,
+      },
+      {
+        name: 'tenant.usage.read',
+        description: 'Read tenant-wide launch, run, storage, and quota usage summaries.',
+        enabled: true,
+        defaultEnabled: true,
+        isOverridden: false,
+        auth: {
+          scope: 'tenant_admin',
+          requiresFreshMfa: true,
+        },
+        tags: ['tenant', 'usage', 'admin'],
+        inputSchema: {
+          type: 'object',
+          properties: {
+            scope: {
+              type: 'string',
+            },
+          },
+          additionalProperties: false,
+        },
+        strict: true,
+        updatedAt: null,
+        updatedByUserId: null,
+      },
+    ] satisfies WorkspaceAppToolSummary[],
+    enabledToolCount: 2,
+    toolOverrideCount: 0,
   },
 ];
 
@@ -918,7 +971,23 @@ describe('admin routes', () => {
 
       expect(usersResponse.json().data.users).toEqual(adminUsers);
       expect(groupsResponse.json().data.groups).toEqual(adminGroups);
-      expect(appsResponse.json().data.apps).toEqual(adminApps);
+      expect(appsResponse.json().data.apps).toEqual([
+        expect.objectContaining({
+          id: 'app_tenant_control',
+          enabledToolCount: 2,
+          toolOverrideCount: 0,
+          tools: expect.arrayContaining([
+            expect.objectContaining({
+              name: 'tenant.access.review',
+              enabled: true,
+            }),
+            expect.objectContaining({
+              name: 'tenant.usage.read',
+              enabled: true,
+            }),
+          ]),
+        }),
+      ]);
       expect(auditResponse.json().data.events).toEqual(auditEvents);
       expect(auditResponse.json().data.capabilities).toEqual({
         canReadAdmin: true,
@@ -1707,6 +1776,91 @@ describe('admin routes', () => {
           expect.objectContaining({
             action: 'admin.workspace_grant.revoked',
             entityId: 'user-member',
+          }),
+        ])
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('updates the tenant app tool registry and records an audit event', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const auditService = createAuditService();
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+      auditService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/admin/apps/app_tenant_control/tools',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          enabledToolNames: ['tenant.access.review'],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        ok: true,
+        data: {
+          enabledToolNames: ['tenant.access.review'],
+          app: {
+            id: 'app_tenant_control',
+            enabledToolCount: 1,
+            toolOverrideCount: 1,
+            tools: expect.arrayContaining([
+              expect.objectContaining({
+                name: 'tenant.access.review',
+                enabled: true,
+              }),
+              expect.objectContaining({
+                name: 'tenant.usage.read',
+                enabled: false,
+                isOverridden: true,
+              }),
+            ]),
+          },
+        },
+      });
+
+      const auditEvents = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'admin.workspace_tool_registry.updated',
+            entityType: 'workspace_app',
+            entityId: 'app_tenant_control',
+            payload: expect.objectContaining({
+              enabledToolNames: ['tenant.access.review'],
+              toolOverrideCount: 1,
+            }),
           }),
         ])
       );

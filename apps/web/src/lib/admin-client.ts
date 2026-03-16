@@ -2,6 +2,8 @@ import type {
   AdminAppGrantCreateRequest,
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
+  AdminAppToolUpdateRequest,
+  AdminAppToolUpdateResponse,
   AdminAppsResponse,
   AdminCleanupResponse,
   AdminContextResponse,
@@ -388,4 +390,15 @@ export async function revokeAdminAppGrant(
       method: 'DELETE',
     }
   );
+}
+
+export async function updateAdminAppTools(
+  sessionToken: string,
+  appId: string,
+  payload: AdminAppToolUpdateRequest
+): Promise<AdminAppToolUpdateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminAppToolUpdateResponse>(`/admin/apps/${appId}/tools`, sessionToken, {
+    method: 'PUT',
+    body: payload,
+  });
 }

@@ -89,6 +89,7 @@ export type AuthAuditAction =
   | 'admin.tenant.suspended'
   | 'admin.tenant.reactivated'
   | 'admin.workspace.read'
+  | 'admin.workspace_tool_registry.updated'
   | 'admin.workspace_grant.created'
   | 'admin.workspace_grant.revoked'
   | 'admin.workspace_grant.rejected';

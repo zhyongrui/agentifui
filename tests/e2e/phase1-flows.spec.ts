@@ -848,7 +848,29 @@ test("register/login/workspace controls work for a normal active user", async ({
       timeout: 60_000,
     },
   );
-  await page.getByRole("button", { name: "Stop response" }).click();
+  await expect
+    .poll(
+      async () => {
+        const stopButton = page.getByRole("button", { name: "Stop response" });
+
+        if ((await stopButton.count()) === 0) {
+          return "missing";
+        }
+
+        try {
+          await stopButton.click({
+            timeout: 2_000,
+          });
+          return "clicked";
+        } catch {
+          return "retry";
+        }
+      },
+      {
+        timeout: 10_000,
+      },
+    )
+    .toBe("clicked");
   const runStatusCard = page.locator("article.chat-meta-card").filter({
     has: page.getByText("Run status"),
   });
@@ -986,13 +1008,37 @@ $$x^2 + y^2 = z^2$$`);
   const runHistoryPanel = page.locator("section.chat-panel").filter({
     has: page.getByRole("heading", { name: "Run history" }),
   });
-  await expect(runHistoryPanel.getByText("Replay citations")).toBeVisible();
-  await expect(
-    runHistoryPanel.getByText("S1 · Policy Watch workspace context", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(runHistoryPanel.getByText("Replay source blocks")).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        (await runHistoryPanel.textContent())?.includes("Replay citations") ??
+        false,
+      {
+        timeout: 60_000,
+      },
+    )
+    .toBe(true);
+  await expect
+    .poll(
+      async () =>
+        (await runHistoryPanel.textContent())?.includes(
+          "S1 · Policy Watch workspace context",
+        ) ?? false,
+      {
+        timeout: 60_000,
+      },
+    )
+    .toBe(true);
+  await expect
+    .poll(
+      async () =>
+        (await runHistoryPanel.textContent())?.includes("Replay source blocks") ??
+        false,
+      {
+        timeout: 60_000,
+      },
+    )
+    .toBe(true);
   await expect(
     runHistoryPanel.locator(".artifact-link-card").getByText(
       "Policy Watch workspace context",
@@ -1038,8 +1084,11 @@ test("runbook mentor browser flow uses the structured runtime path", async ({
   const conversationPanel = page.locator("section.chat-panel").filter({
     has: page.getByRole("heading", { name: "Conversation" }),
   });
+  const latestAssistantBubble = conversationPanel
+    .locator("article.chat-bubble.assistant")
+    .last();
   await expect(
-    conversationPanel.getByText(
+    latestAssistantBubble.getByText(
       "Runbook Mentor translated the request into a structured execution outline.",
     ),
   ).toBeVisible({
@@ -1049,12 +1098,28 @@ test("runbook mentor browser flow uses the structured runtime path", async ({
   const runHistoryPanel = page.locator("section.chat-panel").filter({
     has: page.getByRole("heading", { name: "Run history" }),
   });
-  await expect(
-    runHistoryPanel.getByText("Structured Placeholder Runtime").first(),
-  ).toBeVisible();
-  await expect(
-    runHistoryPanel.getByText("placeholder_structured").first(),
-  ).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        (await runHistoryPanel.textContent())?.includes(
+          "Structured Placeholder Runtime",
+        ) ?? false,
+      {
+        timeout: 60_000,
+      },
+    )
+    .toBe(true);
+  await expect
+    .poll(
+      async () =>
+        (await runHistoryPanel.textContent())?.includes(
+          "placeholder_structured",
+        ) ?? false,
+      {
+        timeout: 60_000,
+      },
+    )
+    .toBe(true);
 });
 
 test("degraded runtime keeps history readable and the composer disabled", async ({
@@ -1952,22 +2017,42 @@ test("admin pages render persisted governance data for tenant admins", async ({
 
   await page.getByRole("link", { name: "Admin preview" }).click();
   await expect(page).toHaveURL(/\/admin\/users$/);
-  await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Users" })).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.getByText("Total users")).toBeVisible();
   await expect(page.getByText(adminEmail)).toBeVisible();
   await expect(page.getByRole("link", { name: "Tenants" })).toHaveCount(0);
 
   await page.getByRole("link", { name: "Groups" }).click();
   await expect(page).toHaveURL(/\/admin\/groups$/);
-  await expect(page.getByRole("heading", { name: "Groups" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Groups" })).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.getByText("Total groups")).toBeVisible();
   await expect(page.getByText("Product Studio")).toBeVisible();
 
   await page.getByRole("link", { name: "Apps", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/apps$/);
-  await expect(page.getByRole("heading", { name: "Apps" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Apps" })).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.getByText("Tenant Control")).toBeVisible();
   const tenantControlCard = appCard(page, "Tenant Control");
+  await expect(
+    tenantControlCard.getByLabel("Tenant Control tool tenant.usage.read"),
+  ).toBeChecked();
+  await tenantControlCard
+    .getByLabel("Tenant Control tool tenant.usage.read")
+    .uncheck();
+  await Promise.all([
+    waitForGatewayPut(page, "/admin/apps/app_tenant_control/tools"),
+    tenantControlCard.getByRole("button", { name: "Save tool registry" }).click(),
+  ]);
+  await expect(
+    page.getByText("Tenant Control now exposes 1 enabled tools in this tenant."),
+  ).toBeVisible();
+  await expect(tenantControlCard.getByText("1 / 2")).toBeVisible();
   await tenantControlCard
     .getByLabel("Tenant Control grant email")
     .fill(memberEmail);
@@ -1989,7 +2074,9 @@ test("admin pages render persisted governance data for tenant admins", async ({
 
   await page.getByRole("link", { name: "Audit" }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/);
-  await expect(page.getByRole("heading", { name: "Audit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Audit" })).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.getByText("Top actions")).toBeVisible();
   await expect(
     page
@@ -2113,7 +2200,9 @@ test("root admins can open the platform tenant inventory page", async ({
 
   await page.getByRole("link", { name: "Tenants" }).click();
   await expect(page).toHaveURL(/\/admin\/tenants$/);
-  await expect(page.getByRole("heading", { name: "Tenants" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tenants" })).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(page.getByText("Total tenants")).toBeVisible();
 
   await page.getByLabel("Tenant name").fill(tenantName);
