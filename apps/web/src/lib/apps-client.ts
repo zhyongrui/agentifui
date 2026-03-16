@@ -209,6 +209,34 @@ export async function updateWorkspaceConversationPresence(
   );
 }
 
+export async function fetchWorkspaceSharedConversationPresence(
+  sessionToken: string,
+  shareId: string
+): Promise<WorkspaceConversationPresenceResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationPresenceResponse>(
+    `/workspace/shares/${shareId}/presence`,
+    {
+      method: 'GET',
+      sessionToken,
+    }
+  );
+}
+
+export async function updateWorkspaceSharedConversationPresence(
+  sessionToken: string,
+  shareId: string,
+  input: WorkspaceConversationPresenceUpdateRequest
+): Promise<WorkspaceConversationPresenceResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationPresenceResponse>(
+    `/workspace/shares/${shareId}/presence`,
+    {
+      method: 'PUT',
+      sessionToken,
+      body: input,
+    }
+  );
+}
+
 export async function fetchWorkspacePendingActions(
   sessionToken: string,
   conversationId: string

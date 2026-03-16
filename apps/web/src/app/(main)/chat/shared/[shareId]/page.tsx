@@ -1,5 +1,6 @@
 "use client";
 
+import type { WorkspaceConversationPresence } from "@agentifui/shared/apps";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -11,8 +12,16 @@ import { WorkspaceSafetySignalList } from "../../../../../components/workspace-s
 import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-artifacts";
 import { WorkspaceCitationList } from "../../../../../components/workspace-sources";
 import { WorkspaceToolCallSummaryList } from "../../../../../components/workspace-tool-summary";
-import { fetchWorkspaceSharedConversation } from "../../../../../lib/apps-client";
+import {
+  fetchWorkspaceSharedConversation,
+  fetchWorkspaceSharedConversationPresence,
+  updateWorkspaceSharedConversationPresence,
+} from "../../../../../lib/apps-client";
 import { clearAuthSession } from "../../../../../lib/auth-session";
+import {
+  readOrCreateWorkspacePresenceSessionId,
+  summarizeWorkspacePresence,
+} from "../../../../../lib/workspace-presence";
 import { localizeWorkspaceApp } from "../../../../../lib/workspace-localization";
 import { useProtectedSession } from "../../../../../lib/use-protected-session";
 
@@ -36,6 +45,28 @@ function describeSharedMessageLabel(input: {
   return input.appName;
 }
 
+function describePresenceState(
+  locale: string,
+  state: "active" | "idle",
+) {
+  if (locale === "zh-CN") {
+    return state === "active" ? "在线" : "空闲";
+  }
+
+  return state === "active" ? "Active" : "Idle";
+}
+
+function describePresenceSurface(
+  locale: string,
+  surface: "conversation" | "shared_conversation",
+) {
+  if (locale === "zh-CN") {
+    return surface === "shared_conversation" ? "共享视图" : "所有者视图";
+  }
+
+  return surface === "shared_conversation" ? "Shared view" : "Owner view";
+}
+
 export default function SharedConversationPage() {
   const params = useParams<{ shareId: string }>();
   const router = useRouter();
@@ -45,6 +76,11 @@ export default function SharedConversationPage() {
     ReturnType<typeof fetchWorkspaceSharedConversation>
   > | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [presence, setPresence] = useState<WorkspaceConversationPresence | null>(
+    null,
+  );
+  const [lastLiveSyncAt, setLastLiveSyncAt] = useState<string | null>(null);
+  const [presenceSessionId, setPresenceSessionId] = useState<string | null>(null);
   const shareId =
     typeof params?.shareId === "string" ? params.shareId.trim() : "";
   const copy =
@@ -67,6 +103,13 @@ export default function SharedConversationPage() {
           safety: "共享安全提示",
           citations: "共享引用",
           artifacts: "共享产物",
+          liveSync: "协作视图",
+          viewers: "位查看者",
+          activeViewers: "位在线查看者",
+          lastSynced: "最近同步",
+          viewerPresence: "协作者视图",
+          you: "你",
+          noViewers: "当前没有其他查看者在线。",
         }
       : {
           missingShareId: "Share id is missing.",
@@ -87,11 +130,19 @@ export default function SharedConversationPage() {
           safety: "Shared safety signals",
           citations: "Shared citations",
           artifacts: "Shared artifacts",
+          liveSync: "Live view",
+          viewers: "viewers",
+          activeViewers: "active viewers",
+          lastSynced: "Last synced",
+          viewerPresence: "Viewer presence",
+          you: "You",
+          noViewers: "No other viewers are currently active on this shared surface.",
         };
 
   useEffect(() => {
     if (!session || !shareId) {
       setPayload(null);
+      setPresence(null);
       setError(shareId ? null : copy.missingShareId);
       return;
     }
@@ -135,6 +186,100 @@ export default function SharedConversationPage() {
     };
   }, [router, session, shareId]);
 
+  useEffect(() => {
+    if (!shareId) {
+      setPresenceSessionId(null);
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    setPresenceSessionId(
+      readOrCreateWorkspacePresenceSessionId(
+        window.sessionStorage,
+        `shared:${shareId}`,
+      ),
+    );
+  }, [shareId]);
+
+  useEffect(() => {
+    if (!session || !shareId || !presenceSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncPresence = async (state: "active" | "idle") => {
+      try {
+        const result = await updateWorkspaceSharedConversationPresence(
+          session.sessionToken,
+          shareId,
+          {
+            sessionId: presenceSessionId,
+            state,
+            surface: "shared_conversation",
+          },
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!result.ok) {
+          if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+            clearAuthSession(window.sessionStorage);
+            router.replace("/login");
+          }
+          return;
+        }
+
+        setPresence(result.data);
+        setLastLiveSyncAt(new Date().toISOString());
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        try {
+          const fallback = await fetchWorkspaceSharedConversationPresence(
+            session.sessionToken,
+            shareId,
+          );
+
+          if (!cancelled && fallback.ok) {
+            setPresence(fallback.data);
+          }
+        } catch {
+          // Ignore transient presence heartbeat failures on the read-only surface.
+        }
+      }
+    };
+
+    const tick = async () => {
+      const nextState =
+        document.visibilityState === "visible" ? "active" : "idle";
+      await syncPresence(nextState);
+    };
+
+    const handleVisibilityChange = () => {
+      void tick();
+    };
+
+    void tick();
+    const intervalId = window.setInterval(() => {
+      void tick();
+    }, 10_000);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [presenceSessionId, router, session, shareId]);
+
   if (isLoading) {
     return <p className="lead">{copy.checking}</p>;
   }
@@ -159,6 +304,8 @@ export default function SharedConversationPage() {
 
   const { conversation, share } = payload.data;
   const localizedApp = localizeWorkspaceApp(conversation.app, locale);
+  const presenceSummary = summarizeWorkspacePresence(presence);
+  const visibleViewers = presence?.viewers ?? [];
 
   return (
     <div className="chat-surface stack">
@@ -174,6 +321,17 @@ export default function SharedConversationPage() {
           <span className="workspace-badge">{copy.shareLabel} {share.id}</span>
           <span className="workspace-badge">{copy.groupLabel} {share.group.name}</span>
           <span className="workspace-badge">{share.status}</span>
+          <span className="workspace-badge">
+            {copy.liveSync} · {presenceSummary.total} {copy.viewers}
+          </span>
+          <span className="workspace-badge">
+            {presenceSummary.active} {copy.activeViewers}
+          </span>
+          {lastLiveSyncAt ? (
+            <span className="workspace-badge">
+              {copy.lastSynced} {new Date(lastLiveSyncAt).toLocaleTimeString()}
+            </span>
+          ) : null}
         </div>
       </header>
 
@@ -183,6 +341,33 @@ export default function SharedConversationPage() {
             <h2>{copy.sharedConversation}</h2>
             <p>{copy.sharedLead(share.group.name)}</p>
           </div>
+        </div>
+
+        <div className="workspace-presence-section">
+          <span className="chat-suggested-prompts-label">{copy.viewerPresence}</span>
+          {visibleViewers.length > 0 ? (
+            <div className="workspace-presence-list">
+              {visibleViewers.map((viewer) => (
+                <span
+                  key={viewer.sessionId}
+                  className={`workspace-presence-chip${
+                    viewer.isCurrentUser ? " is-current" : ""
+                  }`}
+                >
+                  <strong>
+                    {viewer.displayName}
+                    {viewer.isCurrentUser ? ` · ${copy.you}` : ""}
+                  </strong>
+                  <span className="workspace-presence-meta">
+                    {describePresenceState(locale, viewer.state)} ·{" "}
+                    {describePresenceSurface(locale, viewer.surface)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="chat-presence-empty">{copy.noViewers}</p>
+          )}
         </div>
 
         <div className="chat-placeholder">

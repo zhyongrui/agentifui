@@ -4018,6 +4018,63 @@ export function createPersistentWorkspaceService(
         }),
       };
     },
+    async getSharedConversationPresenceForUser(user, shareId) {
+      const sharedConversation = await getSharedConversationForUser(
+        database,
+        user,
+        shareId,
+      );
+
+      if (!sharedConversation.ok) {
+        return sharedConversation;
+      }
+
+      const conversationId = sharedConversation.data.conversation.id;
+      const nextEntries = pruneWorkspacePresenceEntries(
+        presenceByConversationId.get(conversationId) ?? [],
+      );
+      presenceByConversationId.set(conversationId, nextEntries);
+
+      return {
+        ok: true,
+        data: buildWorkspaceConversationPresence({
+          conversationId,
+          entries: nextEntries,
+          currentUserId: user.id,
+        }),
+      };
+    },
+    async updateSharedConversationPresenceForUser(user, input) {
+      const sharedConversation = await getSharedConversationForUser(
+        database,
+        user,
+        input.shareId,
+      );
+
+      if (!sharedConversation.ok) {
+        return sharedConversation;
+      }
+
+      const conversationId = sharedConversation.data.conversation.id;
+      const nextEntries = upsertWorkspacePresenceEntry({
+        activeRunId: input.activeRunId,
+        entries: presenceByConversationId.get(conversationId) ?? [],
+        sessionId: input.sessionId,
+        state: input.state,
+        surface: input.surface ?? "shared_conversation",
+        user,
+      });
+      presenceByConversationId.set(conversationId, nextEntries);
+
+      return {
+        ok: true,
+        data: buildWorkspaceConversationPresence({
+          conversationId,
+          entries: nextEntries,
+          currentUserId: user.id,
+        }),
+      };
+    },
     async listConversationsForUser(
       user,
       input,

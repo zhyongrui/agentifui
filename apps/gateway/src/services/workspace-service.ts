@@ -329,7 +329,14 @@ type WorkspaceConversationPresenceResult =
       ok: true;
       data: WorkspaceConversationPresence;
     }
-  | WorkspaceLookupFailure;
+  | WorkspaceLookupFailure
+  | {
+      ok: false;
+      statusCode: 403;
+      code: 'WORKSPACE_FORBIDDEN';
+      message: string;
+      details?: unknown;
+    };
 
 type WorkspaceService = {
   getCatalogForUser(user: AuthUser): WorkspaceCatalog | Promise<WorkspaceCatalog>;
@@ -404,6 +411,20 @@ type WorkspaceService = {
     user: AuthUser,
     input: {
       conversationId: string;
+      sessionId: string;
+      activeRunId?: string | null;
+      state?: WorkspaceConversationPresenceUpdateRequest['state'];
+      surface?: WorkspaceConversationPresenceUpdateRequest['surface'];
+    }
+  ): WorkspaceConversationPresenceResult | Promise<WorkspaceConversationPresenceResult>;
+  getSharedConversationPresenceForUser(
+    user: AuthUser,
+    shareId: string
+  ): WorkspaceConversationPresenceResult | Promise<WorkspaceConversationPresenceResult>;
+  updateSharedConversationPresenceForUser(
+    user: AuthUser,
+    input: {
+      shareId: string;
       sessionId: string;
       activeRunId?: string | null;
       state?: WorkspaceConversationPresenceUpdateRequest['state'];
@@ -2360,6 +2381,85 @@ export function createWorkspaceService(options: {
         ok: true,
         data: buildWorkspaceConversationPresence({
           conversationId: input.conversationId,
+          entries: nextEntries,
+          currentUserId: user.id,
+        }),
+      };
+    },
+    getSharedConversationPresenceForUser(user, shareId) {
+      const share = sharesById.get(shareId);
+
+      if (!share || share.status !== 'active') {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace share could not be found.',
+        };
+      }
+
+      const context = getContextForUser(user);
+
+      if (!context.memberGroupIds.includes(share.group.id)) {
+        return {
+          ok: false,
+          statusCode: 403,
+          code: 'WORKSPACE_FORBIDDEN',
+          message: 'The current user is not allowed to access this shared conversation.',
+        };
+      }
+
+      const nextEntries = pruneWorkspacePresenceEntries(
+        presenceByConversationId.get(share.conversationId) ?? []
+      );
+      presenceByConversationId.set(share.conversationId, nextEntries);
+
+      return {
+        ok: true,
+        data: buildWorkspaceConversationPresence({
+          conversationId: share.conversationId,
+          entries: nextEntries,
+          currentUserId: user.id,
+        }),
+      };
+    },
+    updateSharedConversationPresenceForUser(user, input) {
+      const share = sharesById.get(input.shareId);
+
+      if (!share || share.status !== 'active') {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace share could not be found.',
+        };
+      }
+
+      const context = getContextForUser(user);
+
+      if (!context.memberGroupIds.includes(share.group.id)) {
+        return {
+          ok: false,
+          statusCode: 403,
+          code: 'WORKSPACE_FORBIDDEN',
+          message: 'The current user is not allowed to access this shared conversation.',
+        };
+      }
+
+      const nextEntries = upsertWorkspacePresenceEntry({
+        activeRunId: input.activeRunId,
+        entries: presenceByConversationId.get(share.conversationId) ?? [],
+        sessionId: input.sessionId,
+        state: input.state,
+        surface: input.surface ?? 'shared_conversation',
+        user,
+      });
+      presenceByConversationId.set(share.conversationId, nextEntries);
+
+      return {
+        ok: true,
+        data: buildWorkspaceConversationPresence({
+          conversationId: share.conversationId,
           entries: nextEntries,
           currentUserId: user.id,
         }),

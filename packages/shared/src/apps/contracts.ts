@@ -123,7 +123,9 @@ export type WorkspaceConversationFeedbackSummary = {
 };
 export type WorkspaceConversationShareStatus = "active" | "revoked";
 export type WorkspaceConversationShareAccess = "read_only";
-export type WorkspaceConversationPresenceSurface = "conversation";
+export type WorkspaceConversationPresenceSurface =
+  | "conversation"
+  | "shared_conversation";
 export type WorkspaceConversationPresenceState = "active" | "idle";
 
 export type WorkspaceRunType = "workflow" | "agent" | "generation";

@@ -696,6 +696,43 @@ button:disabled {
   gap: 14px;
 }
 
+.workspace-presence-section {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-presence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workspace-presence-chip {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.workspace-presence-chip.is-current {
+  border-color: rgba(26, 111, 61, 0.35);
+  background: rgba(231, 245, 236, 0.9);
+}
+
+.workspace-presence-chip strong {
+  font-size: 14px;
+}
+
+.workspace-presence-meta,
+.chat-presence-empty {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .run-history-grid {
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);

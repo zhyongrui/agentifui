@@ -16,7 +16,7 @@ const WORKSPACE_PRESENCE_TTL_MS = 60_000;
 function isPresenceSurface(
   value: unknown,
 ): value is WorkspaceConversationPresenceSurface {
-  return value === "conversation";
+  return value === "conversation" || value === "shared_conversation";
 }
 
 function isPresenceState(value: unknown): value is WorkspaceConversationPresenceState {

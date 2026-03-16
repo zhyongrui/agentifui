@@ -6,6 +6,7 @@ import {
   fetchWorkspaceConversationPresence,
   fetchWorkspaceConversationList,
   fetchWorkspacePendingActions,
+  fetchWorkspaceSharedConversationPresence,
   respondToWorkspacePendingAction,
   fetchWorkspaceConversationRuns,
   fetchWorkspaceArtifact,
@@ -13,6 +14,7 @@ import {
   fetchWorkspaceRun,
   launchWorkspaceApp,
   updateWorkspaceConversationPresence,
+  updateWorkspaceSharedConversationPresence,
   updateWorkspaceConversation,
   updateWorkspaceConversationMessageFeedback,
   updateWorkspacePreferences,
@@ -425,6 +427,118 @@ describe('apps client', () => {
         viewers: [
           {
             sessionId: 'presence-1',
+            state: 'idle',
+          },
+        ],
+      },
+    });
+  });
+
+  it('loads shared conversation presence through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            ttlSeconds: 60,
+            viewers: [
+              {
+                sessionId: 'presence-shared-1',
+                userId: 'usr_2',
+                displayName: 'Shared Reviewer',
+                joinedAt: '2026-03-16T15:00:00.000Z',
+                lastSeenAt: '2026-03-16T15:00:30.000Z',
+                expiresAt: '2026-03-16T15:01:30.000Z',
+                surface: 'shared_conversation',
+                state: 'active',
+                activeRunId: null,
+                isCurrentUser: true,
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceSharedConversationPresence('session-123', 'share-123');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/shares/share-123/presence', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        conversationId: 'conv-123',
+        viewers: [
+          {
+            sessionId: 'presence-shared-1',
+            surface: 'shared_conversation',
+            state: 'active',
+          },
+        ],
+      },
+    });
+  });
+
+  it('updates shared conversation presence through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-123',
+            ttlSeconds: 60,
+            viewers: [
+              {
+                sessionId: 'presence-shared-1',
+                userId: 'usr_2',
+                displayName: 'Shared Reviewer',
+                joinedAt: '2026-03-16T15:00:00.000Z',
+                lastSeenAt: '2026-03-16T15:00:45.000Z',
+                expiresAt: '2026-03-16T15:01:45.000Z',
+                surface: 'shared_conversation',
+                state: 'idle',
+                activeRunId: null,
+                isCurrentUser: true,
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await updateWorkspaceSharedConversationPresence('session-123', 'share-123', {
+      sessionId: 'presence-shared-1',
+      state: 'idle',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/shares/share-123/presence', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId: 'presence-shared-1',
+        state: 'idle',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        conversationId: 'conv-123',
+        viewers: [
+          {
+            sessionId: 'presence-shared-1',
+            surface: 'shared_conversation',
             state: 'idle',
           },
         ],

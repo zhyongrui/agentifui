@@ -1566,6 +1566,158 @@ describe("workspace routes", () => {
     }
   });
 
+  it("tracks shared conversation presence sessions for shared viewers", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+    authService.register({
+      email: "reader-a@example.com",
+      password: "Secure123",
+      displayName: "Reader A",
+    });
+    authService.register({
+      email: "reader-b@example.com",
+      password: "Secure123",
+      displayName: "Reader B",
+    });
+
+    const ownerLogin = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+    const readerALogin = authService.login({
+      email: "reader-a@example.com",
+      password: "Secure123",
+    });
+    const readerBLogin = authService.login({
+      email: "reader-b@example.com",
+      password: "Secure123",
+    });
+
+    expect(ownerLogin.ok).toBe(true);
+    expect(readerALogin.ok).toBe(true);
+    expect(readerBLogin.ok).toBe(true);
+
+    if (!ownerLogin.ok || !readerALogin.ok || !readerBLogin.ok) {
+      throw new Error("expected all shared presence logins to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const conversationId = (launch.json() as WorkspaceAppLaunchResponse).data
+        .conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected shared presence launch to include a conversation id");
+      }
+
+      const createShare = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          groupId: "grp_research",
+        },
+      });
+
+      expect(createShare.statusCode).toBe(200);
+
+      const share = (createShare.json() as WorkspaceConversationShareResponse).data;
+
+      const firstPresence = await app.inject({
+        method: "PUT",
+        url: `/workspace/shares/${share.id}/presence`,
+        headers: {
+          authorization: `Bearer ${readerALogin.data.sessionToken}`,
+        },
+        payload: {
+          sessionId: "shared-presence-a",
+          state: "active",
+        },
+      });
+
+      expect(firstPresence.statusCode).toBe(200);
+      expect((firstPresence.json() as WorkspaceConversationPresenceResponse).data).toMatchObject({
+        conversationId,
+        ttlSeconds: 60,
+        viewers: [
+          expect.objectContaining({
+            sessionId: "shared-presence-a",
+            displayName: "Reader A",
+            surface: "shared_conversation",
+            state: "active",
+            isCurrentUser: true,
+          }),
+        ],
+      });
+
+      const secondPresence = await app.inject({
+        method: "PUT",
+        url: `/workspace/shares/${share.id}/presence`,
+        headers: {
+          authorization: `Bearer ${readerBLogin.data.sessionToken}`,
+        },
+        payload: {
+          sessionId: "shared-presence-b",
+          state: "idle",
+        },
+      });
+
+      expect(secondPresence.statusCode).toBe(200);
+
+      const listPresence = await app.inject({
+        method: "GET",
+        url: `/workspace/shares/${share.id}/presence`,
+        headers: {
+          authorization: `Bearer ${readerALogin.data.sessionToken}`,
+        },
+      });
+
+      expect(listPresence.statusCode).toBe(200);
+      expect((listPresence.json() as WorkspaceConversationPresenceResponse).data).toMatchObject({
+        conversationId,
+        viewers: [
+          expect.objectContaining({
+            sessionId: "shared-presence-b",
+            displayName: "Reader B",
+            surface: "shared_conversation",
+            state: "idle",
+            isCurrentUser: false,
+          }),
+          expect.objectContaining({
+            sessionId: "shared-presence-a",
+            displayName: "Reader A",
+            surface: "shared_conversation",
+            state: "active",
+            isCurrentUser: true,
+          }),
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("keeps conversations readable but blocks uploads while the runtime is degraded", async () => {
     const authService = createTestAuthService();
     const { runtimeService, setDegraded } = createSwitchableRuntimeService();

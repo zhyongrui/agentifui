@@ -140,7 +140,8 @@ Execution status:
 | completed | `P3-B-12` | tool onboarding / e2e test runbook 已文档化                                                            |
 | completed | `P3-C-01` | conversation presence/session 合同、owner route、service 和 client 已落地                              |
 | completed | `P3-C-02` | `/chat/[conversationId]` 已加 live refresh / polling、presence heartbeat 和 last-sync surfacing       |
-| active    | `P3-C-03` | 下一项，给 shared conversation surface 加 collaborator identity chips / viewer context                  |
+| completed | `P3-C-03` | shared conversation presence route、viewer chips 和 shared-surface heartbeat 已闭环                    |
+| active    | `P3-C-09` | 下一项，补 multi-user collaboration browser coverage                                                    |
 
 ## 5. First Batch Definition
 
@@ -190,7 +191,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-C-03`
+- the active follow-on item is `P3-C-09`
 
 ## 6. Detailed Execution Notes
 
@@ -756,7 +757,7 @@ Legend:
 
 - [x] `P3-C-01` Define a presence/session model for multiple viewers on the same conversation
 - [x] `P3-C-02` Add live refresh or polling for new messages and run status changes
-- [ ] `P3-C-03` Add collaborator identity chips or cursors on shared conversation surfaces
+- [x] `P3-C-03` Add collaborator identity chips or cursors on shared conversation surfaces
 - [ ] `P3-C-04` Add comment or note threads attached to runs, artifacts, or messages
 - [ ] `P3-C-05` Add mention/notification primitives for shared work review
 - [ ] `P3-C-06` Add fine-grained permission modes for commenter vs editor vs owner

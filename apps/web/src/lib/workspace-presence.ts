@@ -4,9 +4,9 @@ const WORKSPACE_PRESENCE_SESSION_PREFIX = "workspace.presence.";
 
 export function readOrCreateWorkspacePresenceSessionId(
   storage: Pick<Storage, "getItem" | "setItem">,
-  conversationId: string,
+  scopeId: string,
 ) {
-  const storageKey = `${WORKSPACE_PRESENCE_SESSION_PREFIX}${conversationId}`;
+  const storageKey = `${WORKSPACE_PRESENCE_SESSION_PREFIX}${scopeId}`;
   const existing = storage.getItem(storageKey)?.trim();
 
   if (existing) {

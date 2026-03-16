@@ -133,7 +133,9 @@ function isConversationPresenceUpdateRequest(
     typeof request.sessionId === 'string' &&
     request.sessionId.trim().length > 0 &&
     (request.activeRunId === undefined || isNullableString(request.activeRunId)) &&
-    (request.surface === undefined || request.surface === 'conversation') &&
+    (request.surface === undefined ||
+      request.surface === 'conversation' ||
+      request.surface === 'shared_conversation') &&
     (request.state === undefined ||
       request.state === 'active' ||
       request.state === 'idle')
@@ -1557,6 +1559,89 @@ export async function registerWorkspaceRoutes(
         groupName: result.data.share.group.name,
       },
     });
+
+    return response;
+  });
+
+  app.get('/workspace/shares/:shareId/presence', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      shareId?: string;
+    };
+    const shareId = params.shareId?.trim();
+
+    if (!shareId) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace shared presence lookup requires a share id.'
+      );
+    }
+
+    const result = await workspaceService.getSharedConversationPresenceForUser(
+      access.user,
+      shareId
+    );
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationPresenceResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    return response;
+  });
+
+  app.put('/workspace/shares/:shareId/presence', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      shareId?: string;
+    };
+    const shareId = params.shareId?.trim();
+    const body = request.body;
+
+    if (!shareId || !isConversationPresenceUpdateRequest(body)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace shared presence updates require a share id plus a valid session id and optional state changes.'
+      );
+    }
+
+    const result = await workspaceService.updateSharedConversationPresenceForUser(access.user, {
+      shareId,
+      sessionId: body.sessionId.trim(),
+      activeRunId:
+        body.activeRunId === undefined ? undefined : body.activeRunId?.trim() || null,
+      state: body.state,
+      surface: body.surface ?? 'shared_conversation',
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationPresenceResponse = {
+      ok: true,
+      data: result.data,
+    };
 
     return response;
   });
