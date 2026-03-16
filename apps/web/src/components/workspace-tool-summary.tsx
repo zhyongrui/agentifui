@@ -18,6 +18,11 @@ function readCopy(locale: ToolSummaryLocale) {
         timeoutBudget: "超时预算",
         maxAttempts: "最大尝试次数",
         failureReason: "失败原因",
+        failureCode: "失败代码",
+        failureStage: "失败阶段",
+        failureMessage: "失败说明",
+        failureRetryable: "可重试",
+        failureManualFollowUp: "需要人工跟进",
         resultPreview: "结果摘要",
         noResultPreview: "没有结果摘要",
         status: {
@@ -27,6 +32,9 @@ function readCopy(locale: ToolSummaryLocale) {
         failureReasonLabels: {
           timeout: "超时",
           provider_error: "执行错误",
+          approval_rejected: "审批拒绝",
+          approval_cancelled: "审批取消",
+          approval_expired: "审批过期",
         } as Record<string, string>,
       }
     : {
@@ -41,6 +49,11 @@ function readCopy(locale: ToolSummaryLocale) {
         timeoutBudget: "Timeout budget",
         maxAttempts: "Max attempts",
         failureReason: "Failure reason",
+        failureCode: "Failure code",
+        failureStage: "Failure stage",
+        failureMessage: "Failure message",
+        failureRetryable: "retryable",
+        failureManualFollowUp: "manual follow-up",
         resultPreview: "Result preview",
         noResultPreview: "No result preview",
         status: {
@@ -50,6 +63,9 @@ function readCopy(locale: ToolSummaryLocale) {
         failureReasonLabels: {
           timeout: "timeout",
           provider_error: "provider error",
+          approval_rejected: "approval rejected",
+          approval_cancelled: "approval cancelled",
+          approval_expired: "approval expired",
         } as Record<string, string>,
       };
 }
@@ -204,9 +220,11 @@ export function WorkspaceToolExecutionSummaryList(input: {
           const resultPreview = execution.result?.content
             ? buildResultPreview(execution.result.content)
             : "";
-          const failureReason =
-            execution.metadata?.failureReason &&
-            copy.failureReasonLabels[execution.metadata.failureReason]
+          const structuredFailure = execution.failure;
+          const failureReason = structuredFailure
+            ? null
+            : execution.metadata?.failureReason &&
+                copy.failureReasonLabels[execution.metadata.failureReason]
               ? copy.failureReasonLabels[execution.metadata.failureReason]
               : execution.metadata?.failureReason ?? null;
 
@@ -256,6 +274,36 @@ export function WorkspaceToolExecutionSummaryList(input: {
                   </span>
                   {failureReason}
                 </p>
+              ) : null}
+              {structuredFailure ? (
+                <>
+                  <p className="tool-summary-copy">
+                    <span className="tool-summary-label">
+                      {copy.failureCode}:{" "}
+                    </span>
+                    {structuredFailure.code}
+                  </p>
+                  <p className="tool-summary-copy">
+                    <span className="tool-summary-label">
+                      {copy.failureStage}:{" "}
+                    </span>
+                    {structuredFailure.stage}
+                  </p>
+                  <p className="tool-summary-copy">
+                    <span className="tool-summary-label">
+                      {copy.failureMessage}:{" "}
+                    </span>
+                    {structuredFailure.message}
+                  </p>
+                  {structuredFailure.detail ? (
+                    <p className="tool-summary-copy">{structuredFailure.detail}</p>
+                  ) : null}
+                  <p className="tool-summary-copy">
+                    {structuredFailure.retryable
+                      ? copy.failureRetryable
+                      : copy.failureManualFollowUp}
+                  </p>
+                </>
               ) : null}
               {execution.metadata?.idempotencyKey ? (
                 <p className="tool-summary-copy">

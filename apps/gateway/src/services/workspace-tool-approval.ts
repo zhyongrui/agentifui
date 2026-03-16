@@ -7,6 +7,8 @@ import type {
 import type { ChatToolCall } from "@agentifui/shared";
 import { randomUUID } from "node:crypto";
 
+import { buildWorkspaceToolExecutionFailure } from "./workspace-run-failure.js";
+
 const TOOL_APPROVAL_KIND = "tool_approval";
 
 type ToolApprovalMetadata = {
@@ -99,18 +101,21 @@ function buildOutcomeLabel(step: WorkspaceHitlStep) {
       return {
         summary: "was approved",
         detail: "executed after approval",
+        failureReason: null,
         isError: false,
       };
     case "reject":
       return {
         summary: "was rejected",
         detail: "was not executed because approval was rejected",
+        failureReason: "approval_rejected",
         isError: true,
       };
     case "cancel":
       return {
         summary: "was cancelled",
         detail: "was not executed because the approval request was cancelled",
+        failureReason: "approval_cancelled",
         isError: true,
       };
     default:
@@ -295,6 +300,9 @@ export function buildWorkspaceToolApprovalResolution(input: {
     content,
     isError: outcome.isError,
     metadata: {
+      ...(outcome.failureReason
+        ? { failureReason: outcome.failureReason }
+        : {}),
       ...(metadata.idempotencyKey ? { idempotencyKey: metadata.idempotencyKey } : {}),
       ...(metadata.maxAttempts !== null
         ? { maxAttempts: String(metadata.maxAttempts) }
@@ -310,6 +318,9 @@ export function buildWorkspaceToolApprovalResolution(input: {
   ];
 
   const toolExecutionMetadata = {
+    ...(outcome.failureReason
+      ? { failureReason: outcome.failureReason }
+      : {}),
     ...(metadata.idempotencyKey ? { idempotencyKey: metadata.idempotencyKey } : {}),
     ...(metadata.maxAttempts !== null
       ? { maxAttempts: String(metadata.maxAttempts) }
@@ -329,6 +340,18 @@ export function buildWorkspaceToolApprovalResolution(input: {
     ...(Object.keys(toolExecutionMetadata).length > 0
       ? { metadata: toolExecutionMetadata }
       : {}),
+    failure: buildWorkspaceToolExecutionFailure({
+      attempt: input.attempt,
+      maxAttempts: metadata.maxAttempts,
+      metadata: toolExecutionMetadata,
+      result: {
+        content,
+        isError: outcome.isError,
+        recordedAt,
+      },
+      status: outcome.isError ? "failed" : "succeeded",
+      toolName: metadata.toolName,
+    }),
     result: {
       content,
       isError: outcome.isError,

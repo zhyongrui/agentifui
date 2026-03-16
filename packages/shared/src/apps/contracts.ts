@@ -419,6 +419,11 @@ export type WorkspaceRunFailureCode =
   | "validation_error"
   | "quota_exceeded"
   | "runtime_unavailable"
+  | "tool_timeout"
+  | "tool_provider_error"
+  | "tool_approval_rejected"
+  | "tool_approval_cancelled"
+  | "tool_approval_expired"
   | "unknown";
 
 export type WorkspaceRunFailureStage =
@@ -426,6 +431,8 @@ export type WorkspaceRunFailureStage =
   | "input_validation"
   | "execution"
   | "streaming"
+  | "tool_execution"
+  | "tool_approval"
   | "persistence";
 
 export type WorkspaceRunFailure = {
@@ -473,6 +480,7 @@ export type WorkspaceRunToolExecution = {
   latencyMs: number | null;
   request: ChatToolCall;
   metadata?: Record<string, string>;
+  failure?: WorkspaceRunFailure | null;
   result: WorkspaceRunToolExecutionResult | null;
 };
 

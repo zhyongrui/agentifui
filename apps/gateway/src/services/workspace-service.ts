@@ -49,6 +49,7 @@ import {
 import type { WorkspaceFileStorage } from './workspace-file-storage.js';
 import {
   buildWorkspaceRunFailure,
+  buildWorkspaceToolExecutionFailure,
   parseWorkspaceRunFailure,
 } from './workspace-run-failure.js';
 import { buildWorkspaceToolApprovalResolution } from './workspace-tool-approval.js';
@@ -682,21 +683,32 @@ function buildToolExecutionsFromLegacyOutputs(
             )
           : {};
 
+      const attempt =
+        typeof matchingResult?.attempt === 'number' &&
+        Number.isFinite(matchingResult.attempt) &&
+        matchingResult.attempt > 0
+          ? matchingResult.attempt
+          : resultIndex + 1;
+      const status =
+        typeof matchingResult?.isError === 'boolean' && matchingResult.isError
+          ? 'failed'
+          : 'succeeded';
+      const result =
+        content.length > 0
+          ? {
+              content,
+              isError: Boolean(matchingResult.isError),
+              recordedAt,
+            }
+          : null;
+
       return {
         id:
           typeof matchingResult?.id === 'string'
             ? matchingResult.id
             : `tool_exec_${randomUUID()}`,
-        attempt:
-          typeof matchingResult?.attempt === 'number' &&
-          Number.isFinite(matchingResult.attempt) &&
-          matchingResult.attempt > 0
-            ? matchingResult.attempt
-            : resultIndex + 1,
-        status:
-          typeof matchingResult?.isError === 'boolean' && matchingResult.isError
-            ? 'failed'
-            : 'succeeded',
+        attempt,
+        status,
         startedAt:
           typeof matchingResult?.startedAt === 'string'
             ? matchingResult.startedAt
@@ -711,14 +723,14 @@ function buildToolExecutionsFromLegacyOutputs(
             : null,
         request: toolCall,
         ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
-        result:
-          content.length > 0
-            ? {
-                content,
-                isError: Boolean(matchingResult.isError),
-                recordedAt,
-              }
-            : null,
+        failure: buildWorkspaceToolExecutionFailure({
+          attempt,
+          metadata,
+          result,
+          status,
+          toolName: toolCall.function.name,
+        }),
+        result,
       } satisfies WorkspaceRunToolExecution;
     });
   });
@@ -739,12 +751,26 @@ function buildToolExecutionsFromOutputs(
     const execution = entry as Record<string, unknown>;
     const request = toWorkspaceToolCall(execution.request);
     const result = toWorkspaceRunToolExecutionResult(execution.result);
+    const status =
+      execution.status === 'succeeded' || execution.status === 'failed'
+        ? execution.status
+        : null;
+    const metadata =
+      typeof execution.metadata === 'object' &&
+      execution.metadata !== null &&
+      !Array.isArray(execution.metadata)
+        ? Object.fromEntries(
+            Object.entries(execution.metadata as Record<string, unknown>).flatMap(
+              ([key, value]) => (typeof value === 'string' ? [[key, value]] : []),
+            ),
+          )
+        : undefined;
 
     if (
       !request ||
       typeof execution.id !== 'string' ||
       typeof execution.attempt !== 'number' ||
-      (execution.status !== 'succeeded' && execution.status !== 'failed') ||
+      status === null ||
       typeof execution.startedAt !== 'string'
     ) {
       return [];
@@ -754,23 +780,28 @@ function buildToolExecutionsFromOutputs(
       {
         id: execution.id,
         attempt: execution.attempt,
-        status: execution.status,
+        status,
         startedAt: execution.startedAt,
         finishedAt:
           typeof execution.finishedAt === 'string' ? execution.finishedAt : null,
         latencyMs:
           typeof execution.latencyMs === 'number' ? execution.latencyMs : null,
         request,
-        metadata:
-          typeof execution.metadata === 'object' &&
-          execution.metadata !== null &&
-          !Array.isArray(execution.metadata)
-            ? Object.fromEntries(
-                Object.entries(execution.metadata as Record<string, unknown>).flatMap(
-                  ([key, value]) => (typeof value === 'string' ? [[key, value]] : []),
-                ),
-              )
-            : undefined,
+        metadata,
+        failure: buildWorkspaceToolExecutionFailure({
+          attempt: execution.attempt,
+          metadata,
+          recordedAt:
+            typeof execution.finishedAt === 'string'
+              ? execution.finishedAt
+              : typeof execution.startedAt === 'string'
+                ? execution.startedAt
+                : null,
+          result,
+          status,
+          toolName: request.function.name,
+          value: execution.failure,
+        }),
         result,
       } satisfies WorkspaceRunToolExecution,
     ];

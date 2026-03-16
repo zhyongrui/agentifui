@@ -2151,6 +2151,11 @@ describe.sequential('persistent auth runtime', () => {
           'failed',
           'succeeded',
         ]);
+        expect(firstExecutions[0]?.failure).toMatchObject({
+          code: 'tool_provider_error',
+          stage: 'tool_execution',
+          retryable: true,
+        });
 
         const firstIdempotencyKey = firstExecutions[0]?.metadata?.idempotencyKey ?? null;
 
@@ -2215,6 +2220,11 @@ describe.sequential('persistent auth runtime', () => {
             failureReason: 'provider_error',
             maxAttempts: '3',
             timeoutMs: '155',
+          });
+          expect(secondExecutions[0]?.failure).toMatchObject({
+            code: 'tool_provider_error',
+            stage: 'tool_execution',
+            retryable: true,
           });
           expect(secondExecutions[1]?.metadata).toMatchObject({
             maxAttempts: '3',

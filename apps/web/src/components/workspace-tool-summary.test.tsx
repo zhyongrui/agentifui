@@ -63,6 +63,14 @@ describe("WorkspaceToolSummary", () => {
               timeoutMs: "155",
               maxAttempts: "3",
             },
+            failure: {
+              code: "tool_timeout",
+              stage: "tool_execution",
+              message: 'Tool "workspace.search" timed out.',
+              retryable: true,
+              detail: "Tool `workspace.search` timed out after 155 ms on attempt 2.",
+              recordedAt: "2026-03-16T12:00:00.120Z",
+            },
             result: {
               content: "Tool `workspace.search` timed out after 155 ms on attempt 2.",
               isError: true,
@@ -77,7 +85,10 @@ describe("WorkspaceToolSummary", () => {
     expect(markup).not.toContain("Succeeded");
     expect(markup).toContain("Failed");
     expect(markup).toContain("Attempt 2");
-    expect(markup).toContain("timeout");
+    expect(markup).toContain("tool_timeout");
+    expect(markup).toContain("tool_execution");
+    expect(markup).toContain("Tool &quot;workspace.search&quot; timed out.");
+    expect(markup).toContain("retryable");
     expect(markup).toContain("tool_idem_abcd1234");
     expect(markup).toContain("timed out after 155 ms");
   });

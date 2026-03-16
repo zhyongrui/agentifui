@@ -492,15 +492,20 @@ describe("chat routes", () => {
       );
 
       expect(executions).toHaveLength(2);
-      expect(executions).toEqual([
-        expect.objectContaining({
-          attempt: 1,
-          status: "failed",
-          metadata: expect.objectContaining({
-            failureReason: "provider_error",
-            idempotencyKey: expect.any(String),
-            maxAttempts: "3",
-            timeoutMs: "155",
+        expect(executions).toEqual([
+          expect.objectContaining({
+            attempt: 1,
+            status: "failed",
+            failure: expect.objectContaining({
+              code: "tool_provider_error",
+              stage: "tool_execution",
+              retryable: true,
+            }),
+            metadata: expect.objectContaining({
+              failureReason: "provider_error",
+              idempotencyKey: expect.any(String),
+              maxAttempts: "3",
+              timeoutMs: "155",
           }),
           result: expect.objectContaining({
             isError: true,
@@ -701,6 +706,14 @@ describe("chat routes", () => {
         "timeout",
         "timeout",
       ]);
+      expect(executions.map(execution => execution.failure?.code)).toEqual([
+        "tool_timeout",
+        "tool_timeout",
+      ]);
+      expect(executions.map(execution => execution.failure?.stage)).toEqual([
+        "tool_execution",
+        "tool_execution",
+      ]);
       expect(
         new Set(executions.map(execution => execution.metadata?.idempotencyKey)).size,
       ).toBe(1);
@@ -738,6 +751,10 @@ describe("chat routes", () => {
             entityId: runId,
             payload: expect.objectContaining({
               attempt: 1,
+              failure: expect.objectContaining({
+                code: "tool_timeout",
+                stage: "tool_execution",
+              }),
               metadata: expect.objectContaining({
                 failureReason: "timeout",
                 maxAttempts: "2",
@@ -749,6 +766,10 @@ describe("chat routes", () => {
             entityId: runId,
             payload: expect.objectContaining({
               attempt: 2,
+              failure: expect.objectContaining({
+                code: "tool_timeout",
+                stage: "tool_execution",
+              }),
               metadata: expect.objectContaining({
                 failureReason: "timeout",
                 maxAttempts: "2",

@@ -52,7 +52,10 @@ import {
 } from "../services/workspace-runtime.js";
 import { type ToolRegistryService } from "../services/tool-registry-service.js";
 import { readWorkspaceToolApprovalMetadata } from "../services/workspace-tool-approval.js";
-import { buildWorkspaceRunFailure } from "../services/workspace-run-failure.js";
+import {
+  buildWorkspaceRunFailure,
+  buildWorkspaceToolExecutionFailure,
+} from "../services/workspace-run-failure.js";
 import { calculateCompletionQuotaCost } from "../services/workspace-quota.js";
 import type { WorkspaceService } from "../services/workspace-service.js";
 
@@ -412,6 +415,7 @@ async function recordToolExecutionAudit(input: {
         attempt: execution.attempt,
         status: execution.status,
         latencyMs: execution.latencyMs,
+        failure: execution.failure,
         metadata: execution.metadata ?? null,
         appId: input.conversation.app.id,
         appName: input.conversation.app.name,
@@ -1146,34 +1150,48 @@ function buildToolExecutions(input: {
       return [];
     }
 
-    return matchingResults.map((matchingResult, resultIndex) => ({
-      id: `tool_exec_${randomUUID()}`,
-      attempt:
+    return matchingResults.map((matchingResult, resultIndex) => {
+      const attempt =
         typeof matchingResult.attempt === "number" &&
         Number.isFinite(matchingResult.attempt) &&
         matchingResult.attempt > 0
           ? matchingResult.attempt
-          : resultIndex + 1,
-      status: matchingResult.isError ? "failed" : "succeeded",
-      startedAt: matchingResult.startedAt ?? input.recordedAt,
-      finishedAt: matchingResult.finishedAt ?? input.recordedAt,
-      latencyMs:
-        typeof matchingResult.latencyMs === "number" &&
-        Number.isFinite(matchingResult.latencyMs)
-          ? matchingResult.latencyMs
-          : perToolLatency,
-      request: toolCall,
-      metadata:
+          : resultIndex + 1;
+      const status = matchingResult.isError ? "failed" : "succeeded";
+      const metadata =
         matchingResult.metadata &&
         Object.keys(matchingResult.metadata).length > 0
           ? matchingResult.metadata
-          : undefined,
-      result: {
+          : undefined;
+      const result = {
         content: matchingResult.content,
         isError: Boolean(matchingResult.isError),
         recordedAt: matchingResult.finishedAt ?? input.recordedAt,
-      },
-    }));
+      };
+
+      return {
+        id: `tool_exec_${randomUUID()}`,
+        attempt,
+        status,
+        startedAt: matchingResult.startedAt ?? input.recordedAt,
+        finishedAt: matchingResult.finishedAt ?? input.recordedAt,
+        latencyMs:
+          typeof matchingResult.latencyMs === "number" &&
+          Number.isFinite(matchingResult.latencyMs)
+            ? matchingResult.latencyMs
+            : perToolLatency,
+        request: toolCall,
+        ...(metadata ? { metadata } : {}),
+        failure: buildWorkspaceToolExecutionFailure({
+          attempt,
+          metadata,
+          result,
+          status,
+          toolName: toolCall.function.name,
+        }),
+        result,
+      };
+    });
   });
 }
 
