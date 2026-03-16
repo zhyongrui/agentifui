@@ -1,4 +1,8 @@
-import type { WorkspaceAppToolSummary, ChatToolDescriptor } from "@agentifui/shared";
+import type {
+  WorkspaceAppToolSummary,
+  ChatToolDescriptor,
+  ToolExecutionPolicy,
+} from "@agentifui/shared";
 import type { AdminErrorCode } from "@agentifui/shared/admin";
 import type { AuthUser } from "@agentifui/shared/auth";
 import { randomUUID } from "node:crypto";
@@ -22,7 +26,12 @@ export type ToolRegistryMutationResult<TData> =
 
 export type UpdateAppToolRegistryInput = {
   appId: string;
-  enabledToolNames: string[];
+  enabledToolNames?: string[];
+  tools?: Array<{
+    name: string;
+    enabled: boolean;
+    execution?: ToolExecutionPolicy;
+  }>;
 };
 
 export type ToolRegistryService = {
@@ -54,6 +63,9 @@ export type ToolRegistryService = {
 
 type ToolOverrideRecord = {
   enabled: boolean;
+  timeoutMs: number | null;
+  maxAttempts: number | null;
+  idempotencyScope: "conversation" | "run" | null;
   updatedAt: string;
   updatedByUserId: string | null;
 };
@@ -63,6 +75,10 @@ type WorkspaceToolCatalogEntry = {
   defaultEnabledAppIds: string[];
   descriptor: ChatToolDescriptor;
 };
+
+const DEFAULT_TOOL_TIMEOUT_MS = 150;
+const DEFAULT_TOOL_MAX_ATTEMPTS = 1;
+const DEFAULT_TOOL_IDEMPOTENCY_SCOPE = "run" as const;
 
 const WORKSPACE_TOOL_CATALOG: WorkspaceToolCatalogEntry[] = [
   {
@@ -322,6 +338,82 @@ function normalizeToolNames(value: string[]) {
   ].sort((left, right) => left.localeCompare(right));
 }
 
+export function normalizeToolExecutionPolicy(
+  policy: ToolExecutionPolicy | undefined,
+): Required<ToolExecutionPolicy> {
+  return {
+    timeoutMs:
+      typeof policy?.timeoutMs === "number" &&
+      Number.isFinite(policy.timeoutMs) &&
+      policy.timeoutMs > 0
+        ? Math.round(policy.timeoutMs)
+        : DEFAULT_TOOL_TIMEOUT_MS,
+    maxAttempts:
+      typeof policy?.maxAttempts === "number" &&
+      Number.isFinite(policy.maxAttempts) &&
+      policy.maxAttempts > 0
+        ? Math.round(policy.maxAttempts)
+        : DEFAULT_TOOL_MAX_ATTEMPTS,
+    idempotencyScope:
+      policy?.idempotencyScope === "conversation"
+        ? "conversation"
+        : DEFAULT_TOOL_IDEMPOTENCY_SCOPE,
+  };
+}
+
+function readOverrideExecutionPolicy(
+  override: ToolOverrideRecord | null,
+  defaultExecution: Required<ToolExecutionPolicy>,
+): Required<ToolExecutionPolicy> {
+  if (!override) {
+    return defaultExecution;
+  }
+
+  return {
+    timeoutMs: override.timeoutMs ?? defaultExecution.timeoutMs,
+    maxAttempts: override.maxAttempts ?? defaultExecution.maxAttempts,
+    idempotencyScope: override.idempotencyScope ?? defaultExecution.idempotencyScope,
+  };
+}
+
+export function toolExecutionPoliciesEqual(
+  left: Required<ToolExecutionPolicy>,
+  right: Required<ToolExecutionPolicy>,
+) {
+  return (
+    left.timeoutMs === right.timeoutMs &&
+    left.maxAttempts === right.maxAttempts &&
+    left.idempotencyScope === right.idempotencyScope
+  );
+}
+
+export function buildToolUpdateMap(
+  tools: UpdateAppToolRegistryInput["tools"],
+): Map<
+  string,
+  {
+    enabled: boolean;
+    execution?: ToolExecutionPolicy;
+  }
+> {
+  const updateMap = new Map<
+    string,
+    {
+      enabled: boolean;
+      execution?: ToolExecutionPolicy;
+    }
+  >();
+
+  for (const tool of tools ?? []) {
+    updateMap.set(tool.name.trim(), {
+      enabled: tool.enabled,
+      execution: tool.execution,
+    });
+  }
+
+  return updateMap;
+}
+
 function buildToolSummary(
   appId: string,
   entry: WorkspaceToolCatalogEntry,
@@ -329,14 +421,25 @@ function buildToolSummary(
 ): WorkspaceAppToolSummary {
   const defaultEnabled = entry.defaultEnabledAppIds.includes(appId);
   const enabled = override?.enabled ?? defaultEnabled;
+  const defaultExecution = normalizeToolExecutionPolicy(entry.descriptor.execution);
+  const execution = readOverrideExecutionPolicy(override, defaultExecution);
+  const enabledIsOverridden = enabled !== defaultEnabled;
+  const executionIsOverridden = !toolExecutionPoliciesEqual(
+    execution,
+    defaultExecution,
+  );
 
   return {
     name: entry.descriptor.function.name,
     description: entry.descriptor.function.description ?? null,
     enabled,
     defaultEnabled,
-    isOverridden: override !== null,
+    enabledIsOverridden,
+    isOverridden: enabledIsOverridden || executionIsOverridden,
     auth: entry.descriptor.auth,
+    execution,
+    defaultExecution,
+    executionIsOverridden,
     tags: entry.descriptor.tags ?? [],
     inputSchema: entry.descriptor.function.inputSchema,
     strict: entry.descriptor.function.strict ?? false,
@@ -366,9 +469,13 @@ export function buildAppToolSummaries(
 
 function toEnabledDescriptor(
   entry: WorkspaceToolCatalogEntry,
+  override: ToolOverrideRecord | null,
 ): ChatToolDescriptor {
+  const defaultExecution = normalizeToolExecutionPolicy(entry.descriptor.execution);
+
   return {
     ...entry.descriptor,
+    execution: readOverrideExecutionPolicy(override, defaultExecution),
     enabled: true,
   };
 }
@@ -425,7 +532,12 @@ export function createToolRegistryService(): ToolRegistryService {
           const override = overridesByToolName.get(entry.descriptor.function.name);
           return override?.enabled ?? entry.defaultEnabledAppIds.includes(input.appId);
         })
-        .map(toEnabledDescriptor);
+        .map((entry) =>
+          toEnabledDescriptor(
+            entry,
+            overridesByToolName.get(entry.descriptor.function.name) ?? null,
+          ),
+        );
     },
     updateAppToolsForUser(user, input) {
       const appId = input.appId.trim();
@@ -444,10 +556,16 @@ export function createToolRegistryService(): ToolRegistryService {
       const availableToolNames = new Set(
         catalogEntries.map((entry) => entry.descriptor.function.name),
       );
-      const enabledToolNames = normalizeToolNames(input.enabledToolNames);
-      const invalidToolNames = enabledToolNames.filter(
-        (name) => !availableToolNames.has(name),
-      );
+      const enabledToolNames = input.enabledToolNames
+        ? normalizeToolNames(input.enabledToolNames)
+        : null;
+      const toolUpdates = buildToolUpdateMap(input.tools);
+      const invalidToolNames = [
+        ...(enabledToolNames ?? []),
+        ...[...toolUpdates.keys()],
+      ].filter((name, index, values) => {
+        return values.indexOf(name) === index && !availableToolNames.has(name);
+      });
 
       if (invalidToolNames.length > 0) {
         return toMutationError(
@@ -460,21 +578,50 @@ export function createToolRegistryService(): ToolRegistryService {
         );
       }
 
+      if (enabledToolNames === null && toolUpdates.size === 0) {
+        return toMutationError(
+          "ADMIN_INVALID_PAYLOAD",
+          "The tool update payload must include enabledToolNames or tools.",
+          { appId },
+        );
+      }
+
       const overridesByToolName = readAppOverrides(user.tenantId, appId);
       const updatedAt = new Date().toISOString();
 
       for (const entry of catalogEntries) {
         const toolName = entry.descriptor.function.name;
         const defaultEnabled = entry.defaultEnabledAppIds.includes(appId);
-        const desiredEnabled = enabledToolNames.includes(toolName);
+        const defaultExecution = normalizeToolExecutionPolicy(entry.descriptor.execution);
+        const existingOverride = overridesByToolName.get(toolName) ?? null;
+        const currentEnabled = existingOverride?.enabled ?? defaultEnabled;
+        const currentExecution = readOverrideExecutionPolicy(
+          existingOverride,
+          defaultExecution,
+        );
+        const requestedTool = toolUpdates.get(toolName);
+        const desiredEnabled =
+          requestedTool?.enabled ??
+          (enabledToolNames ? enabledToolNames.includes(toolName) : currentEnabled);
+        const desiredExecution = requestedTool?.execution
+          ? normalizeToolExecutionPolicy(requestedTool.execution)
+          : currentExecution;
+        const enabledIsOverridden = desiredEnabled !== defaultEnabled;
+        const executionIsOverridden = !toolExecutionPoliciesEqual(
+          desiredExecution,
+          defaultExecution,
+        );
 
-        if (desiredEnabled === defaultEnabled) {
+        if (!enabledIsOverridden && !executionIsOverridden) {
           overridesByToolName.delete(toolName);
           continue;
         }
 
         overridesByToolName.set(toolName, {
           enabled: desiredEnabled,
+          timeoutMs: desiredExecution.timeoutMs,
+          maxAttempts: desiredExecution.maxAttempts,
+          idempotencyScope: desiredExecution.idempotencyScope,
           updatedAt,
           updatedByUserId: user.id,
         });

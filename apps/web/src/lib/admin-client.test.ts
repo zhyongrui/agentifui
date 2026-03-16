@@ -629,7 +629,17 @@ describe('admin client', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await updateAdminAppTools('session-123', 'app_policy_watch', {
-      enabledToolNames: ['workspace.search'],
+      tools: [
+        {
+          name: 'workspace.search',
+          enabled: true,
+          execution: {
+            timeoutMs: 210,
+            maxAttempts: 2,
+            idempotencyScope: 'conversation',
+          },
+        },
+      ],
     });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/gateway/admin/apps/app_policy_watch/tools', {
@@ -639,7 +649,17 @@ describe('admin client', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        enabledToolNames: ['workspace.search'],
+        tools: [
+          {
+            name: 'workspace.search',
+            enabled: true,
+            execution: {
+              timeoutMs: 210,
+              maxAttempts: 2,
+              idempotencyScope: 'conversation',
+            },
+          },
+        ],
       }),
       cache: 'no-store',
     });

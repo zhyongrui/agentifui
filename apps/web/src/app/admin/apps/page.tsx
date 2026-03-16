@@ -3,6 +3,7 @@
 import type {
   AdminAppGrantCreateRequest,
   AdminAppSummary,
+  AdminAppToolUpdateInput,
   WorkspaceAppToolSummary,
 } from '@agentifui/shared';
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
@@ -42,16 +43,46 @@ function readDraft(
 }
 
 function readToolDraft(
-  drafts: Record<string, string[]>,
+  drafts: Record<string, AdminAppToolUpdateInput[]>,
   app: Pick<AdminAppSummary, 'id' | 'tools'>
 ) {
-  return drafts[app.id] ?? app.tools.filter(tool => tool.enabled).map(tool => tool.name);
+  return (
+    drafts[app.id] ??
+    app.tools.map(tool => ({
+      name: tool.name,
+      enabled: tool.enabled,
+      execution: {
+        timeoutMs: tool.execution.timeoutMs,
+        maxAttempts: tool.execution.maxAttempts,
+        idempotencyScope: tool.execution.idempotencyScope,
+      },
+    }))
+  );
 }
 
-function toggleToolName(currentToolNames: string[], toolName: string) {
-  return currentToolNames.includes(toolName)
-    ? currentToolNames.filter(currentName => currentName !== toolName)
-    : [...currentToolNames, toolName].sort((left, right) => left.localeCompare(right));
+function updateToolDraftEntry(
+  currentTools: AdminAppToolUpdateInput[],
+  toolName: string,
+  update: Partial<AdminAppToolUpdateInput>
+) {
+  return currentTools
+    .map(tool =>
+      tool.name === toolName
+        ? {
+            ...tool,
+            ...update,
+            execution: {
+              timeoutMs: update.execution?.timeoutMs ?? tool.execution?.timeoutMs ?? 150,
+              maxAttempts: update.execution?.maxAttempts ?? tool.execution?.maxAttempts ?? 1,
+              idempotencyScope:
+                update.execution?.idempotencyScope ??
+                tool.execution?.idempotencyScope ??
+                'run',
+            },
+          }
+        : tool
+    )
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function formatToolAuth(tool: WorkspaceAppToolSummary) {
@@ -68,12 +99,23 @@ function formatToolAuth(tool: WorkspaceAppToolSummary) {
   return flags.join(' · ');
 }
 
+function formatExecutionSummary(
+  tool: WorkspaceAppToolSummary,
+  copy: ReturnType<typeof useI18n>['messages']['adminApps']
+) {
+  return `${copy.toolTimeoutLabel}: ${tool.execution.timeoutMs} ms · ${copy.maxAttemptsLabel}: ${tool.execution.maxAttempts} · ${copy.idempotencyScopeLabel}: ${
+    tool.execution.idempotencyScope === 'conversation'
+      ? copy.idempotencyConversation
+      : copy.idempotencyRun
+  }`;
+}
+
 export default function AdminAppsPage() {
   const { locale, messages, formatDateTime } = useI18n();
   const appsCopy = messages.adminApps;
   const { data, error, isLoading, reload, session } = useAdminPageData(fetchAdminApps);
   const [drafts, setDrafts] = useState<Record<string, AdminAppGrantCreateRequest>>({});
-  const [toolDrafts, setToolDrafts] = useState<Record<string, string[]>>({});
+  const [toolDrafts, setToolDrafts] = useState<Record<string, AdminAppToolUpdateInput[]>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
@@ -112,7 +154,7 @@ export default function AdminAppsPage() {
 
     setToolDrafts(currentDrafts =>
       Object.fromEntries(
-        data.apps.map(app => [app.id, currentDrafts[app.id] ?? app.tools.filter(tool => tool.enabled).map(tool => tool.name)])
+        data.apps.map(app => [app.id, currentDrafts[app.id] ?? readToolDraft(currentDrafts, app)])
       )
     );
   }, [data]);
@@ -214,7 +256,7 @@ export default function AdminAppsPage() {
       return;
     }
 
-    const enabledToolNames = readToolDraft(toolDrafts, app);
+    const tools = readToolDraft(toolDrafts, app);
 
     setPendingActionId(`tools:${app.id}`);
     setMutationError(null);
@@ -224,7 +266,7 @@ export default function AdminAppsPage() {
 
     try {
       result = await updateAdminAppTools(session.sessionToken, app.id, {
-        enabledToolNames,
+        tools,
       });
     } catch {
       setPendingActionId(null);
@@ -425,31 +467,139 @@ export default function AdminAppsPage() {
                         </div>
                       ) : (
                         app.tools.map(tool => {
-                          const checked = enabledToolDraft.includes(tool.name);
+                          const draftTool =
+                            enabledToolDraft.find(entry => entry.name === tool.name) ?? {
+                              name: tool.name,
+                              enabled: tool.enabled,
+                              execution: tool.execution,
+                            };
 
                           return (
-                            <label className="detail-row" key={`${app.id}:${tool.name}`}>
+                            <div className="detail-row" key={`${app.id}:${tool.name}`}>
                               <div className="admin-grant-copy">
                                 <strong>{tool.name}</strong>
                                 <span>{tool.description ?? appsCopy.noToolDescription}</span>
                                 <span>
                                   {formatToolAuth(tool)} ·{' '}
                                   {tool.defaultEnabled ? appsCopy.defaultOn : appsCopy.defaultOff} ·{' '}
-                                  {tool.isOverridden ? appsCopy.tenantOverride : appsCopy.catalogDefault}
+                                  {tool.enabledIsOverridden
+                                    ? appsCopy.tenantOverride
+                                    : appsCopy.catalogDefault}
                                 </span>
+                                <span>{formatExecutionSummary(tool, appsCopy)}</span>
+                                <span>
+                                  {tool.executionIsOverridden
+                                    ? appsCopy.toolPolicyOverride
+                                    : appsCopy.toolPolicyDefault}
+                                </span>
+                                <div className="tool-policy-grid">
+                                  <label className="tool-policy-field">
+                                    {appsCopy.toolTimeoutLabel}
+                                    <input
+                                      aria-label={`${localizedApp.name} tool ${tool.name} timeout`}
+                                      min={1}
+                                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                        setToolDrafts(currentDrafts => ({
+                                          ...currentDrafts,
+                                          [app.id]: updateToolDraftEntry(
+                                            readToolDraft(currentDrafts, app),
+                                            tool.name,
+                                            {
+                                              execution: {
+                                                ...draftTool.execution,
+                                                timeoutMs: Math.max(
+                                                  1,
+                                                  Number(event.target.value || draftTool.execution?.timeoutMs || 1)
+                                                ),
+                                              },
+                                            }
+                                          ),
+                                        }))
+                                      }
+                                      type="number"
+                                      value={draftTool.execution?.timeoutMs ?? tool.execution.timeoutMs}
+                                    />
+                                  </label>
+                                  <label className="tool-policy-field">
+                                    {appsCopy.maxAttemptsLabel}
+                                    <input
+                                      aria-label={`${localizedApp.name} tool ${tool.name} attempts`}
+                                      min={1}
+                                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                        setToolDrafts(currentDrafts => ({
+                                          ...currentDrafts,
+                                          [app.id]: updateToolDraftEntry(
+                                            readToolDraft(currentDrafts, app),
+                                            tool.name,
+                                            {
+                                              execution: {
+                                                ...draftTool.execution,
+                                                maxAttempts: Math.max(
+                                                  1,
+                                                  Number(event.target.value || draftTool.execution?.maxAttempts || 1)
+                                                ),
+                                              },
+                                            }
+                                          ),
+                                        }))
+                                      }
+                                      type="number"
+                                      value={draftTool.execution?.maxAttempts ?? tool.execution.maxAttempts}
+                                    />
+                                  </label>
+                                  <label className="tool-policy-field">
+                                    {appsCopy.idempotencyScopeLabel}
+                                    <select
+                                      aria-label={`${localizedApp.name} tool ${tool.name} idempotency`}
+                                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                                        setToolDrafts(currentDrafts => ({
+                                          ...currentDrafts,
+                                          [app.id]: updateToolDraftEntry(
+                                            readToolDraft(currentDrafts, app),
+                                            tool.name,
+                                            {
+                                              execution: {
+                                                ...draftTool.execution,
+                                                idempotencyScope:
+                                                  event.target.value as NonNullable<
+                                                    WorkspaceAppToolSummary['execution']
+                                                  >['idempotencyScope'],
+                                              },
+                                            }
+                                          ),
+                                        }))
+                                      }
+                                      value={
+                                        draftTool.execution?.idempotencyScope ??
+                                        tool.execution.idempotencyScope
+                                      }
+                                    >
+                                      <option value="conversation">
+                                        {appsCopy.idempotencyConversation}
+                                      </option>
+                                      <option value="run">{appsCopy.idempotencyRun}</option>
+                                    </select>
+                                  </label>
+                                </div>
                               </div>
                               <input
                                 aria-label={`${localizedApp.name} tool ${tool.name}`}
-                                checked={checked}
+                                checked={draftTool.enabled}
                                 onChange={() =>
                                   setToolDrafts(currentDrafts => ({
                                     ...currentDrafts,
-                                    [app.id]: toggleToolName(readToolDraft(currentDrafts, app), tool.name),
+                                    [app.id]: updateToolDraftEntry(
+                                      readToolDraft(currentDrafts, app),
+                                      tool.name,
+                                      {
+                                        enabled: !draftTool.enabled,
+                                      }
+                                    ),
                                   }))
                                 }
                                 type="checkbox"
                               />
-                            </label>
+                            </div>
                           );
                         })
                       )}

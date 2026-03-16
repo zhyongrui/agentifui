@@ -1,5 +1,4 @@
 import type { AdminAppsResponse, AdminAppToolUpdateResponse } from '@agentifui/shared/admin';
-import type { ChatGatewayErrorResponse } from '@agentifui/shared/chat';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from '../app.js';
@@ -66,6 +65,11 @@ describe.sequential('persistent tool registry', () => {
             name: 'workspace.search',
             enabled: true,
             isOverridden: false,
+            execution: expect.objectContaining({
+              timeoutMs: 150,
+              maxAttempts: 2,
+              idempotencyScope: 'conversation',
+            }),
           }),
         ])
       );
@@ -75,16 +79,26 @@ describe.sequential('persistent tool registry', () => {
         url: '/admin/apps/app_policy_watch/tools',
         headers,
         payload: {
-          enabledToolNames: [],
+          tools: [
+            {
+              name: 'workspace.search',
+              enabled: true,
+              execution: {
+                timeoutMs: 210,
+                maxAttempts: 2,
+                idempotencyScope: 'conversation',
+              },
+            },
+          ],
         },
       });
 
       expect(updateResponse.statusCode).toBe(200);
       expect((updateResponse.json() as AdminAppToolUpdateResponse).data).toMatchObject({
-        enabledToolNames: [],
+        enabledToolNames: ['workspace.search'],
         app: {
           id: 'app_policy_watch',
-          enabledToolCount: 0,
+          enabledToolCount: 1,
           toolOverrideCount: 1,
         },
       });
@@ -93,9 +107,17 @@ describe.sequential('persistent tool registry', () => {
 
       try {
         const rows = await database<
-          { app_id: string; tool_name: string; enabled: boolean; updated_by_user_id: string | null }[]
+          {
+            app_id: string;
+            tool_name: string;
+            enabled: boolean;
+            timeout_ms: number | null;
+            max_attempts: number | null;
+            idempotency_scope: string | null;
+            updated_by_user_id: string | null;
+          }[]
         >`
-          select app_id, tool_name, enabled, updated_by_user_id
+          select app_id, tool_name, enabled, timeout_ms, max_attempts, idempotency_scope, updated_by_user_id
           from workspace_app_tool_overrides
           where tenant_id = ${PERSISTENT_TEST_ENV.defaultTenantId}
             and app_id = 'app_policy_watch'
@@ -105,7 +127,10 @@ describe.sequential('persistent tool registry', () => {
           expect.objectContaining({
             app_id: 'app_policy_watch',
             tool_name: 'workspace.search',
-            enabled: false,
+            enabled: true,
+            timeout_ms: 210,
+            max_attempts: 2,
+            idempotency_scope: 'conversation',
             updated_by_user_id: expect.any(String),
           }),
         ]);
@@ -134,8 +159,14 @@ describe.sequential('persistent tool registry', () => {
           expect.arrayContaining([
             expect.objectContaining({
               name: 'workspace.search',
-              enabled: false,
+              enabled: true,
               isOverridden: true,
+              executionIsOverridden: true,
+              execution: expect.objectContaining({
+                timeoutMs: 210,
+                maxAttempts: 2,
+                idempotencyScope: 'conversation',
+              }),
             }),
           ])
         );
@@ -149,36 +180,69 @@ describe.sequential('persistent tool registry', () => {
           },
           payload: {
             app_id: 'app_policy_watch',
+            inputs: {
+              toolSimulation: {
+                'workspace.search': {
+                  failAttemptsBeforeSuccess: 1,
+                },
+              },
+            },
             messages: [
               {
                 role: 'user',
                 content: 'summarize dorm policy updates',
               },
             ],
-            tools: [
-              {
-                type: 'function',
-                function: {
-                  name: 'workspace.search',
-                  description: 'Search indexed workspace knowledge.',
-                  inputSchema: {
-                    type: 'object',
-                  },
-                  strict: true,
-                },
-                auth: {
-                  scope: 'active_group',
-                },
-                enabled: true,
+            tool_choice: {
+              type: 'function',
+              function: {
+                name: 'workspace.search',
               },
-            ],
+            },
           },
         });
 
-        expect(completion.statusCode).toBe(400);
-        expect((completion.json() as ChatGatewayErrorResponse).error).toMatchObject({
-          code: 'invalid_messages',
-          param: 'tools',
+        expect(completion.statusCode).toBe(200);
+        const completionBody = completion.json() as {
+          metadata?: {
+            run_id?: string;
+          };
+        };
+        const runId = completionBody.metadata?.run_id;
+
+        if (!runId) {
+          throw new Error('expected completion to include a run id');
+        }
+
+        const run = await restartedApp.inject({
+          method: 'GET',
+          url: `/workspace/runs/${runId}`,
+          headers,
+        });
+
+        expect(run.statusCode).toBe(200);
+        expect(run.json()).toMatchObject({
+          data: {
+            toolExecutions: [
+              expect.objectContaining({
+                attempt: 1,
+                status: 'failed',
+                metadata: expect.objectContaining({
+                  failureReason: 'provider_error',
+                  timeoutMs: '210',
+                  maxAttempts: '2',
+                }),
+              }),
+              expect.objectContaining({
+                attempt: 2,
+                status: 'succeeded',
+                metadata: expect.objectContaining({
+                  timeoutMs: '210',
+                  maxAttempts: '2',
+                }),
+              }),
+            ],
+          },
         });
       } finally {
         await restartedApp.close();

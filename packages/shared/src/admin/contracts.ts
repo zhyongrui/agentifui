@@ -7,6 +7,7 @@ import type {
 } from '../auth/contracts.js';
 import type { WorkspaceApp, WorkspaceGroup } from '../apps/contracts.js';
 import type { WorkspaceAppToolSummary } from '../tools/contracts.js';
+import type { ToolExecutionPolicy } from '../tools/contracts.js';
 
 export type AdminErrorCode =
   | 'ADMIN_UNAUTHORIZED'
@@ -338,8 +339,15 @@ export type AdminAppGrantDeleteResponse = {
   };
 };
 
+export type AdminAppToolUpdateInput = {
+  name: string;
+  enabled: boolean;
+  execution?: ToolExecutionPolicy;
+};
+
 export type AdminAppToolUpdateRequest = {
-  enabledToolNames: string[];
+  enabledToolNames?: string[];
+  tools?: AdminAppToolUpdateInput[];
 };
 
 export type AdminAppToolUpdateResponse = {

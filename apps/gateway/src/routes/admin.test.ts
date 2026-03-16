@@ -122,11 +122,23 @@ const adminApps: AdminAppSummary[] = [
         description: 'Review pending access policy changes and summarize impacted subjects.',
         enabled: true,
         defaultEnabled: true,
+        enabledIsOverridden: false,
         isOverridden: false,
         auth: {
           scope: 'tenant_admin',
           requiresFreshMfa: true,
         },
+        execution: {
+          timeoutMs: 200,
+          maxAttempts: 1,
+          idempotencyScope: 'conversation',
+        },
+        defaultExecution: {
+          timeoutMs: 200,
+          maxAttempts: 1,
+          idempotencyScope: 'conversation',
+        },
+        executionIsOverridden: false,
         tags: ['tenant', 'rbac', 'admin'],
         inputSchema: {
           type: 'object',
@@ -146,11 +158,23 @@ const adminApps: AdminAppSummary[] = [
         description: 'Read tenant-wide launch, run, storage, and quota usage summaries.',
         enabled: true,
         defaultEnabled: true,
+        enabledIsOverridden: false,
         isOverridden: false,
         auth: {
           scope: 'tenant_admin',
           requiresFreshMfa: true,
         },
+        execution: {
+          timeoutMs: 180,
+          maxAttempts: 1,
+          idempotencyScope: 'run',
+        },
+        defaultExecution: {
+          timeoutMs: 180,
+          maxAttempts: 1,
+          idempotencyScope: 'run',
+        },
+        executionIsOverridden: false,
         tags: ['tenant', 'usage', 'admin'],
         inputSchema: {
           type: 'object',
@@ -1819,7 +1843,26 @@ describe('admin routes', () => {
           authorization: `Bearer ${login.data.sessionToken}`,
         },
         payload: {
-          enabledToolNames: ['tenant.access.review'],
+          tools: [
+            {
+              name: 'tenant.access.review',
+              enabled: true,
+              execution: {
+                timeoutMs: 240,
+                maxAttempts: 2,
+                idempotencyScope: 'conversation',
+              },
+            },
+            {
+              name: 'tenant.usage.read',
+              enabled: false,
+              execution: {
+                timeoutMs: 180,
+                maxAttempts: 1,
+                idempotencyScope: 'run',
+              },
+            },
+          ],
         },
       });
 
@@ -1831,11 +1874,18 @@ describe('admin routes', () => {
           app: {
             id: 'app_tenant_control',
             enabledToolCount: 1,
-            toolOverrideCount: 1,
+            toolOverrideCount: 2,
             tools: expect.arrayContaining([
               expect.objectContaining({
                 name: 'tenant.access.review',
                 enabled: true,
+                isOverridden: true,
+                executionIsOverridden: true,
+                execution: expect.objectContaining({
+                  timeoutMs: 240,
+                  maxAttempts: 2,
+                  idempotencyScope: 'conversation',
+                }),
               }),
               expect.objectContaining({
                 name: 'tenant.usage.read',
@@ -1859,7 +1909,18 @@ describe('admin routes', () => {
             entityId: 'app_tenant_control',
             payload: expect.objectContaining({
               enabledToolNames: ['tenant.access.review'],
-              toolOverrideCount: 1,
+              toolOverrideCount: 2,
+              toolPolicies: expect.arrayContaining([
+                expect.objectContaining({
+                  name: 'tenant.access.review',
+                  execution: expect.objectContaining({
+                    timeoutMs: 240,
+                    maxAttempts: 2,
+                    idempotencyScope: 'conversation',
+                  }),
+                  executionIsOverridden: true,
+                }),
+              ]),
             }),
           }),
         ])

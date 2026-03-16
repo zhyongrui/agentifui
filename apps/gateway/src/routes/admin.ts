@@ -28,6 +28,7 @@ import type {
 } from '@agentifui/shared/admin';
 import type { AuthAuditEntityType, AuthAuditLevel, AuthUser } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
+import type { ToolExecutionPolicy } from '@agentifui/shared';
 
 import type { AdminService } from '../services/admin-service.js';
 import type { AuditService } from '../services/audit-service.js';
@@ -69,6 +70,49 @@ function isGrantEffect(value: unknown): value is AdminAppGrantCreateRequest['eff
 
 function isAuditLevel(value: unknown): value is AuthAuditLevel {
   return value === 'critical' || value === 'info' || value === 'warning';
+}
+
+function isToolExecutionPolicy(value: unknown): value is ToolExecutionPolicy {
+  if (value === undefined) {
+    return true;
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const policy = value as Record<string, unknown>;
+
+  return (
+    (policy.timeoutMs === undefined ||
+      (typeof policy.timeoutMs === 'number' &&
+        Number.isFinite(policy.timeoutMs) &&
+        policy.timeoutMs > 0)) &&
+    (policy.maxAttempts === undefined ||
+      (typeof policy.maxAttempts === 'number' &&
+        Number.isFinite(policy.maxAttempts) &&
+        policy.maxAttempts > 0)) &&
+    (policy.idempotencyScope === undefined ||
+      policy.idempotencyScope === 'conversation' ||
+      policy.idempotencyScope === 'run')
+  );
+}
+
+function isAdminAppToolUpdateInput(
+  value: unknown
+): value is NonNullable<AdminAppToolUpdateRequest['tools']>[number] {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const tool = value as Record<string, unknown>;
+
+  return (
+    typeof tool.name === 'string' &&
+    tool.name.trim().length > 0 &&
+    typeof tool.enabled === 'boolean' &&
+    isToolExecutionPolicy(tool.execution)
+  );
 }
 
 function isAuditEntityType(value: unknown): value is AuthAuditEntityType {
@@ -1451,19 +1495,24 @@ export async function registerAdminRoutes(
       Array.isArray(body.enabledToolNames) &&
       body.enabledToolNames.every((value): value is string => typeof value === 'string')
         ? body.enabledToolNames
-      : null;
+        : null;
+    const tools =
+      Array.isArray(body.tools) && body.tools.every(isAdminAppToolUpdateInput)
+        ? body.tools
+        : null;
 
-    if (!appId || enabledToolNames === null) {
+    if (!appId || (enabledToolNames === null && tools === null)) {
       reply.code(400);
       return buildErrorResponse(
         'ADMIN_INVALID_PAYLOAD',
-        'Admin app tool updates require an app id and enabledToolNames array.'
+        'Admin app tool updates require an app id and enabledToolNames or tools payload.'
       );
     }
 
     const result = await toolRegistryService.updateAppToolsForUser(session.user, {
       appId,
-      enabledToolNames,
+      ...(enabledToolNames ? { enabledToolNames } : {}),
+      ...(tools ? { tools } : {}),
     });
 
     if (!result.ok) {
@@ -1499,6 +1548,13 @@ export async function registerAdminRoutes(
         appId: enrichedApp.id,
         appName: enrichedApp.name,
         enabledToolNames: resolveEnabledToolNames(enrichedApp.tools),
+        toolPolicies: enrichedApp.tools.map(tool => ({
+          name: tool.name,
+          enabled: tool.enabled,
+          enabledIsOverridden: tool.enabledIsOverridden,
+          execution: tool.execution,
+          executionIsOverridden: tool.executionIsOverridden,
+        })),
         toolOverrideCount: enrichedApp.toolOverrideCount,
       },
     });

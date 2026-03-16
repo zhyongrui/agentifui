@@ -155,6 +155,9 @@ export const workspaceAppToolOverrides = pgTable(
       .references(() => workspaceApps.id, { onDelete: 'cascade' }),
     toolName: varchar('tool_name', { length: 160 }).notNull(),
     enabled: boolean('enabled').notNull(),
+    timeoutMs: integer('timeout_ms'),
+    maxAttempts: integer('max_attempts'),
+    idempotencyScope: varchar('idempotency_scope', { length: 32 }).$type<'conversation' | 'run' | null>(),
     updatedByUserId: varchar('updated_by_user_id', { length: 120 }).references(() => users.id, {
       onDelete: 'set null',
     }),

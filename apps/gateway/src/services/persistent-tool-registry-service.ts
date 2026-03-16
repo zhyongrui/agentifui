@@ -3,8 +3,11 @@ import type { ChatToolDescriptor } from "@agentifui/shared";
 
 import {
   buildAppToolSummaries,
+  buildToolUpdateMap,
   buildToolRegistryId,
   listCatalogToolsForApp,
+  normalizeToolExecutionPolicy,
+  toolExecutionPoliciesEqual,
   type ToolRegistryMutationResult,
   type ToolRegistryService,
   type UpdateAppToolRegistryInput,
@@ -14,6 +17,9 @@ type ToolOverrideRow = {
   app_id: string;
   tool_name: string;
   enabled: boolean;
+  timeout_ms: number | null;
+  max_attempts: number | null;
+  idempotency_scope: "conversation" | "run" | null;
   updated_at: Date | string;
   updated_by_user_id: string | null;
 };
@@ -30,6 +36,7 @@ function buildEnabledDescriptor(summary: {
   name: string;
   description: string | null;
   auth: ChatToolDescriptor["auth"];
+  execution: ChatToolDescriptor["execution"];
   inputSchema: ChatToolDescriptor["function"]["inputSchema"];
   strict: boolean;
   tags: string[];
@@ -43,6 +50,7 @@ function buildEnabledDescriptor(summary: {
       strict: summary.strict,
     },
     auth: summary.auth,
+    execution: summary.execution,
     enabled: true,
     tags: summary.tags,
   } satisfies ChatToolDescriptor;
@@ -76,6 +84,9 @@ async function listToolOverridesForTenant(
       app_id,
       tool_name,
       enabled,
+      timeout_ms,
+      max_attempts,
+      idempotency_scope,
       updated_at,
       updated_by_user_id
     from workspace_app_tool_overrides
@@ -99,6 +110,9 @@ async function listToolOverridesForTenant(
     const current = overridesByAppId.get(row.app_id) ?? new Map();
     current.set(row.tool_name, {
       enabled: row.enabled,
+      timeoutMs: row.timeout_ms,
+      maxAttempts: row.max_attempts,
+      idempotencyScope: row.idempotency_scope,
       updatedAt: toIso(row.updated_at) ?? new Date().toISOString(),
       updatedByUserId: row.updated_by_user_id,
     });
@@ -149,9 +163,12 @@ export function createPersistentToolRegistryService(
     },
     async updateAppToolsForUser(user, input: UpdateAppToolRegistryInput) {
       const appId = input.appId.trim();
-      const enabledToolNames = [
-        ...new Set(input.enabledToolNames.map((name) => name.trim()).filter(Boolean)),
-      ].sort((left, right) => left.localeCompare(right));
+      const enabledToolNames = input.enabledToolNames
+        ? [
+            ...new Set(input.enabledToolNames.map((name) => name.trim()).filter(Boolean)),
+          ].sort((left, right) => left.localeCompare(right))
+        : null;
+      const toolUpdates = buildToolUpdateMap(input.tools);
 
       const [appRow] = await database<{ id: string }[]>`
         select id
@@ -174,20 +191,39 @@ export function createPersistentToolRegistryService(
       const availableToolNames = new Set(
         catalogEntries.map((entry) => entry.descriptor.function.name),
       );
-      const invalidToolNames = enabledToolNames.filter(
+      const invalidToolNames = (enabledToolNames ?? []).filter(
         (name) => !availableToolNames.has(name),
       );
+      const invalidRequestedToolNames = [...toolUpdates.keys()].filter(
+        (name) => !availableToolNames.has(name),
+      );
+      const combinedInvalidToolNames = [
+        ...new Set([...invalidToolNames, ...invalidRequestedToolNames]),
+      ];
 
-      if (invalidToolNames.length > 0) {
+      if (combinedInvalidToolNames.length > 0) {
         return toMutationError(
           "ADMIN_INVALID_PAYLOAD",
           "The tool update payload references tools that are not available for this app.",
           {
             appId,
-            invalidToolNames,
+            invalidToolNames: combinedInvalidToolNames,
           },
         );
       }
+
+      if (enabledToolNames === null && toolUpdates.size === 0) {
+        return toMutationError(
+          "ADMIN_INVALID_PAYLOAD",
+          "The tool update payload must include enabledToolNames or tools.",
+          { appId },
+        );
+      }
+
+      const refreshedOverridesByAppId = await listToolOverridesForTenant(database, user.tenantId, [
+        appId,
+      ]);
+      const existingOverrides = refreshedOverridesByAppId.get(appId) ?? new Map();
 
       await database.begin(async (transaction) => {
         const sql = transaction as unknown as DatabaseClient;
@@ -195,9 +231,29 @@ export function createPersistentToolRegistryService(
         for (const entry of catalogEntries) {
           const toolName = entry.descriptor.function.name;
           const defaultEnabled = entry.defaultEnabledAppIds.includes(appId);
-          const desiredEnabled = enabledToolNames.includes(toolName);
+          const defaultExecution = normalizeToolExecutionPolicy(entry.descriptor.execution);
+          const existingOverride = existingOverrides.get(toolName) ?? null;
+          const currentEnabled = existingOverride?.enabled ?? defaultEnabled;
+          const currentExecution = {
+            timeoutMs: existingOverride?.timeoutMs ?? defaultExecution.timeoutMs,
+            maxAttempts: existingOverride?.maxAttempts ?? defaultExecution.maxAttempts,
+            idempotencyScope:
+              existingOverride?.idempotencyScope ?? defaultExecution.idempotencyScope,
+          } as const;
+          const requestedTool = toolUpdates.get(toolName);
+          const desiredEnabled =
+            requestedTool?.enabled ??
+            (enabledToolNames ? enabledToolNames.includes(toolName) : currentEnabled);
+          const desiredExecution = requestedTool?.execution
+            ? normalizeToolExecutionPolicy(requestedTool.execution)
+            : currentExecution;
+          const enabledIsOverridden = desiredEnabled !== defaultEnabled;
+          const executionIsOverridden = !toolExecutionPoliciesEqual(
+            desiredExecution,
+            defaultExecution,
+          );
 
-          if (desiredEnabled === defaultEnabled) {
+          if (!enabledIsOverridden && !executionIsOverridden) {
             await sql`
               delete from workspace_app_tool_overrides
               where tenant_id = ${user.tenantId}
@@ -214,6 +270,9 @@ export function createPersistentToolRegistryService(
               app_id,
               tool_name,
               enabled,
+              timeout_ms,
+              max_attempts,
+              idempotency_scope,
               updated_by_user_id,
               created_at,
               updated_at
@@ -224,12 +283,18 @@ export function createPersistentToolRegistryService(
               ${appId},
               ${toolName},
               ${desiredEnabled},
+              ${desiredExecution.timeoutMs},
+              ${desiredExecution.maxAttempts},
+              ${desiredExecution.idempotencyScope},
               ${user.id},
               now(),
               now()
             )
             on conflict (tenant_id, app_id, tool_name) do update
             set enabled = excluded.enabled,
+                timeout_ms = excluded.timeout_ms,
+                max_attempts = excluded.max_attempts,
+                idempotency_scope = excluded.idempotency_scope,
                 updated_by_user_id = excluded.updated_by_user_id,
                 updated_at = excluded.updated_at
           `;
@@ -246,7 +311,7 @@ export function createPersistentToolRegistryService(
           appId,
           tools: buildAppToolSummaries(
             appId,
-            overridesByAppId.get(appId) ?? new Map(),
+            refreshedOverridesByAppId.get(appId) ?? new Map(),
           ),
         },
       };

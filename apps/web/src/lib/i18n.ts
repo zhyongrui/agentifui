@@ -146,6 +146,13 @@ type Messages = {
     defaultOff: string;
     tenantOverride: string;
     catalogDefault: string;
+    toolTimeoutLabel: string;
+    maxAttemptsLabel: string;
+    idempotencyScopeLabel: string;
+    idempotencyConversation: string;
+    idempotencyRun: string;
+    toolPolicyDefault: string;
+    toolPolicyOverride: string;
     saveTools: string;
     savingTools: string;
     directOverrides: string;
@@ -356,6 +363,13 @@ const messages: Record<AppLocale, Messages> = {
       defaultOff: '默认关闭',
       tenantOverride: '租户覆盖',
       catalogDefault: '目录默认值',
+      toolTimeoutLabel: '超时',
+      maxAttemptsLabel: '最大尝试次数',
+      idempotencyScopeLabel: '幂等范围',
+      idempotencyConversation: '会话级',
+      idempotencyRun: '运行级',
+      toolPolicyDefault: '执行策略使用目录默认值',
+      toolPolicyOverride: '执行策略已被租户覆盖',
       saveTools: '保存工具注册表',
       savingTools: '正在保存工具...',
       directOverrides: '直接用户覆盖',
@@ -566,6 +580,13 @@ const messages: Record<AppLocale, Messages> = {
       defaultOff: 'default off',
       tenantOverride: 'tenant override',
       catalogDefault: 'catalog default',
+      toolTimeoutLabel: 'Timeout',
+      maxAttemptsLabel: 'Max attempts',
+      idempotencyScopeLabel: 'Idempotency scope',
+      idempotencyConversation: 'conversation',
+      idempotencyRun: 'run',
+      toolPolicyDefault: 'execution policy uses the catalog default',
+      toolPolicyOverride: 'execution policy is overridden for this tenant',
       saveTools: 'Save tool registry',
       savingTools: 'Saving tools...',
       directOverrides: 'Direct user overrides',

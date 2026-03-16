@@ -85,8 +85,12 @@ export type WorkspaceAppToolSummary = {
   description: string | null;
   enabled: boolean;
   defaultEnabled: boolean;
+  enabledIsOverridden: boolean;
   isOverridden: boolean;
   auth: ToolAuthRequirement;
+  execution: Required<ToolExecutionPolicy>;
+  defaultExecution: Required<ToolExecutionPolicy>;
+  executionIsOverridden: boolean;
   tags: string[];
   inputSchema: ToolInputSchema;
   strict: boolean;
