@@ -82,6 +82,11 @@ function toGatewayMessages(
   return messages.map((message) => ({
     role: message.role,
     content: message.content,
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    ...(message.toolName ? { name: message.toolName } : {}),
+    ...(message.toolCalls && message.toolCalls.length > 0
+      ? { tool_calls: message.toolCalls }
+      : {}),
   }));
 }
 
@@ -352,6 +357,25 @@ function findLatestSafetySignals(messages: WorkspaceConversationMessage[]) {
   return latestAssistantMessage?.safetySignals ?? [];
 }
 
+function describeTranscriptMessageLabel(input: {
+  appName: string;
+  locale: string;
+  message: WorkspaceConversationMessage;
+  userLabel: string;
+}) {
+  if (input.message.role === "user") {
+    return input.userLabel;
+  }
+
+  if (input.message.role === "tool") {
+    return input.locale === "zh-CN"
+      ? `工具 · ${input.message.toolName ?? "tool"}`
+      : `Tool · ${input.message.toolName ?? "tool"}`;
+  }
+
+  return input.appName;
+}
+
 export default function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
   const router = useRouter();
@@ -445,6 +469,7 @@ export default function ConversationPage() {
           helpful: "有帮助",
           needsWork: "待改进",
           followUp: "试试继续追问",
+          toolCalls: "工具调用",
           artifacts: "产物",
           message: "消息",
           askPlaceholder: (name: string) => `让 ${name} 处理一个具体问题...`,
@@ -495,6 +520,7 @@ export default function ConversationPage() {
           helpful: "Helpful",
           needsWork: "Needs work",
           followUp: "Try a follow-up",
+          toolCalls: "Tool calls",
           artifacts: "Artifacts",
           message: "Message",
           askPlaceholder: (name: string) => `Ask ${name} to work on something concrete...`,
@@ -997,13 +1023,15 @@ export default function ConversationPage() {
             const suggestedPrompts = chunk.suggested_prompts;
             const citations = chunk.citations;
             const safetySignals = chunk.safety_signals;
+            const toolCalls = delta?.tool_calls;
 
             if (
               delta?.content ||
               finishReason ||
               (suggestedPrompts && suggestedPrompts.length > 0) ||
               (citations && citations.length > 0) ||
-              (safetySignals && safetySignals.length > 0)
+              (safetySignals && safetySignals.length > 0) ||
+              (toolCalls && toolCalls.length > 0)
             ) {
               setMessages((currentMessages) =>
                 currentMessages.map((message) =>
@@ -1025,6 +1053,10 @@ export default function ConversationPage() {
                           safetySignals && safetySignals.length > 0
                             ? safetySignals
                             : message.safetySignals,
+                        toolCalls:
+                          toolCalls && toolCalls.length > 0
+                            ? toolCalls
+                            : message.toolCalls,
                         status: finishReason
                           ? stopRequestedRef.current
                             ? "stopped"
@@ -1999,9 +2031,12 @@ export default function ConversationPage() {
               >
                 <div className="chat-bubble-meta">
                   <span className="chat-bubble-label">
-                    {message.role === "user"
-                      ? session.user.displayName
-                      : localizedApp.name}
+                    {describeTranscriptMessageLabel({
+                      appName: localizedApp.name,
+                      locale,
+                      message,
+                      userLabel: session.user.displayName,
+                    })}
                   </span>
                   <span
                     className={`chat-bubble-status status-${message.status}`}
@@ -2015,6 +2050,15 @@ export default function ConversationPage() {
                     message.status === "streaming" ? copy.streaming : ""
                   }
                 />
+                {message.toolCalls && message.toolCalls.length > 0 ? (
+                  <ul className="chat-attachment-list">
+                    {message.toolCalls.map((toolCall) => (
+                      <li key={toolCall.id}>
+                        {copy.toolCalls}: {toolCall.function.name}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <div className="chat-message-actions">
                   <button
                     type="button"

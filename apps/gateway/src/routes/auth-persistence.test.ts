@@ -1713,6 +1713,264 @@ describe.sequential('persistent auth runtime', () => {
   );
 
   it(
+    'persists runtime tool calls and tool result messages across app restarts',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        const register = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'tooling@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Tooling Reviewer',
+          },
+        });
+
+        expect(register.statusCode).toBe(201);
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'tooling@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+        };
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+
+        const completion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+            'x-active-group-id': 'grp_research',
+          },
+          payload: {
+            app_id: 'app_policy_watch',
+            conversation_id: launchBody.data.conversationId,
+            messages: [
+              {
+                role: 'user',
+                content: 'Look up the latest dormitory lights-out guidance.',
+              },
+            ],
+            tools: [
+              {
+                type: 'function',
+                function: {
+                  name: 'workspace.search',
+                  description: 'Searches indexed workspace knowledge.',
+                  inputSchema: {
+                    type: 'object',
+                    properties: {
+                      query: {
+                        type: 'string',
+                      },
+                      topK: {
+                        type: 'integer',
+                        minimum: 1,
+                        maximum: 10,
+                      },
+                    },
+                    required: ['query'],
+                    additionalProperties: false,
+                  },
+                  strict: true,
+                },
+                auth: {
+                  scope: 'active_group',
+                  requiresApproval: false,
+                },
+                enabled: true,
+                tags: ['search'],
+              },
+            ],
+            tool_choice: {
+              type: 'function',
+              function: {
+                name: 'workspace.search',
+              },
+            },
+          },
+        });
+
+        expect(completion.statusCode).toBe(200);
+
+        const completionBody = completion.json() as ChatCompletionResponse;
+        const toolCallId =
+          completionBody.choices[0]?.message.tool_calls?.[0]?.id ?? null;
+
+        expect(completionBody.choices[0]?.message.tool_calls).toEqual([
+          expect.objectContaining({
+            function: expect.objectContaining({
+              name: 'workspace.search',
+            }),
+          }),
+        ]);
+        expect(toolCallId).toEqual(expect.any(String));
+
+        if (!toolCallId) {
+          throw new Error('expected completion to include a tool call id');
+        }
+
+        const runtimeDatabase = createPersistentTestDatabase();
+
+        try {
+          const [runRow] = await runtimeDatabase<{
+            outputs: Record<string, unknown> | string;
+          }[]>`
+            select outputs
+            from runs
+            where id = ${launchBody.data.runId}
+            limit 1
+          `;
+
+          expect(runRow).toBeDefined();
+
+          if (!runRow) {
+            throw new Error('expected run row to exist');
+          }
+
+          const outputs =
+            typeof runRow.outputs === 'string'
+              ? (JSON.parse(runRow.outputs) as Record<string, unknown>)
+              : runRow.outputs;
+
+          expect(outputs).toMatchObject({
+            assistant: {
+              toolCalls: [
+                expect.objectContaining({
+                  id: toolCallId,
+                  function: expect.objectContaining({
+                    name: 'workspace.search',
+                  }),
+                }),
+              ],
+            },
+            toolCalls: [
+              expect.objectContaining({
+                id: toolCallId,
+              }),
+            ],
+            toolResults: [
+              expect.objectContaining({
+                toolCallId,
+                toolName: 'workspace.search',
+                content: expect.stringContaining('workspace.search'),
+              }),
+            ],
+          });
+        } finally {
+          await runtimeDatabase.end({ timeout: 5 });
+        }
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+        let restartedAppClosed = false;
+
+        try {
+          const conversation = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/conversations/${launchBody.data.conversationId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(conversation.statusCode).toBe(200);
+          expect((conversation.json() as WorkspaceConversationResponse).data.messages).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                role: 'assistant',
+                toolCalls: [
+                  expect.objectContaining({
+                    id: toolCallId,
+                    function: expect.objectContaining({
+                      name: 'workspace.search',
+                    }),
+                  }),
+                ],
+              }),
+              expect.objectContaining({
+                role: 'tool',
+                toolCallId,
+                toolName: 'workspace.search',
+                content: expect.stringContaining('workspace.search'),
+              }),
+              expect.objectContaining({
+                role: 'assistant',
+                content: expect.stringContaining('Tools used: workspace.search.'),
+              }),
+            ])
+          );
+
+          const run = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/runs/${launchBody.data.runId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(run.statusCode).toBe(200);
+          expect((run.json() as WorkspaceRunResponse).data.outputs).toMatchObject({
+            toolCalls: [
+              expect.objectContaining({
+                id: toolCallId,
+              }),
+            ],
+            toolResults: [
+              expect.objectContaining({
+                toolCallId,
+                toolName: 'workspace.search',
+              }),
+            ],
+          });
+        } finally {
+          if (!restartedAppClosed) {
+            await restartedApp.close();
+            restartedAppClosed = true;
+          }
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
     'persists safety signals and audit events across app restarts',
     async () => {
       await resetPersistentTestDatabase();

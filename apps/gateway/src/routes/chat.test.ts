@@ -260,23 +260,76 @@ describe("chat routes", () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toMatchObject({
+      const responseBody = response.json() as ChatCompletionResponse;
+
+      expect(responseBody).toMatchObject({
         choices: [
           {
             index: 0,
             message: {
               role: "assistant",
               content: expect.any(String),
+              tool_calls: [
+                expect.objectContaining({
+                  type: "function",
+                  function: expect.objectContaining({
+                    name: "workspace.search",
+                  }),
+                }),
+              ],
             },
             finish_reason: "stop",
           },
         ],
+        conversation_id: expect.any(String),
         metadata: {
           app_id: "app_policy_watch",
           run_id: expect.any(String),
           active_group_id: "grp_research",
         },
       });
+
+      const conversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${responseBody.conversation_id}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversation.statusCode).toBe(200);
+      expect(
+        (conversation.json() as WorkspaceConversationResponse).data.messages,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: "assistant",
+            toolCalls: [
+              expect.objectContaining({
+                function: expect.objectContaining({
+                  name: "workspace.search",
+                }),
+              }),
+            ],
+          }),
+          expect.objectContaining({
+            role: "tool",
+            toolName: "workspace.search",
+            toolCallId: expect.any(String),
+            content: expect.stringContaining("workspace.search"),
+          }),
+          expect.objectContaining({
+            role: "user",
+            content: "Summarize the latest dormitory lights-out policy.",
+            status: "completed",
+          }),
+          expect.objectContaining({
+            role: "assistant",
+            content: expect.stringContaining("Tools used: workspace.search."),
+            status: "completed",
+          }),
+        ]),
+      );
     } finally {
       await app.close();
     }

@@ -1,4 +1,5 @@
 import type { DatabaseClient } from "@agentifui/db";
+import type { ChatToolCall } from "@agentifui/shared";
 import type { AuthUser } from "@agentifui/shared/auth";
 import {
   evaluateAppLaunch,
@@ -741,6 +742,49 @@ function toWorkspaceConversationSuggestedPrompts(
   return prompts.length > 0 ? prompts.slice(0, 3) : undefined;
 }
 
+function toWorkspaceConversationToolCalls(
+  value: unknown,
+): ChatToolCall[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const toolCalls = value.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) {
+      return [];
+    }
+
+    const toolCall = entry as Record<string, unknown>;
+    const toolFunction =
+      typeof toolCall.function === "object" && toolCall.function !== null
+        ? (toolCall.function as Record<string, unknown>)
+        : null;
+
+    if (
+      typeof toolCall.id !== "string" ||
+      toolCall.type !== "function" ||
+      !toolFunction ||
+      typeof toolFunction.name !== "string" ||
+      typeof toolFunction.arguments !== "string"
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: toolCall.id,
+        type: "function" as const,
+        function: {
+          name: toolFunction.name,
+          arguments: toolFunction.arguments,
+        },
+      },
+    ];
+  });
+
+  return toolCalls.length > 0 ? toolCalls : undefined;
+}
+
 function toWorkspaceCitation(value: unknown): WorkspaceCitation | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -1087,7 +1131,9 @@ function toWorkspaceConversationMessages(
     const message = entry as Record<string, unknown>;
 
     if (
-      (message.role !== "user" && message.role !== "assistant") ||
+      (message.role !== "user" &&
+        message.role !== "assistant" &&
+        message.role !== "tool") ||
       typeof message.id !== "string" ||
       typeof message.content !== "string" ||
       typeof message.status !== "string" ||
@@ -1116,6 +1162,11 @@ function toWorkspaceConversationMessages(
         suggestedPrompts: toWorkspaceConversationSuggestedPrompts(
           message.suggestedPrompts,
         ),
+        toolCallId:
+          typeof message.toolCallId === "string" ? message.toolCallId : undefined,
+        toolName:
+          typeof message.toolName === "string" ? message.toolName : undefined,
+        toolCalls: toWorkspaceConversationToolCalls(message.toolCalls),
       },
     ];
   });

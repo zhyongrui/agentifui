@@ -867,6 +867,11 @@ function buildPersistedHistory(
   messages: ChatCompletionMessage[],
   input: {
     latestUserAttachments?: WorkspaceConversationAttachment[];
+    assistantToolCallMessage?: {
+      content: string;
+      status: WorkspaceConversationMessageStatus;
+      toolCalls: ChatToolCall[];
+    };
     assistantMessage?: {
       artifacts?: WorkspaceArtifact[];
       citations?: WorkspaceCitation[];
@@ -875,6 +880,12 @@ function buildPersistedHistory(
       status: WorkspaceConversationMessageStatus;
       suggestedPrompts?: string[];
     };
+    toolMessages?: Array<{
+      content: string;
+      status?: WorkspaceConversationMessageStatus;
+      toolCallId: string;
+      toolName: string;
+    }>;
   } = {},
 ): WorkspaceConversationMessage[] {
   const baseTime = Date.now();
@@ -883,7 +894,11 @@ function buildPersistedHistory(
     .lastIndexOf("user");
   const transcript: WorkspaceConversationMessage[] = messages.flatMap(
     (message, index) => {
-      if (message.role !== "user" && message.role !== "assistant") {
+      if (
+        message.role !== "user" &&
+        message.role !== "assistant" &&
+        message.role !== "tool"
+      ) {
         return [];
       }
 
@@ -898,10 +913,52 @@ function buildPersistedHistory(
             message.role === "user" && index === latestUserMessageIndex
               ? input.latestUserAttachments
               : undefined,
+          toolCallId:
+            message.role === "tool" && message.tool_call_id?.trim()
+              ? message.tool_call_id.trim()
+              : undefined,
+          toolName:
+            message.role === "tool" && message.name?.trim()
+              ? message.name.trim()
+              : undefined,
+          toolCalls:
+            message.role === "assistant" &&
+            Array.isArray(message.tool_calls) &&
+            message.tool_calls.length > 0
+              ? message.tool_calls
+              : undefined,
         } satisfies WorkspaceConversationMessage,
       ];
     },
   );
+
+  if (
+    input.assistantToolCallMessage &&
+    input.assistantToolCallMessage.toolCalls.length > 0
+  ) {
+    transcript.push({
+      id: buildConversationMessageId(),
+      role: "assistant",
+      content: input.assistantToolCallMessage.content,
+      status: input.assistantToolCallMessage.status,
+      createdAt: new Date(baseTime + transcript.length).toISOString(),
+      toolCalls: input.assistantToolCallMessage.toolCalls,
+    });
+  }
+
+  if (input.toolMessages && input.toolMessages.length > 0) {
+    transcript.push(
+      ...input.toolMessages.map((message, index) => ({
+        id: buildConversationMessageId(),
+        role: "tool" as const,
+        content: message.content,
+        status: message.status ?? "completed",
+        createdAt: new Date(baseTime + transcript.length + index).toISOString(),
+        toolCallId: message.toolCallId,
+        toolName: message.toolName,
+      })),
+    );
+  }
 
   if (
     input.assistantMessage &&
@@ -938,6 +995,19 @@ function buildPersistedHistory(
   }
 
   return transcript;
+}
+
+function buildAssistantToolCallMessageContent(toolCalls: ChatToolCall[]) {
+  const toolNames = toolCalls.map((toolCall) => toolCall.function.name);
+
+  if (toolNames.length === 0) {
+    return "";
+  }
+
+  return [
+    `Requested ${toolNames.length} tool call${toolNames.length === 1 ? "" : "s"}.`,
+    `Tools: ${toolNames.join(", ")}.`,
+  ].join("\n");
 }
 
 function buildAssistantText(
@@ -1269,6 +1339,7 @@ function buildStreamingChunk(input: {
   pendingActions?: WorkspaceHitlStep[];
   safetySignals?: WorkspaceSafetySignal[];
   sourceBlocks?: WorkspaceSourceBlock[];
+  toolCalls?: ChatToolCall[];
   id: string;
   created: number;
   model: string;
@@ -1293,6 +1364,9 @@ function buildStreamingChunk(input: {
         delta: {
           ...(input.includeRole ? { role: "assistant" as const } : {}),
           ...(input.content ? { content: input.content } : {}),
+          ...(input.toolCalls && input.toolCalls.length > 0
+            ? { tool_calls: input.toolCalls }
+            : {}),
         },
         finish_reason: input.finishReason ?? null,
       },
@@ -1332,6 +1406,7 @@ function buildBlockingResponse(input: {
   safetySignals: WorkspaceSafetySignal[];
   sourceBlocks: WorkspaceSourceBlock[];
   suggestedPrompts: string[];
+  toolCalls: ChatToolCall[];
   runtimeId?: string;
 }): ChatCompletionResponse {
   return {
@@ -1345,6 +1420,7 @@ function buildBlockingResponse(input: {
         message: {
           role: "assistant",
           content: input.assistantText,
+          ...(input.toolCalls.length > 0 ? { tool_calls: input.toolCalls } : {}),
           artifacts: input.artifacts,
           ...(input.citations.length > 0 ? { citations: input.citations } : {}),
           ...(input.safetySignals.length > 0
@@ -1393,6 +1469,12 @@ async function* streamCompletionEvents(input: {
   safetySignals: WorkspaceSafetySignal[];
   sourceBlocks: WorkspaceSourceBlock[];
   suggestedPrompts: string[];
+  toolCalls: ChatToolCall[];
+  toolResults: Array<{
+    toolCallId: string;
+    toolName: string;
+    content: string;
+  }>;
   messages: ChatCompletionMessage[];
   startedAt: number;
   user: AuthUser;
@@ -1418,6 +1500,19 @@ async function* streamCompletionEvents(input: {
         includeRole: true,
       }),
     );
+
+    if (input.toolCalls.length > 0) {
+      yield buildChunkEvent(
+        buildStreamingChunk({
+          id: input.conversation.run.id,
+          created: input.created,
+          model: input.model,
+          conversationId: input.conversation.id,
+          traceId: input.conversation.run.traceId,
+          toolCalls: input.toolCalls,
+        }),
+      );
+    }
 
     for (const contentChunk of chunkText(input.assistantText)) {
       if (streamState?.stopRequested) {
@@ -1472,6 +1567,16 @@ async function* streamCompletionEvents(input: {
         status: wasStopped ? "stopped" : "succeeded",
         messageHistory: buildPersistedHistory(input.messages, {
           latestUserAttachments: input.attachments,
+          assistantToolCallMessage:
+            input.toolCalls.length > 0
+              ? {
+                  content: buildAssistantToolCallMessageContent(
+                    input.toolCalls,
+                  ),
+                  status: "completed",
+                  toolCalls: input.toolCalls,
+                }
+              : undefined,
           assistantMessage: {
             artifacts,
             citations,
@@ -1480,6 +1585,8 @@ async function* streamCompletionEvents(input: {
             status: wasStopped ? "stopped" : "completed",
             suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
           },
+          toolMessages:
+            input.toolResults.length > 0 ? input.toolResults : undefined,
         }),
         outputs: {
           assistant: {
@@ -1489,6 +1596,7 @@ async function* streamCompletionEvents(input: {
             citations,
             safetySignals: input.safetySignals,
             suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
+            ...(input.toolCalls.length > 0 ? { toolCalls: input.toolCalls } : {}),
           },
           artifacts,
           citations,
@@ -1496,6 +1604,8 @@ async function* streamCompletionEvents(input: {
           ...(input.runtime ? { runtime: input.runtime } : {}),
           safetySignals: input.safetySignals,
           sourceBlocks,
+          ...(input.toolCalls.length > 0 ? { toolCalls: input.toolCalls } : {}),
+          ...(input.toolResults.length > 0 ? { toolResults: input.toolResults } : {}),
           usage: {
             promptTokens: input.promptTokens,
             completionTokens,
@@ -1523,6 +1633,7 @@ async function* streamCompletionEvents(input: {
       safetySignals: input.safetySignals,
       sourceBlocks,
       suggestedPrompts: wasStopped ? undefined : input.suggestedPrompts,
+      toolCalls: input.toolCalls,
       usage: {
         prompt_tokens: input.promptTokens,
         completion_tokens: completionTokens,
@@ -1602,6 +1713,16 @@ async function* streamCompletionEvents(input: {
           status: streamState?.stopRequested ? "stopped" : "failed",
           messageHistory: buildPersistedHistory(input.messages, {
             latestUserAttachments: input.attachments,
+            assistantToolCallMessage:
+              input.toolCalls.length > 0
+                ? {
+                    content: buildAssistantToolCallMessageContent(
+                      input.toolCalls,
+                    ),
+                    status: "completed",
+                    toolCalls: input.toolCalls,
+                  }
+                : undefined,
             assistantMessage: {
               artifacts,
               citations,
@@ -1610,6 +1731,8 @@ async function* streamCompletionEvents(input: {
               status: streamState?.stopRequested ? "stopped" : "failed",
               suggestedPrompts: undefined,
             },
+            toolMessages:
+              input.toolResults.length > 0 ? input.toolResults : undefined,
           }),
           outputs: {
             assistant: {
@@ -1619,6 +1742,7 @@ async function* streamCompletionEvents(input: {
               citations,
               safetySignals: input.safetySignals,
               suggestedPrompts: undefined,
+              ...(input.toolCalls.length > 0 ? { toolCalls: input.toolCalls } : {}),
             },
             artifacts,
             citations,
@@ -1626,6 +1750,8 @@ async function* streamCompletionEvents(input: {
             ...(input.runtime ? { runtime: input.runtime } : {}),
             safetySignals: input.safetySignals,
             sourceBlocks,
+            ...(input.toolCalls.length > 0 ? { toolCalls: input.toolCalls } : {}),
+            ...(input.toolResults.length > 0 ? { toolResults: input.toolResults } : {}),
             usage: {
               promptTokens: input.promptTokens,
               completionTokens,
@@ -1850,6 +1976,7 @@ export async function registerChatRoutes(
     }
 
     let shouldValidateTools = false;
+    let enabledTools: ChatToolDescriptor[] = [];
 
     if (
       body.tools !== undefined ||
@@ -1872,7 +1999,7 @@ export async function registerChatRoutes(
     }
 
     if (shouldValidateTools) {
-      const enabledTools = await toolRegistryService.getEnabledToolsForUser(access.user, {
+      enabledTools = await toolRegistryService.getEnabledToolsForUser(access.user, {
         appId,
       });
       const toolValidationError = validateToolRegistryRequest({
@@ -1969,6 +2096,22 @@ export async function registerChatRoutes(
       body.inputs && typeof body.inputs === "object"
         ? (body.inputs as Record<string, unknown>)
         : null;
+    const functionToolChoice =
+      body.tool_choice &&
+      body.tool_choice !== "auto" &&
+      body.tool_choice !== "none"
+        ? body.tool_choice
+        : null;
+    const runtimeTools =
+      body.tools && body.tools.length > 0
+        ? body.tools
+        : functionToolChoice
+          ? enabledTools.filter(
+              (tool) =>
+                tool.function.name.trim() ===
+                functionToolChoice.function.name.trim(),
+            )
+          : [];
     const model = resolveModelName(
       {
         app_id: appId,
@@ -2028,6 +2171,8 @@ export async function registerChatRoutes(
       requestedModel: model,
       retrieval,
       runtimeInput,
+      toolChoice: functionToolChoice ?? body.tool_choice,
+      tools: runtimeTools,
     });
 
     if (!runtimeResult.ok) {
@@ -2084,6 +2229,8 @@ export async function registerChatRoutes(
     const safetySignals = runtimeResult.data.safetySignals ?? [];
     const sourceBlocks = runtimeResult.data.sourceBlocks ?? [];
     const suggestedPrompts = runtimeResult.data.suggestedPrompts ?? [];
+    const toolCalls = runtimeResult.data.toolCalls ?? [];
+    const toolResults = runtimeResult.data.toolResults ?? [];
     const runtime = runtimeResult.data.runtime;
     const resolvedModel = runtimeResult.data.model ?? model;
 
@@ -2114,6 +2261,8 @@ export async function registerChatRoutes(
             safetySignals,
             sourceBlocks,
             suggestedPrompts,
+            toolCalls,
+            toolResults,
             messages: body.messages,
             startedAt,
             user: access.user,
@@ -2131,6 +2280,14 @@ export async function registerChatRoutes(
         status: "succeeded",
         messageHistory: buildPersistedHistory(body.messages, {
           latestUserAttachments: attachmentResult.attachments,
+          assistantToolCallMessage:
+            toolCalls.length > 0
+              ? {
+                  content: buildAssistantToolCallMessageContent(toolCalls),
+                  status: "completed",
+                  toolCalls,
+                }
+              : undefined,
           assistantMessage: {
             artifacts,
             citations,
@@ -2139,6 +2296,7 @@ export async function registerChatRoutes(
             status: "completed",
             suggestedPrompts,
           },
+          toolMessages: toolResults.length > 0 ? toolResults : undefined,
         }),
         outputs: {
           assistant: {
@@ -2148,6 +2306,7 @@ export async function registerChatRoutes(
             citations,
             safetySignals,
             suggestedPrompts,
+            ...(toolCalls.length > 0 ? { toolCalls } : {}),
           },
           artifacts,
           citations,
@@ -2155,6 +2314,8 @@ export async function registerChatRoutes(
           runtime,
           safetySignals,
           sourceBlocks,
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          ...(toolResults.length > 0 ? { toolResults } : {}),
           usage: {
             promptTokens,
             completionTokens,
@@ -2224,6 +2385,7 @@ export async function registerChatRoutes(
       safetySignals,
       sourceBlocks,
       suggestedPrompts,
+      toolCalls,
       runtimeId: runtime.id,
     });
   });

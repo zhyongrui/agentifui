@@ -10,6 +10,12 @@ import type {
   WorkspaceSourceBlock,
 } from "@agentifui/shared/apps";
 import type { ChatCompletionMessage } from "@agentifui/shared/chat";
+import type {
+  ChatToolCall,
+  ChatToolChoice,
+  ChatToolDescriptor,
+  ToolInputSchema,
+} from "@agentifui/shared";
 import type { KnowledgeRetrievalResult } from "@agentifui/shared";
 import { randomUUID } from "node:crypto";
 
@@ -42,6 +48,8 @@ export type WorkspaceRuntimeInvocationInput = {
   requestedModel: string;
   retrieval: KnowledgeRetrievalResult | null;
   runtimeInput: Record<string, unknown> | null;
+  toolChoice?: ChatToolChoice;
+  tools?: ChatToolDescriptor[];
 };
 
 export type WorkspaceRuntimeInvocationFailure = {
@@ -62,6 +70,12 @@ export type WorkspaceRuntimeInvocationOutput = {
   safetySignals?: WorkspaceSafetySignal[];
   sourceBlocks?: WorkspaceSourceBlock[];
   suggestedPrompts?: string[];
+  toolCalls?: ChatToolCall[];
+  toolResults?: Array<{
+    toolCallId: string;
+    toolName: string;
+    content: string;
+  }>;
 };
 
 export type WorkspaceRuntimeInvocationResult =
@@ -131,6 +145,178 @@ function buildSuggestedPrompts(latestPrompt: string) {
     `List the next checks I should run for "${topic}".`,
     `Draft a short stakeholder update about "${topic}".`,
   ]);
+}
+
+function slugifyToolToken(value: string) {
+  return value.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase();
+}
+
+function resolveSchemaType(schema: ToolInputSchema) {
+  if (Array.isArray(schema.type)) {
+    return schema.type.find((entry) => entry !== "null") ?? schema.type[0];
+  }
+
+  return schema.type;
+}
+
+function buildToolSchemaValue(input: {
+  schema: ToolInputSchema;
+  latestPrompt: string;
+  conversation: WorkspaceConversation;
+  keyPath?: string[];
+}): unknown {
+  const keyPath = input.keyPath ?? [];
+  const key = keyPath[keyPath.length - 1]?.toLowerCase() ?? "";
+  const schemaType = resolveSchemaType(input.schema);
+  const fallbackPrompt =
+    input.latestPrompt || "Continue the current workspace task.";
+
+  if (input.schema.enum && input.schema.enum.length > 0) {
+    return input.schema.enum[0];
+  }
+
+  if (schemaType === "number" || schemaType === "integer") {
+    return Math.min(
+      typeof input.schema.maximum === "number" ? input.schema.maximum : 3,
+      3,
+    );
+  }
+
+  if (schemaType === "boolean") {
+    return true;
+  }
+
+  if (schemaType === "array") {
+    const itemValue = buildToolSchemaValue({
+      ...input,
+      schema: input.schema.items ?? {
+        type: "string",
+      },
+    });
+    return [itemValue];
+  }
+
+  if (schemaType === "object" || input.schema.properties) {
+    const properties = input.schema.properties ?? {};
+    const entries = Object.entries(properties);
+
+    if (entries.length === 0) {
+      return {
+        request: fallbackPrompt,
+      };
+    }
+
+    return Object.fromEntries(
+      entries.map(([propertyKey, propertySchema]) => [
+        propertyKey,
+        buildToolSchemaValue({
+          ...input,
+          schema: propertySchema,
+          keyPath: [...keyPath, propertyKey],
+        }),
+      ]),
+    );
+  }
+
+  if (schemaType === "null") {
+    return null;
+  }
+
+  if (key.includes("query") || key.includes("prompt") || key.includes("request")) {
+    return fallbackPrompt;
+  }
+
+  if (key.includes("group")) {
+    return input.conversation.activeGroup.name;
+  }
+
+  if (key.includes("app")) {
+    return input.conversation.app.name;
+  }
+
+  if (key.includes("trace")) {
+    return input.conversation.run.traceId;
+  }
+
+  return `${input.conversation.app.name}: ${fallbackPrompt}`;
+}
+
+function selectRuntimeTool(input: WorkspaceRuntimeInvocationInput) {
+  const tools =
+    input.tools?.filter((tool) => tool.enabled !== false) ?? [];
+  const functionToolChoice =
+    input.toolChoice &&
+    input.toolChoice !== "auto" &&
+    input.toolChoice !== "none"
+      ? input.toolChoice
+      : null;
+
+  if (tools.length === 0 || input.toolChoice === "none") {
+    return null;
+  }
+
+  if (functionToolChoice) {
+    return (
+      tools.find(
+        (tool) =>
+          tool.function.name.trim() === functionToolChoice.function.name.trim(),
+      ) ?? null
+    );
+  }
+
+  return tools[0] ?? null;
+}
+
+function buildPlaceholderToolExecution(
+  input: WorkspaceRuntimeInvocationInput,
+) {
+  const selectedTool = selectRuntimeTool(input);
+
+  if (!selectedTool) {
+    return null;
+  }
+
+  const argumentsValue = buildToolSchemaValue({
+    schema: selectedTool.function.inputSchema,
+    latestPrompt: input.latestPrompt,
+    conversation: input.conversation,
+  });
+  const toolCallId = `call_${slugifyToolToken(selectedTool.function.name)}_${randomUUID().slice(0, 8)}`;
+  const toolCall: ChatToolCall = {
+    id: toolCallId,
+    type: "function",
+    function: {
+      name: selectedTool.function.name,
+      arguments: JSON.stringify(argumentsValue),
+    },
+  };
+  const toolOutput = {
+    ok: true,
+    tool: selectedTool.function.name,
+    scope: selectedTool.auth.scope,
+    attributedGroupId: input.conversation.activeGroup.id,
+    attributedGroupName: input.conversation.activeGroup.name,
+    traceId: input.conversation.run.traceId,
+    receivedArguments: argumentsValue,
+    summary: `Placeholder execution completed for ${selectedTool.function.name}.`,
+  };
+
+  return {
+    toolCalls: [toolCall],
+    toolResults: [
+      {
+        toolCallId,
+        toolName: selectedTool.function.name,
+        content: [
+          `Tool \`${selectedTool.function.name}\` executed successfully.`,
+          "",
+          "```json",
+          JSON.stringify(toolOutput, null, 2),
+          "```",
+        ].join("\n"),
+      },
+    ],
+  };
 }
 
 function truncateArtifactText(value: string, maxLength: number) {
@@ -263,6 +449,7 @@ function buildPlaceholderAssistantText(
   conversation: WorkspaceConversation,
   messages: ChatCompletionMessage[],
   attachments: WorkspaceConversationAttachment[],
+  toolCalls: ChatToolCall[] = [],
 ) {
   const latestPrompt = [...messages]
     .reverse()
@@ -282,6 +469,9 @@ function buildPlaceholderAssistantText(
     `${conversation.app.name} is now reachable through the AgentifUI gateway.`,
     `Request: ${requestSummary || "Continue the current workspace task."}`,
     attachmentSummary,
+    toolCalls.length > 0
+      ? `Tools used: ${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}.`
+      : null,
     `Context: attributed group ${conversation.activeGroup.name}, trace ${conversation.run.traceId}.`,
     "This is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
   ]
@@ -293,6 +483,7 @@ function buildStructuredAssistantText(
   conversation: WorkspaceConversation,
   latestPrompt: string,
   retrieval: KnowledgeRetrievalResult | null,
+  toolCalls: ChatToolCall[] = [],
 ) {
   const requestSummary = latestPrompt || "Continue the current runbook task.";
   const retrievalSummary =
@@ -304,6 +495,9 @@ function buildStructuredAssistantText(
     `${conversation.app.name} translated the request into a structured execution outline.`,
     `Request: ${requestSummary}`,
     retrievalSummary,
+    toolCalls.length > 0
+      ? `Tools used: ${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}.`
+      : null,
     `Context: attributed group ${conversation.activeGroup.name}, trace ${conversation.run.traceId}.`,
     "Plan:",
     "1. Confirm prerequisites and owners.",
@@ -348,16 +542,20 @@ function createPlaceholderAdapter(input: {
     },
     async invoke(runtimeInput) {
       const latestPrompt = runtimeInput.latestPrompt;
+      const toolExecution = buildPlaceholderToolExecution(runtimeInput);
+      const toolCalls = toolExecution?.toolCalls ?? [];
       const assistantText = input.structured
         ? buildStructuredAssistantText(
             runtimeInput.conversation,
             latestPrompt,
             runtimeInput.retrieval,
+            toolCalls,
           )
         : buildPlaceholderAssistantText(
             runtimeInput.conversation,
             runtimeInput.messages,
             runtimeInput.attachments,
+            toolCalls,
           );
       const createdAt = new Date().toISOString();
       const { citations, sourceBlocks } = buildAssistantSources({
@@ -397,6 +595,8 @@ function createPlaceholderAdapter(input: {
           safetySignals,
           sourceBlocks,
           suggestedPrompts,
+          toolCalls,
+          toolResults: toolExecution?.toolResults,
         },
       };
     },

@@ -1,3 +1,5 @@
+import type { ChatToolCall } from "../tools/contracts.js";
+
 export type WorkspaceAppKind =
   | "chat"
   | "analysis"
@@ -289,9 +291,11 @@ export type WorkspaceConversationMessageFeedback = {
   updatedAt: string;
 };
 
+export type WorkspaceConversationMessageRole = "user" | "assistant" | "tool";
+
 export type WorkspaceConversationMessage = {
   id: string;
-  role: "user" | "assistant";
+  role: WorkspaceConversationMessageRole;
   content: string;
   status: WorkspaceConversationMessageStatus;
   createdAt: string;
@@ -301,6 +305,9 @@ export type WorkspaceConversationMessage = {
   safetySignals?: WorkspaceSafetySignal[];
   feedback?: WorkspaceConversationMessageFeedback | null;
   suggestedPrompts?: string[];
+  toolCallId?: string;
+  toolName?: string;
+  toolCalls?: ChatToolCall[];
 };
 
 export type WorkspaceHitlStepKind = "approval" | "input_request";

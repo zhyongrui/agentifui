@@ -1035,6 +1035,11 @@ button:disabled {
   background: rgba(255, 255, 255, 0.92);
 }
 
+.chat-bubble.tool {
+  background: rgba(18, 52, 86, 0.08);
+  border-style: dashed;
+}
+
 .chat-composer {
   display: grid;
   gap: 12px;

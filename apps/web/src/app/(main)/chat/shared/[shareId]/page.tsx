@@ -15,6 +15,26 @@ import { clearAuthSession } from "../../../../../lib/auth-session";
 import { localizeWorkspaceApp } from "../../../../../lib/workspace-localization";
 import { useProtectedSession } from "../../../../../lib/use-protected-session";
 
+function describeSharedMessageLabel(input: {
+  appName: string;
+  locale: string;
+  role: "user" | "assistant" | "tool";
+  toolName?: string;
+  workspaceUser: string;
+}) {
+  if (input.role === "user") {
+    return input.workspaceUser;
+  }
+
+  if (input.role === "tool") {
+    return input.locale === "zh-CN"
+      ? `工具 · ${input.toolName ?? "tool"}`
+      : `Tool · ${input.toolName ?? "tool"}`;
+  }
+
+  return input.appName;
+}
+
 export default function SharedConversationPage() {
   const params = useParams<{ shareId: string }>();
   const router = useRouter();
@@ -41,6 +61,7 @@ export default function SharedConversationPage() {
           sharedConversation: "共享会话",
           sharedLead: (groupName: string) => `这段转录当前以只读方式共享给 ${groupName}。`,
           workspaceUser: "工作台用户",
+          toolCalls: "工具调用",
           suggested: "建议的下一步提问",
           safety: "共享安全提示",
           citations: "共享引用",
@@ -60,6 +81,7 @@ export default function SharedConversationPage() {
           sharedLead: (groupName: string) =>
             `This transcript is currently shared read-only with ${groupName}.`,
           workspaceUser: "Workspace user",
+          toolCalls: "Tool calls",
           suggested: "Suggested next prompts",
           safety: "Shared safety signals",
           citations: "Shared citations",
@@ -167,15 +189,28 @@ export default function SharedConversationPage() {
             <article key={message.id} className={`chat-bubble ${message.role}`}>
               <div className="chat-bubble-meta">
                 <span className="chat-bubble-label">
-                  {message.role === "user"
-                    ? copy.workspaceUser
-                    : localizedApp.name}
+                  {describeSharedMessageLabel({
+                    appName: localizedApp.name,
+                    locale,
+                    role: message.role,
+                    toolName: message.toolName,
+                    workspaceUser: copy.workspaceUser,
+                  })}
                 </span>
                 <span className={`chat-bubble-status status-${message.status}`}>
                   {message.status}
                 </span>
               </div>
               <ChatMarkdown content={message.content} />
+              {message.toolCalls && message.toolCalls.length > 0 ? (
+                <ul className="chat-attachment-list">
+                  {message.toolCalls.map((toolCall) => (
+                    <li key={toolCall.id}>
+                      {copy.toolCalls}: {toolCall.function.name}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {message.role === "assistant" &&
               message.status === "completed" &&
               message.suggestedPrompts &&
