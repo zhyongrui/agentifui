@@ -2135,6 +2135,11 @@ describe("workspace routes", () => {
       });
 
       expect(completion.statusCode).toBe(200);
+      const completionRunId = (completion.json() as ChatCompletionResponse).metadata?.run_id;
+
+      if (!completionRunId) {
+        throw new Error("expected completion payload to include run id");
+      }
 
       const pendingActions = await app.inject({
         method: "GET",
@@ -2283,10 +2288,22 @@ describe("workspace routes", () => {
               content: "Approve this tenant access change.",
             },
           ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "tenant.access.review",
+            },
+          },
         },
       });
 
       expect(completion.statusCode).toBe(200);
+      const completionBody = completion.json() as ChatCompletionResponse;
+      const completionRunId = completionBody.metadata?.run_id;
+
+      if (!completionRunId) {
+        throw new Error("expected completion payload to include run id");
+      }
 
       const pendingActions = await app.inject({
         method: "GET",
@@ -2630,10 +2647,22 @@ describe("workspace routes", () => {
               content: "Approve this tenant access change.",
             },
           ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "tenant.access.review",
+            },
+          },
         },
       });
 
       expect(completion.statusCode).toBe(200);
+      const completionBody = completion.json() as ChatCompletionResponse;
+      const completionRunId = completionBody.metadata?.run_id;
+
+      if (!completionRunId) {
+        throw new Error("expected completion payload to include run id");
+      }
 
       const pendingActions = await app.inject({
         method: "GET",
@@ -2673,6 +2702,83 @@ describe("workspace routes", () => {
         },
       });
 
+      const conversationResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversationResponse.statusCode).toBe(200);
+      expect(
+        (conversationResponse.json() as WorkspaceConversationResponse).data.messages,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: "tool",
+            toolName: "tenant.access.review",
+            content: expect.stringContaining(
+              "was not executed because the approval request was cancelled",
+            ),
+            status: "failed",
+          }),
+          expect.objectContaining({
+            role: "assistant",
+            content: expect.stringContaining(
+              "recorded that tenant.access.review was cancelled and will not execute it.",
+            ),
+            status: "completed",
+          }),
+        ]),
+      );
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${completionRunId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data).toMatchObject({
+        toolExecutions: [
+          expect.objectContaining({
+            status: "failed",
+            request: expect.objectContaining({
+              function: expect.objectContaining({
+                name: "tenant.access.review",
+              }),
+            }),
+            failure: expect.objectContaining({
+              code: "tool_approval_cancelled",
+              stage: "tool_approval",
+              retryable: false,
+            }),
+            result: expect.objectContaining({
+              isError: true,
+              content: expect.stringContaining(
+                "was not executed because the approval request was cancelled",
+              ),
+            }),
+          }),
+        ],
+        outputs: expect.objectContaining({
+          pendingActions: [
+            expect.objectContaining({
+              id: pendingActionId,
+              status: "cancelled",
+            }),
+          ],
+          assistant: expect.objectContaining({
+            content: expect.stringContaining(
+              "recorded that tenant.access.review was cancelled and will not execute it.",
+            ),
+          }),
+        }),
+      });
+
       expect(await auditService.listEvents({ actorUserId: login.data.user.id })).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -2683,6 +2789,38 @@ describe("workspace routes", () => {
               conversationId,
               action: "cancel",
               status: "cancelled",
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.tool_execution.approval_decided",
+            entityType: "pending_action",
+            entityId: pendingActionId,
+            payload: expect.objectContaining({
+              conversationId,
+              runId: completionRunId,
+              decisionAction: "cancel",
+              decisionStatus: "cancelled",
+              toolName: "tenant.access.review",
+              failure: expect.objectContaining({
+                code: "tool_approval_cancelled",
+                stage: "tool_approval",
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.tool_execution.blocked",
+            entityType: "run",
+            entityId: completionRunId,
+            payload: expect.objectContaining({
+              conversationId,
+              runId: completionRunId,
+              decisionAction: "cancel",
+              decisionStatus: "cancelled",
+              toolName: "tenant.access.review",
+              failure: expect.objectContaining({
+                code: "tool_approval_cancelled",
+                stage: "tool_approval",
+              }),
             }),
           }),
         ]),

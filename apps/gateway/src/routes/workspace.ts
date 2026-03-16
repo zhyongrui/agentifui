@@ -878,6 +878,14 @@ export async function registerWorkspaceRoutes(
         result.data.runId,
       );
       const runContext = runResult.ok ? runResult.data : null;
+      const toolExecution =
+        runContext?.toolExecutions
+          .filter(
+            (execution) =>
+              execution.request.id === toolApprovalMetadata.toolCallId &&
+              execution.request.function.name === toolApprovalMetadata.toolName,
+          )
+          .at(-1) ?? null;
 
       await auditService.recordEvent({
         tenantId: access.user.tenantId,
@@ -896,6 +904,7 @@ export async function registerWorkspaceRoutes(
           policyTag: toolApprovalMetadata.policyTag,
           decisionAction: body.action,
           decisionStatus: result.data.item.status,
+          failure: toolExecution?.failure ?? null,
           traceId: runContext?.traceId ?? null,
           appId: runContext?.app.id ?? null,
           appName: runContext?.app.name ?? null,
@@ -924,6 +933,7 @@ export async function registerWorkspaceRoutes(
           policyTag: toolApprovalMetadata.policyTag,
           decisionAction: body.action,
           decisionStatus: result.data.item.status,
+          failure: toolExecution?.failure ?? null,
           traceId: runContext?.traceId ?? null,
           appId: runContext?.app.id ?? null,
           appName: runContext?.app.name ?? null,

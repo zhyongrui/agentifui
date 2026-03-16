@@ -136,7 +136,8 @@ Execution status:
 | completed | `P3-B-08` | admin tool policy controls、policy override persistence、route/client/admin page 已闭环                  |
 | completed | `P3-B-09` | transcript、shared transcript 和 replay panel 上的 tool-call summary 已闭环                               |
 | completed | `P3-B-10` | tool-stage structured failure taxonomy、legacy fallback、audit payload 和 replay surface 已闭环          |
-| active    | `P3-B-11` | 下一项，补 successful / failed / cancelled / approval-gated tool runs 的补齐测试                         |
+| completed | `P3-B-11` | tool run 成功 / 失败 / 取消 / 审批路径的 route+persistence 测试矩阵已补齐                               |
+| active    | `P3-B-12` | 下一项，文档化如何安全新增一个 tool 以及如何做端到端测试                                                |
 
 ## 5. First Batch Definition
 
@@ -186,7 +187,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-B-11`
+- the active follow-on item is `P3-B-12`
 
 ## 6. Detailed Execution Notes
 
@@ -745,7 +746,7 @@ Legend:
 - [x] `P3-B-08` Add tool policy controls on admin surfaces
 - [x] `P3-B-09` Render tool-call summaries in transcript and replay panels
 - [x] `P3-B-10` Add failure taxonomy extensions for tool-stage errors
-- [ ] `P3-B-11` Add tests for successful, failed, cancelled, and approval-gated tool runs
+- [x] `P3-B-11` Add tests for successful, failed, cancelled, and approval-gated tool runs
 - [ ] `P3-B-12` Document how to add a new tool safely and how to test it end to end
 
 ### 7.12 Future Delivery Queue: `P3-C` Collaboration, Presence, And Shared Work

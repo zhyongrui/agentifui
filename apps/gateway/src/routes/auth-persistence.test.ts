@@ -2753,6 +2753,12 @@ describe.sequential('persistent auth runtime', () => {
         });
 
         expect(completion.statusCode).toBe(200);
+        const completionBody = completion.json() as ChatCompletionResponse;
+        const completionRunId = completionBody.metadata?.run_id;
+
+        if (!completionRunId) {
+          throw new Error('expected completion payload to include run id');
+        }
 
         const pendingActions = await app.inject({
           method: 'GET',
@@ -3006,10 +3012,22 @@ describe.sequential('persistent auth runtime', () => {
                 content: 'Approve this tenant access change.',
               },
             ],
+            tool_choice: {
+              type: 'function',
+              function: {
+                name: 'tenant.access.review',
+              },
+            },
           },
         });
 
         expect(completion.statusCode).toBe(200);
+        const completionBody = completion.json() as ChatCompletionResponse;
+        const completionRunId = completionBody.metadata?.run_id;
+
+        if (!completionRunId) {
+          throw new Error('expected completion payload to include run id');
+        }
 
         const pendingActions = await app.inject({
           method: 'GET',
@@ -3461,10 +3479,22 @@ describe.sequential('persistent auth runtime', () => {
                 content: 'Approve this tenant access change.',
               },
             ],
+            tool_choice: {
+              type: 'function',
+              function: {
+                name: 'tenant.access.review',
+              },
+            },
           },
         });
 
         expect(completion.statusCode).toBe(200);
+        const completionBody = completion.json() as ChatCompletionResponse;
+        const completionRunId = completionBody.metadata?.run_id;
+
+        if (!completionRunId) {
+          throw new Error('expected completion payload to include run id');
+        }
 
         const pendingActions = await app.inject({
           method: 'GET',
@@ -3531,6 +3561,78 @@ describe.sequential('persistent auth runtime', () => {
             },
           });
 
+          const conversationResponse = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/conversations/${conversationId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(conversationResponse.statusCode).toBe(200);
+          expect(
+            (conversationResponse.json() as WorkspaceConversationResponse).data.messages
+          ).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                role: 'tool',
+                toolName: 'tenant.access.review',
+                status: 'failed',
+                content: expect.stringContaining(
+                  'was not executed because the approval request was cancelled'
+                ),
+              }),
+              expect.objectContaining({
+                role: 'assistant',
+                status: 'completed',
+                content: expect.stringContaining(
+                  'recorded that tenant.access.review was cancelled and will not execute it.'
+                ),
+              }),
+            ])
+          );
+
+          const runResponse = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/runs/${completionRunId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(runResponse.statusCode).toBe(200);
+          expect((runResponse.json() as WorkspaceRunResponse).data).toMatchObject({
+            toolExecutions: [
+              expect.objectContaining({
+                status: 'failed',
+                request: expect.objectContaining({
+                  function: expect.objectContaining({
+                    name: 'tenant.access.review',
+                  }),
+                }),
+                failure: expect.objectContaining({
+                  code: 'tool_approval_cancelled',
+                  stage: 'tool_approval',
+                  retryable: false,
+                }),
+                result: expect.objectContaining({
+                  isError: true,
+                  content: expect.stringContaining(
+                    'was not executed because the approval request was cancelled'
+                  ),
+                }),
+              }),
+            ],
+            outputs: expect.objectContaining({
+              pendingActions: [
+                expect.objectContaining({
+                  id: stepId,
+                  status: 'cancelled',
+                }),
+              ],
+            }),
+          });
+
           const auditAfterRestart = await restartedApp.inject({
             method: 'GET',
             url: '/auth/audit-events?limit=10',
@@ -3554,6 +3656,34 @@ describe.sequential('persistent auth runtime', () => {
                 }),
               }),
             ]),
+          );
+
+          const blockedAudit = await restartedApp.inject({
+            method: 'GET',
+            url: `/admin/audit?action=workspace.tool_execution.blocked&traceId=${completionBody.trace_id}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(blockedAudit.statusCode).toBe(200);
+          expect((blockedAudit.json() as AdminAuditResponse).data.events).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                action: 'workspace.tool_execution.blocked',
+                payload: expect.objectContaining({
+                  conversationId,
+                  runId: completionRunId,
+                  decisionAction: 'cancel',
+                  decisionStatus: 'cancelled',
+                  toolName: 'tenant.access.review',
+                  failure: expect.objectContaining({
+                    code: 'tool_approval_cancelled',
+                    stage: 'tool_approval',
+                  }),
+                }),
+              }),
+            ])
           );
         } finally {
           if (!restartedAppClosed) {
