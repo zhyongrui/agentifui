@@ -7,6 +7,7 @@ import type {
 } from '@agentifui/shared';
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
+import { useI18n } from '../../../components/i18n-provider';
 import {
   WorkspaceRuntimeDegradedBanner,
   WorkspaceRuntimeHealthCards,
@@ -23,10 +24,6 @@ import {
   type GatewayRuntimeHealthSnapshot,
 } from '../../../lib/gateway-health-client';
 import { useAdminPageData } from '../../../lib/use-admin-page';
-
-function formatTimestamp(value: string | null) {
-  return value ? new Date(value).toLocaleString() : 'Never';
-}
 
 function readDraft(
   drafts: Record<string, AdminAppGrantCreateRequest>,
@@ -67,6 +64,8 @@ function formatToolAuth(tool: WorkspaceAppToolSummary) {
 }
 
 export default function AdminAppsPage() {
+  const { messages, formatDateTime } = useI18n();
+  const appsCopy = messages.adminApps;
   const { data, error, isLoading, reload, session } = useAdminPageData(fetchAdminApps);
   const [drafts, setDrafts] = useState<Record<string, AdminAppGrantCreateRequest>>({});
   const [toolDrafts, setToolDrafts] = useState<Record<string, string[]>>({});
@@ -146,7 +145,7 @@ export default function AdminAppsPage() {
       result = await createAdminAppGrant(session.sessionToken, app.id, draft);
     } catch {
       setPendingActionId(null);
-      setMutationError('Saving the direct override failed. Please retry.');
+      setMutationError(appsCopy.savingOverrideFailed);
       return;
     }
 
@@ -165,9 +164,7 @@ export default function AdminAppsPage() {
       },
     }));
     setPendingActionId(null);
-    setNotice(
-      `${result.data.grant.user.email} now has a ${result.data.grant.effect} override on ${result.data.app.name}.`
-    );
+    setNotice(appsCopy.overrideCreated(result.data.grant.user.email, result.data.grant.effect, result.data.app.name));
     reload();
   }
 
@@ -186,7 +183,7 @@ export default function AdminAppsPage() {
       result = await revokeAdminAppGrant(session.sessionToken, app.id, grantId);
     } catch {
       setPendingActionId(null);
-      setMutationError('Revoking the direct override failed. Please retry.');
+      setMutationError(appsCopy.revokingOverrideFailed);
       return;
     }
 
@@ -197,7 +194,7 @@ export default function AdminAppsPage() {
     }
 
     setPendingActionId(null);
-    setNotice(`Direct override ${result.data.revokedGrantId} was revoked from ${result.data.app.name}.`);
+    setNotice(appsCopy.overrideRevoked(result.data.revokedGrantId, result.data.app.name));
     reload();
   }
 
@@ -220,7 +217,7 @@ export default function AdminAppsPage() {
       });
     } catch {
       setPendingActionId(null);
-      setMutationError('Saving tool registry changes failed. Please retry.');
+      setMutationError(appsCopy.savingToolsFailed);
       return;
     }
 
@@ -231,23 +228,19 @@ export default function AdminAppsPage() {
     }
 
     setPendingActionId(null);
-    setNotice(
-      `${result.data.app.name} now exposes ${result.data.enabledToolNames.length} enabled tools in this tenant.`
-    );
+    setNotice(appsCopy.toolRegistrySaved(result.data.app.name, result.data.enabledToolNames.length));
     reload();
   }
 
   if (isLoading) {
-    return <p className="lead">Loading admin apps...</p>;
+    return <p className="lead">{appsCopy.loading}</p>;
   }
 
   return (
     <div className="stack">
       <div>
-        <h1>Apps</h1>
-        <p className="lead">
-          Manage app visibility across groups, roles and direct user allow or deny overrides.
-        </p>
+        <h1>{appsCopy.title}</h1>
+        <p className="lead">{appsCopy.lead}</p>
       </div>
 
       <WorkspaceRuntimeDegradedBanner context="admin" snapshot={gatewayRuntime} />
@@ -255,35 +248,42 @@ export default function AdminAppsPage() {
       {cleanupStatus && 'ok' in cleanupStatus && cleanupStatus.ok ? (
         <div className="admin-stat-grid">
           <article className="admin-stat-card">
-            <span>Cleanup candidates</span>
+            <span>{appsCopy.cleanupCandidates}</span>
             <strong>{cleanupStatus.data.preview.totalCandidates}</strong>
             <p>
-              {cleanupStatus.data.preview.archivedConversations} archived conversations ·{' '}
-              {cleanupStatus.data.preview.expiredShares} expired shares ·{' '}
-              {cleanupStatus.data.preview.staleKnowledgeSources} stale sources
+              {appsCopy.cleanupBreakdown(
+                cleanupStatus.data.preview.archivedConversations,
+                cleanupStatus.data.preview.expiredShares,
+                cleanupStatus.data.preview.staleKnowledgeSources,
+              )}
             </p>
           </article>
           <article className="admin-stat-card">
-            <span>Cold timeline / stale sources</span>
+            <span>{appsCopy.coldTimelineSources}</span>
             <strong>
               {cleanupStatus.data.preview.coldTimelineEvents + cleanupStatus.data.preview.staleKnowledgeSources}
             </strong>
             <p>
-              Timeline {cleanupStatus.data.policy.timelineRetentionDays} days · Sources{' '}
-              {cleanupStatus.data.policy.staleKnowledgeSourceRetentionDays} days
+              {appsCopy.retentionWindow(
+                cleanupStatus.data.policy.timelineRetentionDays,
+                cleanupStatus.data.policy.staleKnowledgeSourceRetentionDays,
+              )}
             </p>
           </article>
           <article className="admin-stat-card">
-            <span>Last cleanup execution</span>
+            <span>{appsCopy.lastCleanupExecution}</span>
             <strong>
               {cleanupStatus.data.lastRun
-                ? new Date(cleanupStatus.data.lastRun.occurredAt).toLocaleString()
-                : 'Never'}
+                ? formatDateTime(cleanupStatus.data.lastRun.occurredAt)
+                : appsCopy.never}
             </strong>
             <p>
               {cleanupStatus.data.lastRun
-                ? `${cleanupStatus.data.lastRun.summary.mode} · removed ${cleanupStatus.data.lastRun.summary.archivedConversationsDeleted} archived conversations`
-                : 'No cleanup execution has been recorded yet.'}
+                ? appsCopy.cleanupSummary(
+                    cleanupStatus.data.lastRun.summary.mode,
+                    cleanupStatus.data.lastRun.summary.archivedConversationsDeleted,
+                  )
+                : appsCopy.noCleanupRecorded}
             </p>
           </article>
         </div>
@@ -297,28 +297,28 @@ export default function AdminAppsPage() {
         <>
           <div className="admin-stat-grid">
             <article className="admin-stat-card">
-              <span>Total apps</span>
+              <span>{appsCopy.totalApps}</span>
               <strong>{data.apps.length}</strong>
             </article>
             <article className="admin-stat-card">
-              <span>Direct user grants</span>
+              <span>{appsCopy.directUserGrants}</span>
               <strong>
                 {data.apps.reduce((total, app) => total + app.directUserGrantCount, 0)}
               </strong>
             </article>
             <article className="admin-stat-card">
-              <span>Deny overrides</span>
+              <span>{appsCopy.denyOverrides}</span>
               <strong>{data.apps.reduce((total, app) => total + app.denyGrantCount, 0)}</strong>
             </article>
             <article className="admin-stat-card">
-              <span>Enabled tools</span>
+              <span>{appsCopy.enabledTools}</span>
               <strong>{data.apps.reduce((total, app) => total + app.enabledToolCount, 0)}</strong>
             </article>
           </div>
 
           <div className="workspace-badges">
             <span className="workspace-badge">
-              Snapshot: {new Date(data.generatedAt).toLocaleString()}
+              {appsCopy.snapshot}: {formatDateTime(data.generatedAt)}
             </span>
           </div>
 
@@ -342,33 +342,35 @@ export default function AdminAppsPage() {
 
                   <div className="tag-row">
                     <span className="tag">{app.kind}</span>
-                    <span className="tag">Cost {app.launchCost}</span>
+                    <span className="tag">
+                      {appsCopy.costTag} {app.launchCost}
+                    </span>
                     {app.grantedRoleIds.map(roleId => (
                       <span className="tag tag-muted" key={`${app.id}:${roleId}`}>
-                        role:{roleId}
+                        {appsCopy.roleTagPrefix}:{roleId}
                       </span>
                     ))}
                   </div>
 
                   <div className="detail-list">
                     <div className="detail-row">
-                      <span className="detail-label">Launch count</span>
+                      <span className="detail-label">{appsCopy.launchCount}</span>
                       <strong>{app.launchCount}</strong>
                     </div>
                     <div className="detail-row">
-                      <span className="detail-label">Last launch</span>
-                      <strong>{formatTimestamp(app.lastLaunchedAt)}</strong>
+                      <span className="detail-label">{appsCopy.lastLaunch}</span>
+                      <strong>{formatDateTime(app.lastLaunchedAt, appsCopy.never)}</strong>
                     </div>
                     <div className="detail-row">
-                      <span className="detail-label">Direct user grants</span>
+                      <span className="detail-label">{appsCopy.directUserGrants}</span>
                       <strong>{app.directUserGrantCount}</strong>
                     </div>
                     <div className="detail-row">
-                      <span className="detail-label">Deny overrides</span>
+                      <span className="detail-label">{appsCopy.denyOverrides}</span>
                       <strong>{app.denyGrantCount}</strong>
                     </div>
                     <div className="detail-row">
-                      <span className="detail-label">Enabled tools</span>
+                      <span className="detail-label">{appsCopy.enabledTools}</span>
                       <strong>
                         {app.enabledToolCount} / {app.tools.length}
                       </strong>
@@ -376,10 +378,10 @@ export default function AdminAppsPage() {
                   </div>
 
                   <div>
-                    <strong>Granted groups</strong>
+                    <strong>{appsCopy.grantedGroups}</strong>
                     <div className="tag-row admin-tag-row">
                       {app.grantedGroups.length === 0 ? (
-                        <span className="tag tag-muted">No group grants</span>
+                        <span className="tag tag-muted">{appsCopy.noGroupGrants}</span>
                       ) : (
                         app.grantedGroups.map(group => (
                           <span className="tag" key={`${app.id}:${group.id}`}>
@@ -392,17 +394,15 @@ export default function AdminAppsPage() {
 
                   <section className="stack">
                     <div>
-                      <strong>Tool registry</strong>
-                      <p className="helper-text">
-                        Configure which structured tools this tenant exposes to the app runtime.
-                      </p>
+                      <strong>{appsCopy.toolRegistry}</strong>
+                      <p className="helper-text">{appsCopy.toolRegistryLead}</p>
                     </div>
 
                     <div className="detail-list">
                       {app.tools.length === 0 ? (
                         <div className="detail-row">
-                          <span className="detail-label">Available tools</span>
-                          <strong>No tools assigned</strong>
+                          <span className="detail-label">{appsCopy.availableTools}</span>
+                          <strong>{appsCopy.noToolsAssigned}</strong>
                         </div>
                       ) : (
                         app.tools.map(tool => {
@@ -412,10 +412,11 @@ export default function AdminAppsPage() {
                             <label className="detail-row" key={`${app.id}:${tool.name}`}>
                               <div className="admin-grant-copy">
                                 <strong>{tool.name}</strong>
-                                <span>{tool.description ?? 'No description provided.'}</span>
+                                <span>{tool.description ?? appsCopy.noToolDescription}</span>
                                 <span>
-                                  {formatToolAuth(tool)} · {tool.defaultEnabled ? 'default on' : 'default off'} ·{' '}
-                                  {tool.isOverridden ? 'tenant override' : 'catalog default'}
+                                  {formatToolAuth(tool)} ·{' '}
+                                  {tool.defaultEnabled ? appsCopy.defaultOn : appsCopy.defaultOff} ·{' '}
+                                  {tool.isOverridden ? appsCopy.tenantOverride : appsCopy.catalogDefault}
                                 </span>
                               </div>
                               <input
@@ -442,23 +443,24 @@ export default function AdminAppsPage() {
                         onClick={() => handleSaveTools(app)}
                         type="button"
                       >
-                        {pendingActionId === `tools:${app.id}` ? 'Saving tools...' : 'Save tool registry'}
+                        {pendingActionId === `tools:${app.id}` ? appsCopy.savingTools : appsCopy.saveTools}
                       </button>
                     ) : null}
                   </section>
 
                   <section className="stack">
                     <div>
-                      <strong>Direct user overrides</strong>
+                      <strong>{appsCopy.directOverrides}</strong>
                       <p className="helper-text">
-                        Add a user-level allow or deny grant by email. This writes directly into the
-                        persisted workspace grant table.
+                        {appsCopy.directOverridesLeadLine1}
+                        <br />
+                        {appsCopy.directOverridesLeadLine2}
                       </p>
                     </div>
 
                     <form className="admin-grant-form" onSubmit={event => handleCreateGrant(event, app)}>
                       <label className="field">
-                        Email
+                        {appsCopy.email}
                         <input
                           aria-label={`${app.name} grant email`}
                           autoComplete="off"
@@ -471,7 +473,7 @@ export default function AdminAppsPage() {
                       </label>
 
                       <label className="field">
-                        Effect
+                        {appsCopy.effect}
                         <select
                           aria-label={`${app.name} grant effect`}
                           onChange={(event: ChangeEvent<HTMLSelectElement>) =>
@@ -479,19 +481,19 @@ export default function AdminAppsPage() {
                           }
                           value={draft.effect}
                         >
-                          <option value="allow">allow</option>
-                          <option value="deny">deny</option>
+                          <option value="allow">{appsCopy.allow}</option>
+                          <option value="deny">{appsCopy.deny}</option>
                         </select>
                       </label>
 
                       <label className="field">
-                        Reason
+                        {appsCopy.reason}
                         <input
                           aria-label={`${app.name} grant reason`}
                           onChange={(event: ChangeEvent<HTMLInputElement>) =>
                             updateDraft(app.id, 'reason', event.target.value)
                           }
-                          placeholder="Optional context for the override"
+                          placeholder={appsCopy.reasonPlaceholder}
                           value={draft.reason ?? ''}
                         />
                       </label>
@@ -501,27 +503,27 @@ export default function AdminAppsPage() {
                         disabled={pendingActionId === `create:${app.id}`}
                         type="submit"
                       >
-                        {pendingActionId === `create:${app.id}` ? 'Saving override...' : 'Save direct override'}
+                        {pendingActionId === `create:${app.id}` ? appsCopy.savingOverride : appsCopy.saveOverride}
                       </button>
                     </form>
 
                     <div className="detail-list">
                       {app.userGrants.length === 0 ? (
                         <div className="detail-row">
-                          <span className="detail-label">Current overrides</span>
-                          <strong>No direct user overrides</strong>
+                          <span className="detail-label">{appsCopy.currentOverrides}</span>
+                          <strong>{appsCopy.noOverrides}</strong>
                         </div>
                       ) : (
                         app.userGrants.map(grant => (
                           <div className="detail-row admin-grant-row" key={grant.id}>
                             <div className="admin-grant-copy">
                               <strong>
-                                {grant.user.displayName} · {grant.effect}
+                                {grant.user.displayName} · {grant.effect === 'allow' ? appsCopy.allow : appsCopy.deny}
                               </strong>
                               <span>{grant.user.email}</span>
                               <span>
-                                {grant.reason ? `Reason: ${grant.reason}` : 'Reason: none'} ·{' '}
-                                {formatTimestamp(grant.createdAt)}
+                                {appsCopy.reason}: {grant.reason ?? appsCopy.reasonNone} ·{' '}
+                                {formatDateTime(grant.createdAt, appsCopy.never)}
                               </span>
                             </div>
                             <button
@@ -530,7 +532,7 @@ export default function AdminAppsPage() {
                               onClick={() => handleRevokeGrant(app, grant.id)}
                               type="button"
                             >
-                              {pendingActionId === `revoke:${grant.id}` ? 'Revoking...' : 'Revoke'}
+                              {pendingActionId === `revoke:${grant.id}` ? appsCopy.revoking : appsCopy.revoke}
                             </button>
                           </div>
                         ))

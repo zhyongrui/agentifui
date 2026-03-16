@@ -4,34 +4,13 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { useI18n } from './i18n-provider';
 import { fetchAdminContext } from '../lib/admin-client';
 import { readAuthSession } from '../lib/auth-session';
 
-const SHARED_ADMIN_ITEMS = [
-  {
-    href: '/admin/users',
-    label: 'Users',
-  },
-  {
-    href: '/admin/groups',
-    label: 'Groups',
-  },
-  {
-    href: '/admin/apps',
-    label: 'Apps',
-  },
-  {
-    href: '/admin/sources',
-    label: 'Sources',
-  },
-  {
-    href: '/admin/audit',
-    label: 'Audit',
-  },
-];
-
 export function AdminSectionNav() {
   const pathname = usePathname();
+  const { messages } = useI18n();
   const [canReadPlatformAdmin, setCanReadPlatformAdmin] = useState(false);
 
   useEffect(() => {
@@ -63,18 +42,41 @@ export function AdminSectionNav() {
     };
   }, []);
 
+  const sharedItems = [
+    {
+      href: '/admin/users',
+      label: messages.adminNav.users,
+    },
+    {
+      href: '/admin/groups',
+      label: messages.adminNav.groups,
+    },
+    {
+      href: '/admin/apps',
+      label: messages.adminNav.apps,
+    },
+    {
+      href: '/admin/sources',
+      label: messages.adminNav.sources,
+    },
+    {
+      href: '/admin/audit',
+      label: messages.adminNav.audit,
+    },
+  ];
+
   const items = canReadPlatformAdmin
     ? [
         {
           href: '/admin/tenants',
-          label: 'Tenants',
+          label: messages.adminNav.tenants,
         },
-        ...SHARED_ADMIN_ITEMS,
+        ...sharedItems,
       ]
-    : SHARED_ADMIN_ITEMS;
+    : sharedItems;
 
   return (
-    <nav aria-label="Admin sections" className="page-nav">
+    <nav aria-label={messages.adminNav.ariaLabel} className="page-nav">
       {items.map(item => (
         <Link
           aria-current={pathname === item.href ? 'page' : undefined}

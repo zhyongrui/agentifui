@@ -24,6 +24,7 @@ import {
   launchWorkspaceApp,
   updateWorkspacePreferences,
 } from '../../../lib/apps-client';
+import { useI18n } from '../../../components/i18n-provider';
 import { clearAuthSession } from '../../../lib/auth-session';
 import { useProtectedSession } from '../../../lib/use-protected-session';
 import { MainSectionNav } from '../../../components/main-section-nav';
@@ -41,77 +42,82 @@ function formatQuotaPercent(usage: QuotaUsage): number {
   return Math.min(100, Math.round((usage.used / usage.limit) * 100));
 }
 
-function getQuotaSeverityLabel(usage: QuotaUsage): string {
+function getQuotaSeverityLabel(
+  usage: QuotaUsage,
+  copy: ReturnType<typeof useI18n>['messages']['apps']
+): string {
   const severity = getQuotaSeverity(usage);
 
   if (severity === 'warning') {
-    return '80% threshold reached';
+    return copy.quotaSeverityWarning;
   }
 
   if (severity === 'critical') {
-    return '90% threshold reached';
+    return copy.quotaSeverityCritical;
   }
 
   if (severity === 'blocked') {
-    return 'Limit reached';
+    return copy.quotaSeverityBlocked;
   }
 
-  return 'Within range';
+  return copy.quotaSeverityNormal;
 }
 
 function getLaunchDescription(
   app: WorkspaceApp,
   guard: AppLaunchGuard,
   activeGroup: WorkspaceGroup,
-  groupsById: Map<string, WorkspaceGroup>
+  groupsById: Map<string, WorkspaceGroup>,
+  copy: ReturnType<typeof useI18n>['messages']['apps']
 ): string {
   if (guard.reason === 'group_switch_required') {
-    return `当前群组无法归因此应用，切换到 ${guard.eligibleGroupIds
+    return `${copy.groupSwitchRequiredPrefix}${guard.eligibleGroupIds
       .map(groupId => groupsById.get(groupId)?.name ?? groupId)
       .join(' / ')} 后才能启动。`;
   }
 
   if (guard.reason === 'quota_exceeded') {
-    return `本次启动会超过 ${guard.blockingScopes
+    return `${copy.quotaExceededPrefix}${guard.blockingScopes
       .map(scope => scope.scopeLabel)
-      .join('、')}，因此被拦截。`;
+      .join('、')}${copy.quotaExceededSuffix}`;
   }
 
   if (guard.reason === 'quota_service_degraded') {
-    return '当前处于配额服务降级模式，目录可查看，但新启动会被暂停。';
+    return copy.quotaDegradedDescription;
   }
 
   if (guard.reason === 'not_authorized') {
-    return '当前账号没有这个应用的访问授权。';
+    return copy.notAuthorized;
   }
 
-  return `启动后将从 ${activeGroup.name} 归因扣减 ${app.launchCost} credits。`;
+  return `${copy.launchFromGroupPrefix}${activeGroup.name}${copy.launchFromGroupSuffix} ${app.launchCost} credits。`;
 }
 
 function getPrimaryActionLabel(
   guard: AppLaunchGuard,
-  groupsById: Map<string, WorkspaceGroup>
+  groupsById: Map<string, WorkspaceGroup>,
+  copy: ReturnType<typeof useI18n>['messages']['apps']
 ): string {
   if (guard.reason === 'group_switch_required') {
     const nextGroupId = guard.eligibleGroupIds[0];
     const nextGroupName = nextGroupId ? groupsById.get(nextGroupId)?.name ?? nextGroupId : 'group';
 
-    return `切换到 ${nextGroupName}`;
+    return `${copy.switchGroupPrefix} ${nextGroupName}`;
   }
 
   if (guard.reason === 'quota_service_degraded') {
-    return '配额服务降级中';
+    return copy.quotaDegradedAction;
   }
 
   if (guard.reason === 'quota_exceeded') {
-    return '配额不足';
+    return copy.quotaBlockedAction;
   }
 
   if (guard.reason === 'not_authorized') {
-    return '不可用';
+    return copy.unavailableAction;
   }
 
-  return '打开应用';
+  return copy.openApp;
 }
 
 type WorkspaceSectionProps = {
@@ -127,6 +133,7 @@ type WorkspaceSectionProps = {
   onToggleFavorite: (appId: string) => void;
   onPrimaryAction: (app: WorkspaceApp, guard: AppLaunchGuard) => void;
   emptyMessage: string;
+  copy: ReturnType<typeof useI18n>['messages']['apps'];
 };
 
 function WorkspaceSection({
@@ -142,6 +149,7 @@ function WorkspaceSection({
   onToggleFavorite,
   onPrimaryAction,
   emptyMessage,
+  copy,
 }: WorkspaceSectionProps) {
   return (
     <section className="workspace-section">
@@ -181,7 +189,9 @@ function WorkspaceSection({
 
                 <div className="tag-row">
                   <span className="tag">{app.kind}</span>
-                  <span className="tag">Cost {app.launchCost}</span>
+                  <span className="tag">
+                    {copy.searchTagCost} {app.launchCost}
+                  </span>
                   {app.tags.map(tag => (
                     <span className="tag tag-muted" key={tag}>
                       {tag}
@@ -190,7 +200,7 @@ function WorkspaceSection({
                 </div>
 
                 <p className="app-card-note">
-                  {getLaunchDescription(app, guard, activeGroup, groupsById)}
+                  {getLaunchDescription(app, guard, activeGroup, groupsById, copy)}
                 </p>
 
                 <div className="app-actions">
@@ -199,7 +209,7 @@ function WorkspaceSection({
                     type="button"
                     onClick={() => onToggleFavorite(app.id)}
                   >
-                    {favoriteIds.includes(app.id) ? '已收藏' : '收藏'}
+                    {favoriteIds.includes(app.id) ? copy.favorited : copy.favorite}
                   </button>
                   <button
                     className="primary"
@@ -211,7 +221,7 @@ function WorkspaceSection({
                     }
                     onClick={() => onPrimaryAction(app, guard)}
                   >
-                    {getPrimaryActionLabel(guard, groupsById)}
+                    {getPrimaryActionLabel(guard, groupsById, copy)}
                   </button>
                 </div>
               </article>
@@ -225,6 +235,8 @@ function WorkspaceSection({
 
 export default function AppsPage() {
   const router = useRouter();
+  const { messages, formatDateTime } = useI18n();
+  const appsCopy = messages.apps;
   const { session, isLoading } = useProtectedSession('/apps');
   const [workspace, setWorkspace] = useState<WorkspaceCatalog | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -308,7 +320,7 @@ export default function AppsPage() {
         }
 
         setWorkspace(null);
-        setWorkspaceError('Apps workspace 加载失败，请稍后重试。');
+        setWorkspaceError(appsCopy.workspaceLoadFailed);
       })
       .finally(() => {
         if (!isCancelled) {
@@ -319,14 +331,14 @@ export default function AppsPage() {
     return () => {
       isCancelled = true;
     };
-  }, [router, session]);
+  }, [appsCopy.workspaceLoadFailed, router, session]);
 
   if (isLoading) {
-    return <p className="lead">Checking your session...</p>;
+    return <p className="lead">{appsCopy.checkingSession}</p>;
   }
 
   if (isWorkspaceLoading) {
-    return <p className="lead">Loading apps workspace...</p>;
+    return <p className="lead">{appsCopy.loadingWorkspace}</p>;
   }
 
   if (workspaceError) {
@@ -435,7 +447,7 @@ export default function AppsPage() {
       });
       setNotice({
         tone: 'info',
-        message: `工作群组已切换到 ${nextGroup?.name ?? nextGroupId}，可以重新发起应用启动。`,
+        message: `${appsCopy.quotaSwitchNoticePrefix}${nextGroup?.name ?? nextGroupId}${appsCopy.quotaSwitchNoticeSuffix}`,
       });
       return;
     }
@@ -443,7 +455,7 @@ export default function AppsPage() {
     if (!guard.canLaunch) {
       setNotice({
         tone: 'error',
-        message: getLaunchDescription(app, guard, currentActiveGroup, groupsById),
+        message: getLaunchDescription(app, guard, currentActiveGroup, groupsById, appsCopy),
       });
       return;
     }
@@ -481,25 +493,33 @@ export default function AppsPage() {
 
       <div className="workspace-header">
         <div className="workspace-title">
-          <span className="eyebrow">S1-3 Workspace</span>
-          <h1>Apps workspace</h1>
+          <span className="eyebrow">{appsCopy.eyebrow}</span>
+          <h1>{appsCopy.title}</h1>
           <p className="lead">
-            欢迎回来，{session.user.displayName}。这里现在由 Gateway 返回真实工作台目录，并持久化收藏、最近使用、默认工作群组和首版 launch handoff。
+            {appsCopy.leadPrefix}
+            {session.user.displayName}
+            {appsCopy.leadSuffix}
           </p>
         </div>
         <div className="workspace-badges">
-          <span className="workspace-badge">{workspaceState.apps.length} 个授权应用</span>
-          <span className="workspace-badge">当前群组: {currentActiveGroup.name}</span>
           <span className="workspace-badge">
-            目录时间: {new Date(workspaceState.generatedAt).toLocaleString()}
+            {workspaceState.apps.length} {appsCopy.authorizedApps}
           </span>
-          <span className="workspace-badge">安全入口: Security / MFA</span>
+          <span className="workspace-badge">
+            {appsCopy.currentGroup}: {currentActiveGroup.name}
+          </span>
+          <span className="workspace-badge">
+            {appsCopy.snapshotTime}: {formatDateTime(workspaceState.generatedAt)}
+          </span>
+          <span className="workspace-badge">
+            {appsCopy.securityEntry}: {messages.mainNav.securityMfa}
+          </span>
         </div>
       </div>
 
       <div className="workspace-toolbar">
         <label className="field">
-          <span>Working group</span>
+          <span>{appsCopy.workingGroup}</span>
           <select
             value={currentActiveGroup.id}
             onChange={event => {
@@ -521,10 +541,10 @@ export default function AppsPage() {
         </label>
 
         <label className="field">
-          <span>Search apps</span>
+          <span>{appsCopy.searchApps}</span>
           <input
             type="search"
-            placeholder="Search by name, description or tag"
+            placeholder={appsCopy.searchPlaceholder}
             value={search}
             onChange={event => setSearch(event.target.value)}
           />
@@ -532,9 +552,7 @@ export default function AppsPage() {
       </div>
 
       {workspaceState.quotaServiceState === 'degraded' ? (
-        <div className="notice info">
-          配额服务当前由 Gateway 标记为降级状态。应用目录仍然可浏览，但新启动会被统一暂停，这一行为对齐 `AC-S1-3-B01`。
-        </div>
+        <div className="notice info">{appsCopy.quotaDegraded}</div>
       ) : null}
 
       {notice ? <div className={`notice ${notice.tone}`}>{notice.message}</div> : null}
@@ -556,7 +574,7 @@ export default function AppsPage() {
               <span>
                 {usage.used} / {usage.limit}
               </span>
-              <span>{getQuotaSeverityLabel(usage)}</span>
+              <span>{getQuotaSeverityLabel(usage, appsCopy)}</span>
             </div>
           </article>
         ))}
@@ -566,15 +584,15 @@ export default function AppsPage() {
         <div className="workspace-alerts">
           {quotaAlerts.map(alert => (
             <div className={`alert-pill alert-${getQuotaSeverity(alert)}`} key={alert.scope}>
-              {alert.scopeLabel}: {getQuotaSeverityLabel(alert)}
+              {alert.scopeLabel}: {getQuotaSeverityLabel(alert, appsCopy)}
             </div>
           ))}
         </div>
       ) : null}
 
       <WorkspaceSection
-        title="Recent"
-        description="按照最近一次成功进入启动准备态的时间倒序展示。"
+        title={appsCopy.recentTitle}
+        description={appsCopy.recentDescription}
         apps={sections.recent}
         activeGroup={currentActiveGroup}
         favoriteIds={favoriteIds}
@@ -588,12 +606,13 @@ export default function AppsPage() {
         onPrimaryAction={(app, guard) => {
           void handlePrimaryAction(app, guard);
         }}
-        emptyMessage="还没有最近使用记录。先从下面的应用目录里打开一个应用。"
+        emptyMessage={appsCopy.recentEmpty}
+        copy={appsCopy}
       />
 
       <WorkspaceSection
-        title="Favorites"
-        description="收藏常用应用，保持工作台入口稳定。"
+        title={appsCopy.favoritesTitle}
+        description={appsCopy.favoritesDescription}
         apps={sections.favorites}
         activeGroup={currentActiveGroup}
         favoriteIds={favoriteIds}
@@ -607,12 +626,13 @@ export default function AppsPage() {
         onPrimaryAction={(app, guard) => {
           void handlePrimaryAction(app, guard);
         }}
-        emptyMessage="还没有收藏应用。你可以在任何应用卡片上点击“收藏”。"
+        emptyMessage={appsCopy.favoritesEmpty}
+        copy={appsCopy}
       />
 
       <WorkspaceSection
-        title="All apps"
-        description="展示当前账号通过群组授权并集可见的全部应用。"
+        title={appsCopy.allAppsTitle}
+        description={appsCopy.allAppsDescription}
         apps={sections.all}
         activeGroup={currentActiveGroup}
         favoriteIds={favoriteIds}
@@ -626,7 +646,8 @@ export default function AppsPage() {
         onPrimaryAction={(app, guard) => {
           void handlePrimaryAction(app, guard);
         }}
-        emptyMessage="没有匹配的应用，换个关键词试试。"
+        emptyMessage={appsCopy.allAppsEmpty}
+        copy={appsCopy}
       />
     </div>
   );

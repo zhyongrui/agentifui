@@ -6,6 +6,8 @@ import postgres from "postgres";
 const DATABASE_URL =
   "postgresql://agentifui:agentifui@localhost:5432/agentifui";
 const DEFAULT_PASSWORD = "Secure123";
+const LOCALE_STORAGE_KEY = "agentifui.locale";
+const TEST_LOCALE = "en-US";
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const TOTP_STEP_MS = 30_000;
 const EXPECT_DEGRADED_RUNTIME = process.env.PLAYWRIGHT_EXPECT_DEGRADED_RUNTIME === "1";
@@ -81,6 +83,15 @@ function appCard(page: Page, appName: string): Locator {
     has: page.getByRole("heading", { name: appName }),
   });
 }
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(
+    ({ key, locale }) => {
+      window.localStorage.setItem(key, locale);
+    },
+    { key: LOCALE_STORAGE_KEY, locale: TEST_LOCALE },
+  );
+});
 
 async function waitForGatewayPost(page: Page, path: string) {
   await waitForGatewayRequest(page, "POST", path);
@@ -704,7 +715,7 @@ test("register/login/workspace controls work for a normal active user", async ({
     email,
   });
   await expectAppsWorkspace(page);
-  await expect(page.getByText("5 个授权应用")).toBeVisible();
+  await expect(page.getByText(/^(5 authorized apps|5 个授权应用)$/)).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Security / MFA" }),
   ).toBeVisible();
@@ -725,7 +736,7 @@ test("register/login/workspace controls work for a normal active user", async ({
   await Promise.all([
     waitForGatewayPut(page, "/workspace/preferences"),
     appCard(page, "Service Copilot")
-      .getByRole("button", { name: "收藏" })
+      .getByRole("button", { name: /^(Favorite|收藏)$/ })
       .click(),
   ]);
   await expect(
@@ -742,10 +753,12 @@ test("register/login/workspace controls work for a normal active user", async ({
   await Promise.all([
     waitForGatewayPut(page, "/workspace/preferences"),
     appCard(page, "Policy Watch")
-      .getByRole("button", { name: /切换到 Research Lab/ })
+      .getByRole("button", { name: /^(Switch to|切换到) Research Lab$/ })
       .click(),
   ]);
-  await expect(page.getByText("工作群组已切换到 Research Lab")).toBeVisible({
+  await expect(
+    page.getByText(/^(Working group switched to|工作群组已切换到) Research Lab/),
+  ).toBeVisible({
     timeout: 15_000,
   });
   await expect(page.getByLabel("Working group")).toHaveValue("grp_research");
@@ -753,7 +766,7 @@ test("register/login/workspace controls work for a normal active user", async ({
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
     appCard(page, "Policy Watch")
-      .getByRole("button", { name: "打开应用" })
+      .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
   await expectConversationSurface(page, "Policy Watch");
@@ -940,7 +953,7 @@ test("chat transcript renders markdown and math content", async ({ page }) => {
   const switchPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
     "button",
     {
-      name: /切换到 Research Lab/,
+      name: /^(Switch to|切换到) Research Lab$/,
     },
   );
   await expect(switchPolicyWatchButton).toBeVisible();
@@ -950,14 +963,16 @@ test("chat transcript renders markdown and math content", async ({ page }) => {
   );
   await switchPolicyWatchButton.click();
   await switchPolicyWatchRequest;
-  await expect(page.getByText("工作群组已切换到 Research Lab")).toBeVisible({
+  await expect(
+    page.getByText(/^(Working group switched to|工作群组已切换到) Research Lab/),
+  ).toBeVisible({
     timeout: 15_000,
   });
 
   const openPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
     "button",
     {
-      name: "打开应用",
+      name: /^(Open app|打开应用)$/,
     },
   );
   await expect(openPolicyWatchButton).toBeVisible();
@@ -1069,7 +1084,7 @@ test("runbook mentor browser flow uses the structured runtime path", async ({
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
     appCard(page, "Runbook Mentor")
-      .getByRole("button", { name: "打开应用" })
+      .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
   await expectConversationSurface(page, "Runbook Mentor", {
@@ -1153,7 +1168,7 @@ test("degraded runtime keeps history readable and the composer disabled", async 
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
     appCard(page, "Runbook Mentor")
-      .getByRole("button", { name: "打开应用" })
+      .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
   await expectConversationSurface(page, "Runbook Mentor", {
@@ -1184,7 +1199,7 @@ test("flagged prompts render safety banners and replay panels", async ({
   const switchPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
     "button",
     {
-      name: /切换到 Research Lab/,
+      name: /^(Switch to|切换到) Research Lab$/,
     },
   );
   await expect(switchPolicyWatchButton).toBeVisible();
@@ -1192,14 +1207,16 @@ test("flagged prompts render safety banners and replay panels", async ({
     waitForGatewayPut(page, "/workspace/preferences"),
     switchPolicyWatchButton.click(),
   ]);
-  await expect(page.getByText("工作群组已切换到 Research Lab")).toBeVisible({
+  await expect(
+    page.getByText(/^(Working group switched to|工作群组已切换到) Research Lab/),
+  ).toBeVisible({
     timeout: 15_000,
   });
 
   const openPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
     "button",
     {
-      name: "打开应用",
+      name: /^(Open app|打开应用)$/,
     },
   );
   await expect(openPolicyWatchButton).toBeVisible();
@@ -1267,7 +1284,7 @@ test("assistant suggested prompts can seed the composer", async ({ page }) => {
   const switchPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
     "button",
     {
-      name: /切换到 Research Lab/,
+      name: /^(Switch to|切换到) Research Lab$/,
     },
   );
   await expect(switchPolicyWatchButton).toBeVisible();
@@ -1277,14 +1294,16 @@ test("assistant suggested prompts can seed the composer", async ({ page }) => {
   );
   await switchPolicyWatchButton.click();
   await switchPolicyWatchRequest;
-  await expect(page.getByText("工作群组已切换到 Research Lab")).toBeVisible({
+  await expect(
+    page.getByText(/^(Working group switched to|工作群组已切换到) Research Lab/),
+  ).toBeVisible({
     timeout: 15_000,
   });
 
   const openPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
     "button",
     {
-      name: "打开应用",
+      name: /^(Open app|打开应用)$/,
     },
   );
   await expect(openPolicyWatchButton).toBeVisible();
@@ -1531,13 +1550,13 @@ test("conversation shares allow another group member to open a read-only shared 
   await expectAppsWorkspace(page);
 
   await appCard(page, "Policy Watch")
-    .getByRole("button", { name: /切换到 Research Lab/ })
+    .getByRole("button", { name: /^(Switch to|切换到) Research Lab$/ })
     .click();
   await expect(page.getByLabel("Working group")).toHaveValue("grp_research");
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
     appCard(page, "Policy Watch")
-      .getByRole("button", { name: "打开应用" })
+      .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
   await expectConversationSurface(page, "Policy Watch");
@@ -1619,13 +1638,13 @@ test("chat history lists recent conversations and links back to timeline-aware r
   await expectAppsWorkspace(page);
 
   await appCard(page, "Policy Watch")
-    .getByRole("button", { name: /切换到 Research Lab/ })
+    .getByRole("button", { name: /^(Switch to|切换到) Research Lab$/ })
     .click();
   await expect(page.getByLabel("Working group")).toHaveValue("grp_research");
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
     appCard(page, "Policy Watch")
-      .getByRole("button", { name: "打开应用" })
+      .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
   await expectConversationSurface(page, "Policy Watch");

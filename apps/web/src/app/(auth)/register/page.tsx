@@ -1,10 +1,10 @@
 'use client';
 
 import type { AuthErrorResponse, RegisterResponse } from '@agentifui/shared/auth';
-import { useRouter } from 'next/navigation';
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 
+import { useI18n } from '../../../components/i18n-provider';
 import { registerWithPassword } from '../../../lib/auth-client';
 
 function isAuthErrorResponse(
@@ -14,7 +14,8 @@ function isAuthErrorResponse(
 }
 
 export default function RegisterPage() {
-  const router = useRouter();
+  const { messages } = useI18n();
+  const registerMessages = messages.auth.register;
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -38,9 +39,9 @@ export default function RegisterPage() {
         return;
       }
 
-      router.push('/login?registered=1');
+      window.location.assign('/login?registered=1');
     } catch {
-      setError('Unable to reach the auth gateway. Check the gateway server and try again.');
+      setError(registerMessages.networkError);
     } finally {
       setIsSubmitting(false);
     }
@@ -48,28 +49,28 @@ export default function RegisterPage() {
 
   return (
     <section className="panel">
-      <span className="eyebrow">S1-1</span>
-      <h1>Register</h1>
-      <p className="lead">这里作为租户内注册、邀请激活和密码策略校验的起点。</p>
+      <span className="eyebrow">{registerMessages.eyebrow}</span>
+      <h1>{registerMessages.title}</h1>
+      <p className="lead">{registerMessages.lead}</p>
 
       {error ? <div className="notice error">{error}</div> : null}
 
       <form className="stack" onSubmit={handleSubmit}>
         <label className="field">
-          <span>Display Name</span>
+          <span>{registerMessages.displayName}</span>
           <input
             type="text"
-            placeholder="Your name"
+            placeholder={registerMessages.displayNamePlaceholder}
             value={displayName}
             onChange={event => setDisplayName(event.target.value)}
           />
         </label>
 
         <label className="field">
-          <span>Email</span>
+          <span>{registerMessages.email}</span>
           <input
             type="email"
-            placeholder="name@company.com"
+            placeholder={registerMessages.emailPlaceholder}
             value={email}
             onChange={event => setEmail(event.target.value)}
             required
@@ -77,10 +78,10 @@ export default function RegisterPage() {
         </label>
 
         <label className="field">
-          <span>Password</span>
+          <span>{registerMessages.password}</span>
           <input
             type="password"
-            placeholder="Create a strong password"
+            placeholder={registerMessages.passwordPlaceholder}
             value={password}
             onChange={event => setPassword(event.target.value)}
             required
@@ -88,7 +89,7 @@ export default function RegisterPage() {
         </label>
 
         <button className="primary" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Creating account...' : 'Create account'}
+          {isSubmitting ? registerMessages.submitting : registerMessages.submit}
         </button>
       </form>
     </section>

@@ -3,6 +3,8 @@ import './globals.css';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
+import { I18nProvider } from '../components/i18n-provider';
+
 export const metadata: Metadata = {
   title: 'AgentifUI',
   description: 'AgentifUI greenfield workspace',
@@ -15,7 +17,9 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <I18nProvider>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

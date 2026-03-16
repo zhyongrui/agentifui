@@ -1,26 +1,23 @@
 'use client';
 
+import { useI18n } from '../../../components/i18n-provider';
 import { fetchAdminUsers } from '../../../lib/admin-client';
 import { useAdminPageData } from '../../../lib/use-admin-page';
 
-function formatTimestamp(value: string | null) {
-  return value ? new Date(value).toLocaleString() : 'Never';
-}
-
 export default function AdminUsersPage() {
+  const { messages, formatDateTime } = useI18n();
+  const usersCopy = messages.adminUsers;
   const { data, error, isLoading } = useAdminPageData(fetchAdminUsers);
 
   if (isLoading) {
-    return <p className="lead">Loading admin users...</p>;
+    return <p className="lead">{usersCopy.loading}</p>;
   }
 
   return (
     <div className="stack">
       <div>
-        <h1>Users</h1>
-        <p className="lead">
-          Read-only tenant user inventory with status, MFA, roles and persisted group membership.
-        </p>
+        <h1>{usersCopy.title}</h1>
+        <p className="lead">{usersCopy.lead}</p>
       </div>
 
       {error ? <div className="notice error">{error}</div> : null}
@@ -29,22 +26,22 @@ export default function AdminUsersPage() {
         <>
           <div className="admin-stat-grid">
             <article className="admin-stat-card">
-              <span>Total users</span>
+              <span>{usersCopy.totalUsers}</span>
               <strong>{data.users.length}</strong>
             </article>
             <article className="admin-stat-card">
-              <span>MFA enabled</span>
+              <span>{usersCopy.mfaEnabled}</span>
               <strong>{data.users.filter(user => user.mfaEnabled).length}</strong>
             </article>
             <article className="admin-stat-card">
-              <span>Pending review</span>
+              <span>{usersCopy.pendingReview}</span>
               <strong>{data.users.filter(user => user.status === 'pending').length}</strong>
             </article>
           </div>
 
           <div className="workspace-badges">
             <span className="workspace-badge">
-              Snapshot: {new Date(data.generatedAt).toLocaleString()}
+              {usersCopy.snapshot}: {formatDateTime(data.generatedAt)}
             </span>
           </div>
 
@@ -61,25 +58,25 @@ export default function AdminUsersPage() {
 
                 <div className="detail-list">
                   <div className="detail-row">
-                    <span className="detail-label">Last login</span>
-                    <strong>{formatTimestamp(user.lastLoginAt)}</strong>
+                    <span className="detail-label">{usersCopy.lastLogin}</span>
+                    <strong>{formatDateTime(user.lastLoginAt, usersCopy.never)}</strong>
                   </div>
                   <div className="detail-row">
-                    <span className="detail-label">MFA</span>
-                    <strong>{user.mfaEnabled ? 'Enabled' : 'Disabled'}</strong>
+                    <span className="detail-label">{usersCopy.mfa}</span>
+                    <strong>{user.mfaEnabled ? usersCopy.enabled : usersCopy.disabled}</strong>
                   </div>
                   <div className="detail-row">
-                    <span className="detail-label">Created</span>
-                    <strong>{formatTimestamp(user.createdAt)}</strong>
+                    <span className="detail-label">{usersCopy.created}</span>
+                    <strong>{formatDateTime(user.createdAt)}</strong>
                   </div>
                 </div>
 
                 <div className="stack">
                   <div>
-                    <strong>Roles</strong>
+                    <strong>{usersCopy.roles}</strong>
                     <div className="tag-row admin-tag-row">
                       {user.roleIds.length === 0 ? (
-                        <span className="tag tag-muted">No persisted roles</span>
+                        <span className="tag tag-muted">{usersCopy.noRoles}</span>
                       ) : (
                         user.roleIds.map(roleId => (
                           <span className="tag" key={roleId}>
@@ -91,16 +88,16 @@ export default function AdminUsersPage() {
                   </div>
 
                   <div>
-                    <strong>Group memberships</strong>
+                    <strong>{usersCopy.groupMemberships}</strong>
                     <div className="tag-row admin-tag-row">
                       {user.groupMemberships.length === 0 ? (
-                        <span className="tag tag-muted">No persisted memberships</span>
+                        <span className="tag tag-muted">{usersCopy.noMemberships}</span>
                       ) : (
                         user.groupMemberships.map(membership => (
                           <span className="tag" key={`${user.id}:${membership.groupId}`}>
                             {membership.groupName}
-                            {membership.isPrimary ? ' · primary' : ''}
-                            {membership.role === 'manager' ? ' · manager' : ''}
+                            {membership.isPrimary ? ` · ${usersCopy.primary}` : ''}
+                            {membership.role === 'manager' ? ` · ${usersCopy.manager}` : ''}
                           </span>
                         ))
                       )}

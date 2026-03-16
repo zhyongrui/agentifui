@@ -1,4 +1,8 @@
+'use client';
+
 import type { ReactNode } from 'react';
+
+import { LanguageSwitcher } from '../../components/language-switcher';
 
 type MainLayoutProps = {
   children: ReactNode;
@@ -7,7 +11,12 @@ type MainLayoutProps = {
 export default function MainLayout({ children }: MainLayoutProps) {
   return (
     <main className="shell shell-main">
-      <section className="panel panel-main">{children}</section>
+      <section className="panel panel-main stack">
+        <div className="layout-toolbar">
+          <LanguageSwitcher />
+        </div>
+        {children}
+      </section>
     </main>
   );
 }

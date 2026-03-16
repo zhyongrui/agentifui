@@ -7,10 +7,11 @@ import type {
   SsoDiscoveryResponse,
 } from '@agentifui/shared/auth';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import type { FormEvent } from 'react';
 import { Suspense, useEffect, useState } from 'react';
 
+import { useI18n } from '../../../components/i18n-provider';
 import { continueWithSso, discoverSso, loginWithPassword } from '../../../lib/auth-client';
 import {
   clearAuthMfaTicket,
@@ -58,8 +59,9 @@ function getMfaTicketFromError(response: AuthErrorResponse): string | null {
 }
 
 function LoginPageContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const { messages } = useI18n();
+  const loginMessages = messages.auth.login;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +74,10 @@ function LoginPageContent() {
   });
   const registered = searchParams.get('registered') === '1';
   const activated = searchParams.get('activated') === '1';
+
+  function navigateTo(path: string) {
+    window.location.assign(path);
+  }
 
   useEffect(() => {
     const normalizedEmail = email.trim().toLowerCase();
@@ -162,12 +168,12 @@ function LoginPageContent() {
             email: email.trim().toLowerCase(),
             createdAt: new Date().toISOString(),
           });
-          router.push('/auth/mfa');
+          navigateTo('/auth/mfa');
           return;
         }
 
         if (response.error.code === 'AUTH_ACCOUNT_PENDING') {
-          router.push('/auth/pending');
+          navigateTo('/auth/pending');
           return;
         }
 
@@ -177,9 +183,9 @@ function LoginPageContent() {
 
       clearAuthMfaTicket(window.sessionStorage);
       writeAuthSession(window.sessionStorage, response.data);
-      router.push(getPostAuthRedirect(response.data.user.status));
+      navigateTo(getPostAuthRedirect(response.data.user.status));
     } catch {
-      setError('Unable to reach the auth gateway. Check the gateway server and try again.');
+      setError(loginMessages.networkError);
     } finally {
       setIsSubmitting(false);
     }
@@ -208,7 +214,7 @@ function LoginPageContent() {
             email: email.trim().toLowerCase(),
             createdAt: new Date().toISOString(),
           });
-          router.push('/auth/mfa');
+          navigateTo('/auth/mfa');
           return;
         }
 
@@ -218,9 +224,9 @@ function LoginPageContent() {
 
       clearAuthMfaTicket(window.sessionStorage);
       writeAuthSession(window.sessionStorage, response.data);
-      router.push(getPostAuthRedirect(response.data.user.status));
+      navigateTo(getPostAuthRedirect(response.data.user.status));
     } catch {
-      setError('Unable to reach the auth gateway. Check the gateway server and try again.');
+      setError(loginMessages.networkError);
     } finally {
       setIsSsoSubmitting(false);
     }
@@ -228,26 +234,24 @@ function LoginPageContent() {
 
   return (
     <section className="panel">
-      <span className="eyebrow">S1-1</span>
-      <h1>Login</h1>
-      <p className="lead">
-        从这里开始实现邮箱密码登录、SSO 域名识别、待审核状态和 MFA。
-      </p>
+      <span className="eyebrow">{loginMessages.eyebrow}</span>
+      <h1>{loginMessages.title}</h1>
+      <p className="lead">{loginMessages.lead}</p>
 
       {registered ? (
-        <div className="notice success">Registration complete. You can now sign in.</div>
+        <div className="notice success">{loginMessages.registered}</div>
       ) : activated ? (
-        <div className="notice success">Invitation accepted. Sign in with your new password.</div>
+        <div className="notice success">{loginMessages.activated}</div>
       ) : null}
 
       {ssoState.status === 'checking' ? (
-        <div className="notice info">Checking whether this email should use enterprise SSO.</div>
+        <div className="notice info">{loginMessages.ssoChecking}</div>
       ) : null}
 
       {ssoState.status === 'available' ? (
         <div className="notice info">
-          Enterprise SSO detected for <strong>{ssoState.domain}</strong>. Continue without a
-          password.
+          {loginMessages.ssoAvailablePrefix} <strong>{ssoState.domain}</strong>
+          {loginMessages.ssoAvailableSuffix}
         </div>
       ) : null}
 
@@ -255,7 +259,7 @@ function LoginPageContent() {
 
       <form className="stack" onSubmit={handlePasswordSubmit}>
         <label className="field">
-          <span>Email</span>
+          <span>{loginMessages.email}</span>
           <input
             type="email"
             placeholder="name@company.com"
@@ -272,12 +276,14 @@ function LoginPageContent() {
             disabled={isSsoSubmitting}
             onClick={handleSsoSubmit}
           >
-            {isSsoSubmitting ? 'Redirecting to SSO...' : `Continue with ${ssoState.providerId}`}
+            {isSsoSubmitting
+              ? loginMessages.redirectingToSso
+              : `${loginMessages.continueWithPrefix} ${ssoState.providerId}`}
           </button>
         ) : (
           <>
             <label className="field">
-              <span>Password</span>
+              <span>{loginMessages.password}</span>
               <input
                 type="password"
                 placeholder="••••••••"
@@ -292,14 +298,14 @@ function LoginPageContent() {
               type="submit"
               disabled={isSubmitting || ssoState.status === 'checking'}
             >
-              {isSubmitting ? 'Signing in...' : 'Continue'}
+              {isSubmitting ? loginMessages.continuing : loginMessages.continue}
             </button>
           </>
         )}
       </form>
 
       <p className="helper-text">
-        No account yet? <Link href="/register">Create one here</Link>.
+        {loginMessages.noAccountPrefix} <Link href="/register">{loginMessages.noAccountLink}</Link>.
       </p>
     </section>
   );
@@ -311,8 +317,8 @@ export default function LoginPage() {
       fallback={
         <section className="panel">
           <span className="eyebrow">S1-1</span>
-          <h1>Login</h1>
-          <p className="lead">Loading sign-in options...</p>
+          <h1>登录</h1>
+          <p className="lead">正在加载登录选项...</p>
         </section>
       }
     >

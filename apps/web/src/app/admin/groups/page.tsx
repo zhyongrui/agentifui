@@ -1,23 +1,23 @@
 'use client';
 
+import { useI18n } from '../../../components/i18n-provider';
 import { fetchAdminGroups } from '../../../lib/admin-client';
 import { useAdminPageData } from '../../../lib/use-admin-page';
 
 export default function AdminGroupsPage() {
+  const { messages, formatDateTime } = useI18n();
+  const groupsCopy = messages.adminGroups;
   const { data, error, isLoading } = useAdminPageData(fetchAdminGroups);
 
   if (isLoading) {
-    return <p className="lead">Loading admin groups...</p>;
+    return <p className="lead">{groupsCopy.loading}</p>;
   }
 
   return (
     <div className="stack">
       <div>
-        <h1>Groups</h1>
-        <p className="lead">
-          Review persisted group membership volume, manager coverage and app grants before enabling
-          write controls.
-        </p>
+        <h1>{groupsCopy.title}</h1>
+        <p className="lead">{groupsCopy.lead}</p>
       </div>
 
       {error ? <div className="notice error">{error}</div> : null}
@@ -26,17 +26,17 @@ export default function AdminGroupsPage() {
         <>
           <div className="admin-stat-grid">
             <article className="admin-stat-card">
-              <span>Total groups</span>
+              <span>{groupsCopy.totalGroups}</span>
               <strong>{data.groups.length}</strong>
             </article>
             <article className="admin-stat-card">
-              <span>Total managers</span>
+              <span>{groupsCopy.totalManagers}</span>
               <strong>
                 {data.groups.reduce((total, group) => total + group.managerCount, 0)}
               </strong>
             </article>
             <article className="admin-stat-card">
-              <span>Total app grants</span>
+              <span>{groupsCopy.totalAppGrants}</span>
               <strong>
                 {data.groups.reduce((total, group) => total + group.appGrants.length, 0)}
               </strong>
@@ -45,7 +45,7 @@ export default function AdminGroupsPage() {
 
           <div className="workspace-badges">
             <span className="workspace-badge">
-              Snapshot: {new Date(data.generatedAt).toLocaleString()}
+              {groupsCopy.snapshot}: {formatDateTime(data.generatedAt)}
             </span>
           </div>
 
@@ -62,24 +62,24 @@ export default function AdminGroupsPage() {
 
                 <div className="detail-list">
                   <div className="detail-row">
-                    <span className="detail-label">Members</span>
+                    <span className="detail-label">{groupsCopy.members}</span>
                     <strong>{group.memberCount}</strong>
                   </div>
                   <div className="detail-row">
-                    <span className="detail-label">Managers</span>
+                    <span className="detail-label">{groupsCopy.managers}</span>
                     <strong>{group.managerCount}</strong>
                   </div>
                   <div className="detail-row">
-                    <span className="detail-label">Primary members</span>
+                    <span className="detail-label">{groupsCopy.primaryMembers}</span>
                     <strong>{group.primaryMemberCount}</strong>
                   </div>
                 </div>
 
                 <div>
-                  <strong>Granted apps</strong>
+                  <strong>{groupsCopy.grantedApps}</strong>
                   <div className="tag-row admin-tag-row">
                     {group.appGrants.length === 0 ? (
-                      <span className="tag tag-muted">No app grants</span>
+                      <span className="tag tag-muted">{groupsCopy.noAppGrants}</span>
                     ) : (
                       group.appGrants.map(app => (
                         <span className="tag" key={`${group.id}:${app.id}`}>

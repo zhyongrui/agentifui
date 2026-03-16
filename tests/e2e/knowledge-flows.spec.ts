@@ -1,6 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const DEFAULT_PASSWORD = "Secure123";
+const LOCALE_STORAGE_KEY = "agentifui.locale";
+const TEST_LOCALE = "en-US";
 
 function uniqueEmail(prefix: string, domain = "example.com") {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@${domain}`;
@@ -11,6 +13,15 @@ function appCard(page: Page, appName: string): Locator {
     has: page.getByRole("heading", { name: appName }),
   });
 }
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(
+    ({ key, locale }) => {
+      window.localStorage.setItem(key, locale);
+    },
+    { key: LOCALE_STORAGE_KEY, locale: TEST_LOCALE },
+  );
+});
 
 async function waitForGatewayRequest(
   page: Page,
@@ -145,7 +156,7 @@ Residents may request approved late access for labs.`);
   const switchPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
     "button",
     {
-      name: /切换到 Research Lab/,
+      name: /^(Switch to|切换到) Research Lab$/,
     },
   );
   await expect(switchPolicyWatchButton).toBeVisible();
@@ -153,14 +164,16 @@ Residents may request approved late access for labs.`);
     waitForGatewayRequest(page, "PUT", "/workspace/preferences"),
     switchPolicyWatchButton.click(),
   ]);
-  await expect(page.getByText("工作群组已切换到 Research Lab")).toBeVisible({
+  await expect(
+    page.getByText(/^(Working group switched to|工作群组已切换到) Research Lab/),
+  ).toBeVisible({
     timeout: 15_000,
   });
 
   await Promise.all([
     waitForGatewayRequest(page, "POST", "/workspace/apps/launch"),
     appCard(page, "Policy Watch")
-      .getByRole("button", { name: "打开应用" })
+      .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
   await expectConversationSurface(page, "Policy Watch");

@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { useI18n } from './i18n-provider';
+
 type MainSectionNavProps = {
   showAdminPreview?: boolean;
   showSecurity?: boolean;
@@ -23,20 +25,21 @@ export function MainSectionNav({
   showSecurity = false,
 }: MainSectionNavProps) {
   const pathname = usePathname();
+  const { messages } = useI18n();
   const items: NavItem[] = [
     {
       href: '/apps',
-      label: 'Apps workspace',
+      label: messages.mainNav.appsWorkspace,
       matchPrefix: '/apps',
     },
     {
       href: '/chat',
-      label: 'Chat history',
+      label: messages.mainNav.chatHistory,
       matchPrefix: '/chat',
     },
     {
       href: '/settings/profile',
-      label: 'Profile',
+      label: messages.mainNav.profile,
       matchPrefix: '/settings/profile',
     },
   ];
@@ -44,7 +47,7 @@ export function MainSectionNav({
   if (showSecurity) {
     items.push({
       href: '/settings/security',
-      label: 'Security / MFA',
+      label: messages.mainNav.securityMfa,
       matchPrefix: '/settings/security',
     });
   }
@@ -52,13 +55,13 @@ export function MainSectionNav({
   if (showAdminPreview) {
     items.push({
       href: '/admin/users',
-      label: 'Admin preview',
+      label: messages.mainNav.adminPreview,
       matchPrefix: '/admin',
     });
   }
 
   return (
-    <nav aria-label="Main sections" className="page-nav">
+    <nav aria-label={messages.mainNav.ariaLabel} className="page-nav">
       {items.map(item => {
         const isActive = isActivePath(pathname, item);
 
