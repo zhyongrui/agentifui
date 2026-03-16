@@ -2001,6 +2001,267 @@ describe.sequential('persistent auth runtime', () => {
   );
 
   it(
+    'keeps conversation-scoped tool idempotency stable across retries and app restarts',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        const register = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'tool-retry@example.net',
+            password: 'Secure123',
+            displayName: 'Tool Retry Tester',
+          },
+        });
+
+        expect(register.statusCode).toBe(201);
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'tool-retry@example.net',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+        };
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+        const completionPayload = {
+          app_id: 'app_policy_watch',
+          conversation_id: launchBody.data.conversationId,
+          messages: [
+            {
+              role: 'user',
+              content: 'Look up the latest dormitory lights-out guidance.',
+            },
+          ],
+          inputs: {
+            toolSimulation: {
+              'workspace.search': {
+                failAttemptsBeforeSuccess: 1,
+              },
+            },
+          },
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'workspace.search',
+                description: 'Searches indexed workspace knowledge.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    query: {
+                      type: 'string',
+                    },
+                    topK: {
+                      type: 'integer',
+                      minimum: 1,
+                      maximum: 10,
+                    },
+                  },
+                  required: ['query'],
+                  additionalProperties: false,
+                },
+                strict: true,
+              },
+              auth: {
+                scope: 'active_group',
+                requiresApproval: false,
+              },
+              execution: {
+                timeoutMs: 155,
+                maxAttempts: 3,
+                idempotencyScope: 'conversation',
+              },
+              enabled: true,
+              tags: ['search'],
+            },
+          ],
+          tool_choice: {
+            type: 'function',
+            function: {
+              name: 'workspace.search',
+            },
+          },
+        };
+
+        const firstCompletion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+            'x-active-group-id': 'grp_research',
+          },
+          payload: completionPayload,
+        });
+
+        expect(firstCompletion.statusCode).toBe(200);
+
+        const firstCompletionBody = firstCompletion.json() as ChatCompletionResponse;
+        const firstRunId = firstCompletionBody.metadata?.run_id;
+
+        if (!firstRunId) {
+          throw new Error('expected first completion to return a run id');
+        }
+
+        const firstRun = await app.inject({
+          method: 'GET',
+          url: `/workspace/runs/${firstRunId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(firstRun.statusCode).toBe(200);
+
+        const firstRunBody = (firstRun.json() as WorkspaceRunResponse).data;
+        const firstExecutions = firstRunBody.toolExecutions.filter(
+          execution => execution.request.function.name === 'workspace.search',
+        );
+
+        expect(firstExecutions).toHaveLength(2);
+        expect(firstExecutions.map(execution => execution.attempt)).toEqual([1, 2]);
+        expect(firstExecutions.map(execution => execution.status)).toEqual([
+          'failed',
+          'succeeded',
+        ]);
+
+        const firstIdempotencyKey = firstExecutions[0]?.metadata?.idempotencyKey ?? null;
+
+        expect(firstIdempotencyKey).toEqual(expect.any(String));
+        expect(
+          new Set(firstExecutions.map(execution => execution.metadata?.idempotencyKey)).size,
+        ).toBe(1);
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+        let restartedAppClosed = false;
+
+        try {
+          const secondCompletion = await restartedApp.inject({
+            method: 'POST',
+            url: '/v1/chat/completions',
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+              'x-active-group-id': 'grp_research',
+            },
+            payload: completionPayload,
+          });
+
+          expect(secondCompletion.statusCode).toBe(200);
+
+          const secondCompletionBody = secondCompletion.json() as ChatCompletionResponse;
+          const secondRunId = secondCompletionBody.metadata?.run_id;
+
+          if (!secondRunId) {
+            throw new Error('expected second completion to return a run id');
+          }
+
+          expect(secondRunId).not.toBe(firstRunId);
+
+          const secondRun = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/runs/${secondRunId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(secondRun.statusCode).toBe(200);
+
+          const secondRunBody = (secondRun.json() as WorkspaceRunResponse).data;
+          const secondExecutions = secondRunBody.toolExecutions.filter(
+            execution => execution.request.function.name === 'workspace.search',
+          );
+
+          expect(secondExecutions).toHaveLength(2);
+          expect(secondExecutions.map(execution => execution.attempt)).toEqual([1, 2]);
+          expect(secondExecutions.map(execution => execution.status)).toEqual([
+            'failed',
+            'succeeded',
+          ]);
+          expect(
+            new Set(secondExecutions.map(execution => execution.metadata?.idempotencyKey)).size,
+          ).toBe(1);
+          expect(secondExecutions[0]?.metadata).toMatchObject({
+            failureReason: 'provider_error',
+            maxAttempts: '3',
+            timeoutMs: '155',
+          });
+          expect(secondExecutions[1]?.metadata).toMatchObject({
+            maxAttempts: '3',
+            timeoutMs: '155',
+          });
+          expect(secondExecutions[0]?.metadata?.idempotencyKey).toBe(
+            firstIdempotencyKey,
+          );
+          expect(secondExecutions[1]?.metadata?.idempotencyKey).toBe(
+            firstIdempotencyKey,
+          );
+          expect(secondRunBody.outputs).toMatchObject({
+            toolResults: [
+              expect.objectContaining({
+                attempt: 1,
+                isError: true,
+                metadata: expect.objectContaining({
+                  failureReason: 'provider_error',
+                  idempotencyKey: firstIdempotencyKey,
+                }),
+              }),
+              expect.objectContaining({
+                attempt: 2,
+                isError: false,
+                metadata: expect.objectContaining({
+                  idempotencyKey: firstIdempotencyKey,
+                }),
+              }),
+            ],
+          });
+        } finally {
+          if (!restartedAppClosed) {
+            await restartedApp.close();
+            restartedAppClosed = true;
+          }
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS,
+  );
+
+  it(
     'persists safety signals and audit events across app restarts',
     async () => {
       await resetPersistentTestDatabase();

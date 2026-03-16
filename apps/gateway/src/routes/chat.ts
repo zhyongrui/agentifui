@@ -412,6 +412,7 @@ async function recordToolExecutionAudit(input: {
         attempt: execution.attempt,
         status: execution.status,
         latencyMs: execution.latencyMs,
+        metadata: execution.metadata ?? null,
         appId: input.conversation.app.id,
         appName: input.conversation.app.name,
         activeGroupId: input.conversation.activeGroup.id,
@@ -738,6 +739,32 @@ function isChatToolCall(value: unknown): value is ChatToolCall {
   );
 }
 
+function isToolExecutionPolicy(value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const policy = value as Record<string, unknown>;
+
+  return (
+    (policy.timeoutMs === undefined ||
+      (typeof policy.timeoutMs === "number" &&
+        Number.isFinite(policy.timeoutMs) &&
+        policy.timeoutMs > 0)) &&
+    (policy.maxAttempts === undefined ||
+      (typeof policy.maxAttempts === "number" &&
+        Number.isFinite(policy.maxAttempts) &&
+        policy.maxAttempts > 0)) &&
+    (policy.idempotencyScope === undefined ||
+      policy.idempotencyScope === "conversation" ||
+      policy.idempotencyScope === "run")
+  );
+}
+
 function isChatToolDescriptor(value: unknown): value is ChatToolDescriptor {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -777,6 +804,7 @@ function isChatToolDescriptor(value: unknown): value is ChatToolDescriptor {
       typeof authRequirement.requiresApproval === "boolean") &&
     (authRequirement.policyTag === undefined ||
       typeof authRequirement.policyTag === "string") &&
+    isToolExecutionPolicy(tool.execution) &&
     (tool.enabled === undefined || typeof tool.enabled === "boolean") &&
     (tool.tags === undefined ||
       (Array.isArray(tool.tags) &&
@@ -1090,6 +1118,11 @@ function buildToolExecutions(input: {
     toolCallId: string;
     toolName: string;
     content: string;
+    attempt?: number;
+    startedAt?: string;
+    finishedAt?: string;
+    latencyMs?: number;
+    metadata?: Record<string, string>;
     isError?: boolean;
   }>;
   recordedAt: string;
@@ -1104,31 +1137,43 @@ function buildToolExecutions(input: {
     Math.round(input.latencyMs / Math.max(input.toolCalls.length, 1)),
   );
 
-  return input.toolCalls.flatMap((toolCall, index) => {
-    const matchingResult =
-      input.toolResults.find((toolResult) => toolResult.toolCallId === toolCall.id) ??
-      null;
+  return input.toolCalls.flatMap((toolCall) => {
+    const matchingResults = input.toolResults.filter(
+      (toolResult) => toolResult.toolCallId === toolCall.id,
+    );
 
-    if (!matchingResult) {
+    if (matchingResults.length === 0) {
       return [];
     }
 
-    return [
-      {
-        id: `tool_exec_${randomUUID()}`,
-        attempt: index + 1,
-        status: matchingResult.isError ? "failed" : "succeeded",
-        startedAt: input.recordedAt,
-        finishedAt: input.recordedAt,
-        latencyMs: perToolLatency,
-        request: toolCall,
-        result: {
-          content: matchingResult.content,
-          isError: Boolean(matchingResult.isError),
-          recordedAt: input.recordedAt,
-        },
+    return matchingResults.map((matchingResult, resultIndex) => ({
+      id: `tool_exec_${randomUUID()}`,
+      attempt:
+        typeof matchingResult.attempt === "number" &&
+        Number.isFinite(matchingResult.attempt) &&
+        matchingResult.attempt > 0
+          ? matchingResult.attempt
+          : resultIndex + 1,
+      status: matchingResult.isError ? "failed" : "succeeded",
+      startedAt: matchingResult.startedAt ?? input.recordedAt,
+      finishedAt: matchingResult.finishedAt ?? input.recordedAt,
+      latencyMs:
+        typeof matchingResult.latencyMs === "number" &&
+        Number.isFinite(matchingResult.latencyMs)
+          ? matchingResult.latencyMs
+          : perToolLatency,
+      request: toolCall,
+      metadata:
+        matchingResult.metadata &&
+        Object.keys(matchingResult.metadata).length > 0
+          ? matchingResult.metadata
+          : undefined,
+      result: {
+        content: matchingResult.content,
+        isError: Boolean(matchingResult.isError),
+        recordedAt: matchingResult.finishedAt ?? input.recordedAt,
       },
-    ];
+    }));
   });
 }
 

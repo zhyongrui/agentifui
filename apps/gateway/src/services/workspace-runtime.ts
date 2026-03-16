@@ -14,10 +14,11 @@ import type {
   ChatToolCall,
   ChatToolChoice,
   ChatToolDescriptor,
+  ToolExecutionPolicy,
   ToolInputSchema,
 } from "@agentifui/shared";
 import type { KnowledgeRetrievalResult } from "@agentifui/shared";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { resolveWorkspaceAppRuntimeId } from "./workspace-catalog-fixtures.js";
 import { buildPlaceholderHitlSteps } from "./workspace-hitl.js";
@@ -76,6 +77,11 @@ export type WorkspaceRuntimeInvocationOutput = {
     toolCallId: string;
     toolName: string;
     content: string;
+    attempt?: number;
+    startedAt?: string;
+    finishedAt?: string;
+    latencyMs?: number;
+    metadata?: Record<string, string>;
     isError?: boolean;
   }>;
 };
@@ -151,6 +157,103 @@ function buildSuggestedPrompts(latestPrompt: string) {
 
 function slugifyToolToken(value: string) {
   return value.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase();
+}
+
+type PlaceholderToolSimulation = {
+  alwaysFail: boolean;
+  alwaysTimeout: boolean;
+  failAttemptsBeforeSuccess: number;
+};
+
+function hashToolExecutionScope(value: string) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+function buildToolIdempotencyKey(input: {
+  conversation: WorkspaceConversation;
+  policy: ToolExecutionPolicy | null;
+  toolCall: ChatToolCall;
+}) {
+  const scope =
+    input.policy?.idempotencyScope === "conversation"
+      ? input.conversation.id
+      : input.conversation.run.id;
+
+  return `tool_idem_${hashToolExecutionScope(
+    `${scope}:${input.toolCall.function.name}:${input.toolCall.function.arguments}`,
+  )}`;
+}
+
+function normalizeExecutionPolicy(policy: ToolExecutionPolicy | undefined) {
+  return {
+    timeoutMs:
+      typeof policy?.timeoutMs === "number" &&
+      Number.isFinite(policy.timeoutMs) &&
+      policy.timeoutMs > 0
+        ? Math.round(policy.timeoutMs)
+        : 150,
+    maxAttempts:
+      typeof policy?.maxAttempts === "number" &&
+      Number.isFinite(policy.maxAttempts) &&
+      policy.maxAttempts > 0
+        ? Math.round(policy.maxAttempts)
+        : 1,
+    idempotencyScope:
+      policy?.idempotencyScope === "conversation" ? "conversation" : "run",
+  } satisfies Required<ToolExecutionPolicy>;
+}
+
+function readToolSimulation(
+  runtimeInput: Record<string, unknown> | null,
+  toolName: string,
+): PlaceholderToolSimulation {
+  const toolSimulation = runtimeInput?.toolSimulation;
+
+  if (typeof toolSimulation !== "object" || toolSimulation === null) {
+    return {
+      alwaysFail: false,
+      alwaysTimeout: false,
+      failAttemptsBeforeSuccess: 0,
+    };
+  }
+
+  const simulationRecord = toolSimulation as Record<string, unknown>;
+  const rawSimulation = simulationRecord[toolName];
+
+  if (typeof rawSimulation !== "object" || rawSimulation === null) {
+    return {
+      alwaysFail: false,
+      alwaysTimeout: false,
+      failAttemptsBeforeSuccess: 0,
+    };
+  }
+
+  const record = rawSimulation as Record<string, unknown>;
+
+  return {
+    alwaysFail: record.alwaysFail === true,
+    alwaysTimeout: record.alwaysTimeout === true,
+    failAttemptsBeforeSuccess:
+      typeof record.failAttemptsBeforeSuccess === "number" &&
+      Number.isFinite(record.failAttemptsBeforeSuccess) &&
+      record.failAttemptsBeforeSuccess > 0
+        ? Math.round(record.failAttemptsBeforeSuccess)
+        : 0,
+  };
+}
+
+function buildToolExecutionAttemptMetadata(input: {
+  failureReason: "provider_error" | "timeout" | null;
+  idempotencyKey: string;
+  maxAttempts: number;
+  timeoutMs: number;
+}) {
+  return {
+    idempotencyKey: input.idempotencyKey,
+    maxAttempts: String(input.maxAttempts),
+    timeoutMs: String(input.timeoutMs),
+    ...(input.failureReason ? { failureReason: input.failureReason } : {}),
+  } satisfies Record<string, string>;
 }
 
 function resolveSchemaType(schema: ToolInputSchema) {
@@ -292,6 +395,13 @@ function buildPlaceholderToolExecution(
       arguments: JSON.stringify(argumentsValue),
     },
   };
+  const executionPolicy = normalizeExecutionPolicy(selectedTool.execution);
+  const idempotencyKey = buildToolIdempotencyKey({
+    conversation: input.conversation,
+    policy: executionPolicy,
+    toolCall,
+  });
+
   if (selectedTool.auth.requiresApproval) {
     return {
       approvalRequired: true,
@@ -299,14 +409,73 @@ function buildPlaceholderToolExecution(
         buildWorkspaceToolApprovalStep({
           conversationId: input.conversation.id,
           createdAt: new Date().toISOString(),
+          idempotencyKey,
+          maxAttempts: executionPolicy.maxAttempts,
           policyTag: selectedTool.auth.policyTag ?? null,
           runId: input.conversation.run.id,
+          timeoutMs: executionPolicy.timeoutMs,
           toolCall,
         }),
       ],
       toolCalls: [toolCall],
     };
   }
+
+  const simulation = readToolSimulation(
+    input.runtimeInput,
+    selectedTool.function.name,
+  );
+  const toolResults: NonNullable<WorkspaceRuntimeInvocationOutput["toolResults"]> =
+    [];
+  let successRecorded = false;
+
+  for (let attempt = 1; attempt <= executionPolicy.maxAttempts; attempt += 1) {
+    const startedAt = new Date().toISOString();
+    const shouldTimeout = simulation.alwaysTimeout;
+    const shouldFail =
+      !shouldTimeout &&
+      (simulation.alwaysFail || attempt <= simulation.failAttemptsBeforeSuccess);
+    const finishedAt = new Date().toISOString();
+    const metadata = buildToolExecutionAttemptMetadata({
+      failureReason: shouldTimeout
+        ? "timeout"
+        : shouldFail
+          ? "provider_error"
+          : null,
+      idempotencyKey,
+      maxAttempts: executionPolicy.maxAttempts,
+      timeoutMs: executionPolicy.timeoutMs,
+    });
+
+    if (shouldTimeout) {
+      toolResults.push({
+        toolCallId: toolCall.id,
+        toolName: selectedTool.function.name,
+        content: `Tool \`${selectedTool.function.name}\` timed out after ${executionPolicy.timeoutMs} ms on attempt ${attempt}.`,
+        attempt,
+        startedAt,
+        finishedAt,
+        latencyMs: executionPolicy.timeoutMs,
+        metadata,
+        isError: true,
+      });
+      continue;
+    }
+
+    if (shouldFail) {
+      toolResults.push({
+        toolCallId: toolCall.id,
+        toolName: selectedTool.function.name,
+        content: `Tool \`${selectedTool.function.name}\` failed on attempt ${attempt}. Retrying is allowed.`,
+        attempt,
+        startedAt,
+        finishedAt,
+        latencyMs: Math.max(1, executionPolicy.timeoutMs - 10),
+        metadata,
+        isError: true,
+      });
+      continue;
+    }
 
   const toolOutput = {
     ok: true,
@@ -316,26 +485,56 @@ function buildPlaceholderToolExecution(
     attributedGroupName: input.conversation.activeGroup.name,
     traceId: input.conversation.run.traceId,
     receivedArguments: argumentsValue,
-    summary: `Placeholder execution completed for ${selectedTool.function.name}.`,
+    summary:
+      attempt > 1
+        ? `Placeholder execution completed for ${selectedTool.function.name} after ${attempt} attempts.`
+        : `Placeholder execution completed for ${selectedTool.function.name}.`,
   };
+
+    toolResults.push({
+      toolCallId,
+      toolName: selectedTool.function.name,
+      content: [
+        `Tool \`${selectedTool.function.name}\` executed successfully.`,
+        "",
+        "```json",
+        JSON.stringify(toolOutput, null, 2),
+        "```",
+      ].join("\n"),
+      attempt,
+      startedAt,
+      finishedAt,
+      latencyMs: Math.max(1, executionPolicy.timeoutMs - 20),
+      metadata,
+      isError: false,
+    });
+    successRecorded = true;
+    break;
+  }
+
+  if (!successRecorded && toolResults.length === 0) {
+    toolResults.push({
+      toolCallId,
+      toolName: selectedTool.function.name,
+      content: `Tool \`${selectedTool.function.name}\` did not produce an execution result.`,
+      attempt: 1,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      latencyMs: executionPolicy.timeoutMs,
+      metadata: buildToolExecutionAttemptMetadata({
+        failureReason: "provider_error",
+        idempotencyKey,
+        maxAttempts: executionPolicy.maxAttempts,
+        timeoutMs: executionPolicy.timeoutMs,
+      }),
+      isError: true,
+    });
+  }
 
   return {
     approvalRequired: false,
     toolCalls: [toolCall],
-    toolResults: [
-      {
-        toolCallId,
-        toolName: selectedTool.function.name,
-        content: [
-          `Tool \`${selectedTool.function.name}\` executed successfully.`,
-          "",
-          "```json",
-          JSON.stringify(toolOutput, null, 2),
-          "```",
-        ].join("\n"),
-        isError: false,
-      },
-    ],
+    toolResults,
   };
 }
 

@@ -472,6 +472,7 @@ export type WorkspaceRunToolExecution = {
   finishedAt: string | null;
   latencyMs: number | null;
   request: ChatToolCall;
+  metadata?: Record<string, string>;
   result: WorkspaceRunToolExecutionResult | null;
 };
 

@@ -46,10 +46,17 @@ export type ToolFunctionDescriptor = {
   strict?: boolean;
 };
 
+export type ToolExecutionPolicy = {
+  timeoutMs?: number;
+  maxAttempts?: number;
+  idempotencyScope?: "conversation" | "run";
+};
+
 export type ChatToolDescriptor = {
   type: "function";
   function: ToolFunctionDescriptor;
   auth: ToolAuthRequirement;
+  execution?: ToolExecutionPolicy;
   enabled?: boolean;
   tags?: string[];
 };

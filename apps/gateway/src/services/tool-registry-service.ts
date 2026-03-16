@@ -106,6 +106,11 @@ const WORKSPACE_TOOL_CATALOG: WorkspaceToolCatalogEntry[] = [
       auth: {
         scope: "active_group",
       },
+      execution: {
+        timeoutMs: 150,
+        maxAttempts: 2,
+        idempotencyScope: "conversation",
+      },
       enabled: true,
       tags: ["search", "knowledge", "retrieval"],
     },
@@ -133,6 +138,11 @@ const WORKSPACE_TOOL_CATALOG: WorkspaceToolCatalogEntry[] = [
       },
       auth: {
         scope: "active_group",
+      },
+      execution: {
+        timeoutMs: 120,
+        maxAttempts: 1,
+        idempotencyScope: "run",
       },
       enabled: true,
       tags: ["files", "attachments"],
@@ -168,6 +178,11 @@ const WORKSPACE_TOOL_CATALOG: WorkspaceToolCatalogEntry[] = [
       auth: {
         scope: "active_group",
       },
+      execution: {
+        timeoutMs: 180,
+        maxAttempts: 2,
+        idempotencyScope: "run",
+      },
       enabled: true,
       tags: ["automation", "runbook"],
     },
@@ -196,6 +211,11 @@ const WORKSPACE_TOOL_CATALOG: WorkspaceToolCatalogEntry[] = [
       auth: {
         scope: "tenant_admin",
         requiresFreshMfa: true,
+      },
+      execution: {
+        timeoutMs: 180,
+        maxAttempts: 1,
+        idempotencyScope: "run",
       },
       enabled: true,
       tags: ["tenant", "usage", "admin"],
@@ -227,6 +247,11 @@ const WORKSPACE_TOOL_CATALOG: WorkspaceToolCatalogEntry[] = [
         requiresFreshMfa: true,
         requiresApproval: true,
         policyTag: "tenant_access_review",
+      },
+      execution: {
+        timeoutMs: 200,
+        maxAttempts: 1,
+        idempotencyScope: "conversation",
       },
       enabled: true,
       tags: ["tenant", "rbac", "admin"],
@@ -260,6 +285,11 @@ const WORKSPACE_TOOL_CATALOG: WorkspaceToolCatalogEntry[] = [
       },
       auth: {
         scope: "active_group",
+      },
+      execution: {
+        timeoutMs: 160,
+        maxAttempts: 2,
+        idempotencyScope: "conversation",
       },
       enabled: true,
       tags: ["security", "audit"],

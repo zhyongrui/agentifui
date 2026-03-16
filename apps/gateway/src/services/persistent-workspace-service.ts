@@ -823,28 +823,38 @@ function buildWorkspaceRunToolExecutionsFromLegacyOutputs(
     return [];
   }
 
-  return toolCalls.flatMap((toolCall, index) => {
-    const matchingResult = toolResults.find((entry) => {
+  return toolCalls.flatMap((toolCall) => {
+    const matchingResults = toolResults.filter((entry) => {
       if (typeof entry !== "object" || entry === null) {
         return false;
       }
 
       return (entry as Record<string, unknown>).toolCallId === toolCall.id;
-    }) as Record<string, unknown> | undefined;
+    }) as Record<string, unknown>[];
 
-    if (!matchingResult) {
+    if (matchingResults.length === 0) {
       return [];
     }
 
-    const recordedAt =
-      typeof matchingResult?.recordedAt === "string"
-        ? matchingResult.recordedAt
-        : fallbackRecordedAt;
-    const content =
-      typeof matchingResult?.content === "string" ? matchingResult.content : "";
+    return matchingResults.map((matchingResult, resultIndex) => {
+      const recordedAt =
+        typeof matchingResult?.recordedAt === "string"
+          ? matchingResult.recordedAt
+          : fallbackRecordedAt;
+      const content =
+        typeof matchingResult?.content === "string" ? matchingResult.content : "";
+      const metadata =
+        typeof matchingResult?.metadata === "object" &&
+        matchingResult.metadata !== null &&
+        !Array.isArray(matchingResult.metadata)
+          ? Object.fromEntries(
+              Object.entries(matchingResult.metadata as Record<string, unknown>).flatMap(
+                ([key, value]) => (typeof value === "string" ? [[key, value]] : []),
+              ),
+            )
+          : {};
 
-    return [
-      {
+      return {
         id:
           typeof matchingResult?.id === "string"
             ? matchingResult.id
@@ -854,7 +864,7 @@ function buildWorkspaceRunToolExecutionsFromLegacyOutputs(
           Number.isFinite(matchingResult.attempt) &&
           matchingResult.attempt > 0
             ? matchingResult.attempt
-            : index + 1,
+            : resultIndex + 1,
         status:
           typeof matchingResult?.isError === "boolean" && matchingResult.isError
             ? "failed"
@@ -872,6 +882,7 @@ function buildWorkspaceRunToolExecutionsFromLegacyOutputs(
             ? matchingResult.latencyMs
             : null,
         request: toolCall,
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         result:
           content.length > 0
             ? {
@@ -880,8 +891,8 @@ function buildWorkspaceRunToolExecutionsFromLegacyOutputs(
                 recordedAt,
               }
             : null,
-      },
-    ];
+      };
+    });
   });
 }
 
@@ -931,6 +942,16 @@ function toWorkspaceRunToolExecutions(
         latencyMs:
           typeof execution.latencyMs === "number" ? execution.latencyMs : null,
         request,
+        metadata:
+          typeof execution.metadata === "object" &&
+          execution.metadata !== null &&
+          !Array.isArray(execution.metadata)
+            ? Object.fromEntries(
+                Object.entries(execution.metadata as Record<string, unknown>).flatMap(
+                  ([key, value]) => (typeof value === "string" ? [[key, value]] : []),
+                ),
+              )
+            : undefined,
         result,
       },
     ];

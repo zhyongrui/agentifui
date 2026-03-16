@@ -377,6 +377,397 @@ describe("chat routes", () => {
     }
   });
 
+  it("retries tool executions and preserves attempt metadata when a later attempt succeeds", async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+          "x-active-group-id": "grp_research",
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          messages: [
+            {
+              role: "user",
+              content: "Look up the latest dormitory lights-out guidance.",
+            },
+          ],
+          inputs: {
+            toolSimulation: {
+              "workspace.search": {
+                failAttemptsBeforeSuccess: 1,
+              },
+            },
+          },
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "workspace.search",
+                description: "Searches indexed workspace knowledge.",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    query: {
+                      type: "string",
+                    },
+                    topK: {
+                      type: "integer",
+                      minimum: 1,
+                      maximum: 10,
+                    },
+                  },
+                  required: ["query"],
+                  additionalProperties: false,
+                },
+                strict: true,
+              },
+              auth: {
+                scope: "active_group",
+                requiresApproval: false,
+              },
+              execution: {
+                timeoutMs: 155,
+                maxAttempts: 3,
+                idempotencyScope: "conversation",
+              },
+              enabled: true,
+              tags: ["search", "knowledge"],
+            },
+          ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "workspace.search",
+            },
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const responseBody = response.json() as ChatCompletionResponse;
+      const runId = responseBody.metadata?.run_id;
+
+      if (!runId) {
+        throw new Error("expected run id in completion metadata");
+      }
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${runId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+
+      const runBody = (runResponse.json() as WorkspaceRunResponse).data;
+      const executions = runBody.toolExecutions.filter(
+        execution => execution.request.function.name === "workspace.search",
+      );
+
+      expect(executions).toHaveLength(2);
+      expect(executions).toEqual([
+        expect.objectContaining({
+          attempt: 1,
+          status: "failed",
+          metadata: expect.objectContaining({
+            failureReason: "provider_error",
+            idempotencyKey: expect.any(String),
+            maxAttempts: "3",
+            timeoutMs: "155",
+          }),
+          result: expect.objectContaining({
+            isError: true,
+          }),
+        }),
+        expect.objectContaining({
+          attempt: 2,
+          status: "succeeded",
+          metadata: expect.objectContaining({
+            idempotencyKey: expect.any(String),
+            maxAttempts: "3",
+            timeoutMs: "155",
+          }),
+          result: expect.objectContaining({
+            isError: false,
+          }),
+        }),
+      ]);
+      expect(
+        new Set(executions.map(execution => execution.metadata?.idempotencyKey)).size,
+      ).toBe(1);
+      expect(runBody.outputs).toMatchObject({
+        toolResults: [
+          expect.objectContaining({
+            attempt: 1,
+            isError: true,
+            metadata: expect.objectContaining({
+              failureReason: "provider_error",
+              maxAttempts: "3",
+              timeoutMs: "155",
+            }),
+          }),
+          expect.objectContaining({
+            attempt: 2,
+            isError: false,
+            metadata: expect.objectContaining({
+              maxAttempts: "3",
+              timeoutMs: "155",
+            }),
+          }),
+        ],
+      });
+
+      const toolAuditEvents = (await auditService.listEvents()).filter(
+        event =>
+          event.action === "workspace.tool_execution.failed" ||
+          event.action === "workspace.tool_execution.completed",
+      );
+
+      expect(toolAuditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.tool_execution.failed",
+            entityId: runId,
+            payload: expect.objectContaining({
+              attempt: 1,
+              metadata: expect.objectContaining({
+                failureReason: "provider_error",
+                maxAttempts: "3",
+                timeoutMs: "155",
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.tool_execution.completed",
+            entityId: runId,
+            payload: expect.objectContaining({
+              attempt: 2,
+              metadata: expect.objectContaining({
+                maxAttempts: "3",
+                timeoutMs: "155",
+              }),
+            }),
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("records timed out tool executions as failed attempts", async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+          "x-active-group-id": "grp_research",
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          messages: [
+            {
+              role: "user",
+              content: "Search for the latest dormitory lights-out policy.",
+            },
+          ],
+          inputs: {
+            toolSimulation: {
+              "workspace.search": {
+                alwaysTimeout: true,
+              },
+            },
+          },
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "workspace.search",
+                description: "Searches indexed workspace knowledge.",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    query: {
+                      type: "string",
+                    },
+                  },
+                  required: ["query"],
+                  additionalProperties: false,
+                },
+                strict: true,
+              },
+              auth: {
+                scope: "active_group",
+                requiresApproval: false,
+              },
+              execution: {
+                timeoutMs: 90,
+                maxAttempts: 2,
+                idempotencyScope: "run",
+              },
+              enabled: true,
+              tags: ["search"],
+            },
+          ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "workspace.search",
+            },
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const responseBody = response.json() as ChatCompletionResponse;
+      const runId = responseBody.metadata?.run_id;
+
+      if (!runId) {
+        throw new Error("expected run id in completion metadata");
+      }
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${runId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+
+      const runBody = (runResponse.json() as WorkspaceRunResponse).data;
+      const executions = runBody.toolExecutions.filter(
+        execution => execution.request.function.name === "workspace.search",
+      );
+
+      expect(executions).toHaveLength(2);
+      expect(executions.every(execution => execution.status === "failed")).toBe(
+        true,
+      );
+      expect(executions.map(execution => execution.attempt)).toEqual([1, 2]);
+      expect(executions.map(execution => execution.latencyMs)).toEqual([90, 90]);
+      expect(executions.map(execution => execution.metadata?.failureReason)).toEqual([
+        "timeout",
+        "timeout",
+      ]);
+      expect(
+        new Set(executions.map(execution => execution.metadata?.idempotencyKey)).size,
+      ).toBe(1);
+      expect(runBody.outputs).toMatchObject({
+        toolResults: [
+          expect.objectContaining({
+            attempt: 1,
+            isError: true,
+            metadata: expect.objectContaining({
+              failureReason: "timeout",
+              maxAttempts: "2",
+              timeoutMs: "90",
+            }),
+          }),
+          expect.objectContaining({
+            attempt: 2,
+            isError: true,
+            metadata: expect.objectContaining({
+              failureReason: "timeout",
+              maxAttempts: "2",
+              timeoutMs: "90",
+            }),
+          }),
+        ],
+      });
+
+      const toolAuditEvents = (await auditService.listEvents()).filter(
+        event => event.action === "workspace.tool_execution.failed",
+      );
+      const allAuditEvents = await auditService.listEvents();
+
+      expect(toolAuditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            entityId: runId,
+            payload: expect.objectContaining({
+              attempt: 1,
+              metadata: expect.objectContaining({
+                failureReason: "timeout",
+                maxAttempts: "2",
+                timeoutMs: "90",
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            entityId: runId,
+            payload: expect.objectContaining({
+              attempt: 2,
+              metadata: expect.objectContaining({
+                failureReason: "timeout",
+                maxAttempts: "2",
+                timeoutMs: "90",
+              }),
+            }),
+          }),
+        ]),
+      );
+      expect(
+        allAuditEvents.some(
+          event => event.action === "workspace.tool_execution.completed",
+        ),
+      ).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects invalid tool descriptors", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
@@ -424,6 +815,9 @@ describe("chat routes", () => {
               },
               auth: {
                 scope: "unsupported_scope",
+              },
+              execution: {
+                timeoutMs: 0,
               },
             },
           ],
@@ -515,7 +909,10 @@ describe("chat routes", () => {
                   metadata: expect.objectContaining({
                     kind: "tool_approval",
                     toolName: "tenant.access.review",
+                    idempotencyKey: expect.any(String),
+                    maxAttempts: "1",
                     policyTag: "tenant_access_review",
+                    timeoutMs: "200",
                   }),
                 }),
               ],

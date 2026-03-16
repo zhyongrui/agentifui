@@ -14,7 +14,10 @@ type ToolApprovalMetadata = {
   toolCallId: string;
   toolName: string;
   toolArguments: string;
+  idempotencyKey: string | null;
+  maxAttempts: number | null;
   policyTag: string | null;
+  timeoutMs: number | null;
 };
 
 type LegacyToolResultRecord = {
@@ -27,6 +30,7 @@ type LegacyToolResultRecord = {
   toolName: string;
   content: string;
   isError: boolean;
+  metadata?: Record<string, string>;
   recordedAt: string;
 };
 
@@ -56,7 +60,18 @@ export function readWorkspaceToolApprovalMetadata(
     toolCallId,
     toolName,
     toolArguments,
+    idempotencyKey: metadata.idempotencyKey?.trim() || null,
+    maxAttempts:
+      typeof metadata.maxAttempts === "string" &&
+      Number.isFinite(Number(metadata.maxAttempts))
+        ? Number(metadata.maxAttempts)
+        : null,
     policyTag: metadata.policyTag?.trim() || null,
+    timeoutMs:
+      typeof metadata.timeoutMs === "string" &&
+      Number.isFinite(Number(metadata.timeoutMs))
+        ? Number(metadata.timeoutMs)
+        : null,
   };
 }
 
@@ -151,6 +166,16 @@ function readExistingLegacyToolResults(outputs: Record<string, unknown>) {
         toolName: record.toolName,
         content: record.content,
         isError: Boolean(record.isError),
+        metadata:
+          typeof record.metadata === "object" &&
+          record.metadata !== null &&
+          !Array.isArray(record.metadata)
+            ? Object.fromEntries(
+                Object.entries(record.metadata as Record<string, unknown>).flatMap(
+                  ([key, value]) => (typeof value === "string" ? [[key, value]] : []),
+                ),
+              )
+            : undefined,
         recordedAt:
           typeof record.recordedAt === "string"
             ? record.recordedAt
@@ -165,8 +190,11 @@ function readExistingLegacyToolResults(outputs: Record<string, unknown>) {
 export function buildWorkspaceToolApprovalStep(input: {
   conversationId: string;
   createdAt: string;
+  idempotencyKey?: string | null;
+  maxAttempts?: number | null;
   policyTag?: string | null;
   runId: string;
+  timeoutMs?: number | null;
   toolCall: ChatToolCall;
 }): WorkspaceApprovalHitlStep {
   const expiresAt = new Date(
@@ -192,7 +220,20 @@ export function buildWorkspaceToolApprovalStep(input: {
       toolCallId: input.toolCall.id,
       toolName,
       toolArguments: input.toolCall.function.arguments,
+      ...(input.idempotencyKey?.trim()
+        ? { idempotencyKey: input.idempotencyKey.trim() }
+        : {}),
+      ...(typeof input.maxAttempts === "number" &&
+      Number.isFinite(input.maxAttempts) &&
+      input.maxAttempts > 0
+        ? { maxAttempts: String(Math.round(input.maxAttempts)) }
+        : {}),
       ...(input.policyTag?.trim() ? { policyTag: input.policyTag.trim() } : {}),
+      ...(typeof input.timeoutMs === "number" &&
+      Number.isFinite(input.timeoutMs) &&
+      input.timeoutMs > 0
+        ? { timeoutMs: String(Math.round(input.timeoutMs)) }
+        : {}),
     },
   };
 }
@@ -253,12 +294,30 @@ export function buildWorkspaceToolApprovalResolution(input: {
     toolName: metadata.toolName,
     content,
     isError: outcome.isError,
+    metadata: {
+      ...(metadata.idempotencyKey ? { idempotencyKey: metadata.idempotencyKey } : {}),
+      ...(metadata.maxAttempts !== null
+        ? { maxAttempts: String(metadata.maxAttempts) }
+        : {}),
+      ...(metadata.timeoutMs !== null
+        ? { timeoutMs: String(metadata.timeoutMs) }
+        : {}),
+    },
     recordedAt,
   };
   const nextToolExecutions: WorkspaceRunToolExecution[] = [
     ...readExistingToolResultsFromOutputs(input.outputs),
   ];
 
+  const toolExecutionMetadata = {
+    ...(metadata.idempotencyKey ? { idempotencyKey: metadata.idempotencyKey } : {}),
+    ...(metadata.maxAttempts !== null
+      ? { maxAttempts: String(metadata.maxAttempts) }
+      : {}),
+    ...(metadata.timeoutMs !== null
+      ? { timeoutMs: String(metadata.timeoutMs) }
+      : {}),
+  };
   const toolExecution: WorkspaceRunToolExecution = {
     id: `tool_exec_${randomUUID()}`,
     attempt: input.attempt,
@@ -267,6 +326,9 @@ export function buildWorkspaceToolApprovalResolution(input: {
     finishedAt: recordedAt,
     latencyMs: 0,
     request,
+    ...(Object.keys(toolExecutionMetadata).length > 0
+      ? { metadata: toolExecutionMetadata }
+      : {}),
     result: {
       content,
       isError: outcome.isError,
