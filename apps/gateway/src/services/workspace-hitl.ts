@@ -122,6 +122,11 @@ function isWorkspaceHitlStep(value: unknown): value is WorkspaceHitlStep {
     typeof record.updatedAt !== "string" ||
     !isNullableString(record.expiresAt ?? null) ||
     !(
+      record.metadata === undefined ||
+      record.metadata === null ||
+      isStringRecord(record.metadata)
+    ) ||
+    !(
       record.response === undefined ||
       record.response === null ||
       isWorkspaceHitlResponse(record.response)

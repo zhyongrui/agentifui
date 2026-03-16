@@ -2354,6 +2354,185 @@ describe("workspace routes", () => {
     }
   });
 
+  it("records transcript and tool execution details when approval-required tools are approved", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "admin@iflabx.com",
+      password: "Secure123",
+      displayName: "Tenant Admin",
+    });
+
+    const login = authService.login({
+      email: "admin@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected tenant admin login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_tenant_control",
+          activeGroupId: "grp_product",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include conversation id");
+      }
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_tenant_control",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Review the pending tenant access changes.",
+            },
+          ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "tenant.access.review",
+            },
+          },
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+      const completionBody = completion.json() as ChatCompletionResponse;
+      const completionRunId = completionBody.metadata?.run_id;
+
+      if (!completionRunId) {
+        throw new Error("expected completion payload to include run id");
+      }
+
+      const pendingActions = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/pending-actions`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(pendingActions.statusCode).toBe(200);
+
+      const pendingActionId = (
+        pendingActions.json() as WorkspacePendingActionsResponse
+      ).data.items[0]?.id;
+
+      if (!pendingActionId) {
+        throw new Error("expected a pending action id");
+      }
+
+      const respond = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/pending-actions/${pendingActionId}/respond`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          action: "approve",
+          note: "Approved for the maintenance window.",
+        },
+      });
+
+      expect(respond.statusCode).toBe(200);
+
+      const conversationResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversationResponse.statusCode).toBe(200);
+      expect(
+        (conversationResponse.json() as WorkspaceConversationResponse).data.messages,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: "tool",
+            toolName: "tenant.access.review",
+            content: expect.stringContaining("executed after approval"),
+            status: "completed",
+          }),
+          expect.objectContaining({
+            role: "assistant",
+            content: expect.stringContaining(
+              "Tenant Control completed tenant.access.review after approval.",
+            ),
+            status: "completed",
+          }),
+        ]),
+      );
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${completionRunId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data).toMatchObject({
+        toolExecutions: [
+          expect.objectContaining({
+            status: "succeeded",
+            request: expect.objectContaining({
+              function: expect.objectContaining({
+                name: "tenant.access.review",
+              }),
+            }),
+            result: expect.objectContaining({
+              isError: false,
+              content: expect.stringContaining("executed after approval"),
+            }),
+          }),
+        ],
+        outputs: expect.objectContaining({
+          pendingActions: [
+            expect.objectContaining({
+              id: pendingActionId,
+              status: "approved",
+            }),
+          ],
+          assistant: expect.objectContaining({
+            content: expect.stringContaining(
+              "Tenant Control completed tenant.access.review after approval.",
+            ),
+          }),
+        }),
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("records audit events when a pending action is cancelled", async () => {
     const authService = createTestAuthService();
     const auditService = createAuditService();

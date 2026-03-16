@@ -225,6 +225,8 @@ const WORKSPACE_TOOL_CATALOG: WorkspaceToolCatalogEntry[] = [
       auth: {
         scope: "tenant_admin",
         requiresFreshMfa: true,
+        requiresApproval: true,
+        policyTag: "tenant_access_review",
       },
       enabled: true,
       tags: ["tenant", "rbac", "admin"],

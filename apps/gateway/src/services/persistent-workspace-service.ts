@@ -73,6 +73,7 @@ import type {
 } from "./workspace-service.js";
 import type { WorkspaceFileStorage } from "./workspace-file-storage.js";
 import { parseWorkspaceRunFailure } from "./workspace-run-failure.js";
+import { buildWorkspaceToolApprovalResolution } from "./workspace-tool-approval.js";
 import {
   applyWorkspaceHitlStepResponse,
   expireWorkspaceHitlSteps,
@@ -822,7 +823,7 @@ function buildWorkspaceRunToolExecutionsFromLegacyOutputs(
     return [];
   }
 
-  return toolCalls.map((toolCall, index) => {
+  return toolCalls.flatMap((toolCall, index) => {
     const matchingResult = toolResults.find((entry) => {
       if (typeof entry !== "object" || entry === null) {
         return false;
@@ -831,6 +832,10 @@ function buildWorkspaceRunToolExecutionsFromLegacyOutputs(
       return (entry as Record<string, unknown>).toolCallId === toolCall.id;
     }) as Record<string, unknown> | undefined;
 
+    if (!matchingResult) {
+      return [];
+    }
+
     const recordedAt =
       typeof matchingResult?.recordedAt === "string"
         ? matchingResult.recordedAt
@@ -838,43 +843,45 @@ function buildWorkspaceRunToolExecutionsFromLegacyOutputs(
     const content =
       typeof matchingResult?.content === "string" ? matchingResult.content : "";
 
-    return {
-      id:
-        typeof matchingResult?.id === "string"
-          ? matchingResult.id
-          : `tool_exec_${randomUUID()}`,
-      attempt:
-        typeof matchingResult?.attempt === "number" &&
-        Number.isFinite(matchingResult.attempt) &&
-        matchingResult.attempt > 0
-          ? matchingResult.attempt
-          : index + 1,
-      status:
-        typeof matchingResult?.isError === "boolean" && matchingResult.isError
-          ? "failed"
-          : "succeeded",
-      startedAt:
-        typeof matchingResult?.startedAt === "string"
-          ? matchingResult.startedAt
-          : recordedAt,
-      finishedAt:
-        typeof matchingResult?.finishedAt === "string"
-          ? matchingResult.finishedAt
-          : recordedAt,
-      latencyMs:
-        typeof matchingResult?.latencyMs === "number"
-          ? matchingResult.latencyMs
-          : null,
-      request: toolCall,
-      result:
-        matchingResult && content.length > 0
-          ? {
-              content,
-              isError: Boolean(matchingResult.isError),
-              recordedAt,
-            }
-          : null,
-    };
+    return [
+      {
+        id:
+          typeof matchingResult?.id === "string"
+            ? matchingResult.id
+            : `tool_exec_${randomUUID()}`,
+        attempt:
+          typeof matchingResult?.attempt === "number" &&
+          Number.isFinite(matchingResult.attempt) &&
+          matchingResult.attempt > 0
+            ? matchingResult.attempt
+            : index + 1,
+        status:
+          typeof matchingResult?.isError === "boolean" && matchingResult.isError
+            ? "failed"
+            : "succeeded",
+        startedAt:
+          typeof matchingResult?.startedAt === "string"
+            ? matchingResult.startedAt
+            : recordedAt,
+        finishedAt:
+          typeof matchingResult?.finishedAt === "string"
+            ? matchingResult.finishedAt
+            : recordedAt,
+        latencyMs:
+          typeof matchingResult?.latencyMs === "number"
+            ? matchingResult.latencyMs
+            : null,
+        request: toolCall,
+        result:
+          content.length > 0
+            ? {
+                content,
+                isError: Boolean(matchingResult.isError),
+                recordedAt,
+              }
+            : null,
+      },
+    ];
   });
 }
 
@@ -2685,27 +2692,66 @@ async function respondToPendingActionForUser(
   const items = pendingActions.map((item, index) =>
     index === pendingActionIndex ? responseResult.item : item,
   );
+  const toolApprovalResolution = buildWorkspaceToolApprovalResolution({
+    appName: conversation.app.name,
+    attempt: run.toolExecutions.length + 1,
+    outputs: run.outputs,
+    step: responseResult.item,
+  });
+  const nextOutputs = toolApprovalResolution
+    ? {
+        ...toolApprovalResolution.nextOutputs,
+        pendingActions: items,
+      }
+    : {
+        ...run.outputs,
+        pendingActions: items,
+      };
+  const nextMessageHistory = toolApprovalResolution
+    ? [
+        ...conversation.messages,
+        toolApprovalResolution.toolMessage,
+        toolApprovalResolution.assistantMessage,
+      ]
+    : conversation.messages;
 
   await database.begin(async (transaction) => {
     const sql = transaction as unknown as DatabaseClient;
 
     await sql`
       update runs
-      set outputs = case
-        when outputs is null then jsonb_set('{}'::jsonb, '{pendingActions}', ${items}::jsonb, true)
-        when jsonb_typeof(outputs) = 'string' then jsonb_set((outputs #>> '{}')::jsonb, '{pendingActions}', ${items}::jsonb, true)
-        else jsonb_set(outputs, '{pendingActions}', ${items}::jsonb, true)
-      end
+      set outputs = ${nextOutputs}::jsonb
       where id = ${run.id}
         and conversation_id = ${conversation.id}
     `;
 
     await sql`
       update conversations
-      set updated_at = ${respondedAt}::timestamptz
+      set updated_at = ${respondedAt}::timestamptz,
+          inputs = jsonb_set(
+            coalesce(inputs, '{}'::jsonb),
+            '{messageHistory}',
+            ${nextMessageHistory}::jsonb,
+            true
+          )
       where id = ${conversation.id}
         and user_id = ${user.id}
     `;
+
+    if (toolApprovalResolution) {
+      await insertRunTimelineEvent(sql, {
+        tenantId: user.tenantId,
+        userId: user.id,
+        conversationId: conversation.id,
+        runId: run.id,
+        type: "output_recorded",
+        metadata: {
+          keys: ["pendingActions", "assistant", "toolExecutions", "toolResults"],
+          resolutionAction: responseResult.item.response?.action ?? null,
+          toolExecutionCount: toolApprovalResolution.nextToolExecutions.length,
+        },
+      });
+    }
   });
 
   return {

@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { resolveWorkspaceAppRuntimeId } from "./workspace-catalog-fixtures.js";
 import { buildPlaceholderHitlSteps } from "./workspace-hitl.js";
 import { resolveSafetySignals } from "./workspace-safety.js";
+import { buildWorkspaceToolApprovalStep } from "./workspace-tool-approval.js";
 
 export type WorkspaceRuntimeAdapterId =
   | "placeholder"
@@ -291,6 +292,22 @@ function buildPlaceholderToolExecution(
       arguments: JSON.stringify(argumentsValue),
     },
   };
+  if (selectedTool.auth.requiresApproval) {
+    return {
+      approvalRequired: true,
+      pendingActions: [
+        buildWorkspaceToolApprovalStep({
+          conversationId: input.conversation.id,
+          createdAt: new Date().toISOString(),
+          policyTag: selectedTool.auth.policyTag ?? null,
+          runId: input.conversation.run.id,
+          toolCall,
+        }),
+      ],
+      toolCalls: [toolCall],
+    };
+  }
+
   const toolOutput = {
     ok: true,
     tool: selectedTool.function.name,
@@ -303,6 +320,7 @@ function buildPlaceholderToolExecution(
   };
 
   return {
+    approvalRequired: false,
     toolCalls: [toolCall],
     toolResults: [
       {
@@ -452,6 +470,7 @@ function buildPlaceholderAssistantText(
   messages: ChatCompletionMessage[],
   attachments: WorkspaceConversationAttachment[],
   toolCalls: ChatToolCall[] = [],
+  approvalRequired = false,
 ) {
   const latestPrompt = [...messages]
     .reverse()
@@ -472,7 +491,9 @@ function buildPlaceholderAssistantText(
     `Request: ${requestSummary || "Continue the current workspace task."}`,
     attachmentSummary,
     toolCalls.length > 0
-      ? `Tools used: ${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}.`
+      ? approvalRequired
+        ? `Tool approval required: ${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}.`
+        : `Tools used: ${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}.`
       : null,
     `Context: attributed group ${conversation.activeGroup.name}, trace ${conversation.run.traceId}.`,
     "This is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
@@ -486,6 +507,7 @@ function buildStructuredAssistantText(
   latestPrompt: string,
   retrieval: KnowledgeRetrievalResult | null,
   toolCalls: ChatToolCall[] = [],
+  approvalRequired = false,
 ) {
   const requestSummary = latestPrompt || "Continue the current runbook task.";
   const retrievalSummary =
@@ -498,7 +520,9 @@ function buildStructuredAssistantText(
     `Request: ${requestSummary}`,
     retrievalSummary,
     toolCalls.length > 0
-      ? `Tools used: ${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}.`
+      ? approvalRequired
+        ? `Tool approval required: ${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}.`
+        : `Tools used: ${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}.`
       : null,
     `Context: attributed group ${conversation.activeGroup.name}, trace ${conversation.run.traceId}.`,
     "Plan:",
@@ -546,18 +570,21 @@ function createPlaceholderAdapter(input: {
       const latestPrompt = runtimeInput.latestPrompt;
       const toolExecution = buildPlaceholderToolExecution(runtimeInput);
       const toolCalls = toolExecution?.toolCalls ?? [];
+      const approvalRequired = toolExecution?.approvalRequired ?? false;
       const assistantText = input.structured
         ? buildStructuredAssistantText(
             runtimeInput.conversation,
             latestPrompt,
             runtimeInput.retrieval,
             toolCalls,
+            approvalRequired,
           )
         : buildPlaceholderAssistantText(
             runtimeInput.conversation,
             runtimeInput.messages,
             runtimeInput.attachments,
             toolCalls,
+            approvalRequired,
           );
       const createdAt = new Date().toISOString();
       const { citations, sourceBlocks } = buildAssistantSources({
@@ -572,13 +599,16 @@ function createPlaceholderAdapter(input: {
         runtimeInput: runtimeInput.runtimeInput,
       });
       const suggestedPrompts = buildSuggestedPrompts(latestPrompt);
-      const pendingActions = buildPlaceholderHitlSteps({
-        appId: runtimeInput.appId,
-        conversationId: runtimeInput.conversation.id,
-        createdAt,
-        latestPrompt,
-        runId: runtimeInput.conversation.run.id,
-      });
+      const pendingActions =
+        toolExecution?.pendingActions && toolExecution.pendingActions.length > 0
+          ? toolExecution.pendingActions
+          : buildPlaceholderHitlSteps({
+              appId: runtimeInput.appId,
+              conversationId: runtimeInput.conversation.id,
+              createdAt,
+              latestPrompt,
+              runId: runtimeInput.conversation.run.id,
+            });
 
       return {
         ok: true,

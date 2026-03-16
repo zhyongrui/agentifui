@@ -1031,27 +1031,31 @@ function buildToolExecutions(input: {
     Math.round(input.latencyMs / Math.max(input.toolCalls.length, 1)),
   );
 
-  return input.toolCalls.map((toolCall, index) => {
+  return input.toolCalls.flatMap((toolCall, index) => {
     const matchingResult =
       input.toolResults.find((toolResult) => toolResult.toolCallId === toolCall.id) ??
       null;
 
-    return {
-      id: `tool_exec_${randomUUID()}`,
-      attempt: index + 1,
-      status: matchingResult?.isError ? "failed" : "succeeded",
-      startedAt: input.recordedAt,
-      finishedAt: input.recordedAt,
-      latencyMs: perToolLatency,
-      request: toolCall,
-      result: matchingResult
-        ? {
-            content: matchingResult.content,
-            isError: Boolean(matchingResult.isError),
-            recordedAt: input.recordedAt,
-          }
-        : null,
-    };
+    if (!matchingResult) {
+      return [];
+    }
+
+    return [
+      {
+        id: `tool_exec_${randomUUID()}`,
+        attempt: index + 1,
+        status: matchingResult.isError ? "failed" : "succeeded",
+        startedAt: input.recordedAt,
+        finishedAt: input.recordedAt,
+        latencyMs: perToolLatency,
+        request: toolCall,
+        result: {
+          content: matchingResult.content,
+          isError: Boolean(matchingResult.isError),
+          recordedAt: input.recordedAt,
+        },
+      },
+    ];
   });
 }
 

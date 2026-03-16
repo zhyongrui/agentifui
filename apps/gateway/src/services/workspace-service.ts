@@ -51,6 +51,7 @@ import {
   buildWorkspaceRunFailure,
   parseWorkspaceRunFailure,
 } from './workspace-run-failure.js';
+import { buildWorkspaceToolApprovalResolution } from './workspace-tool-approval.js';
 import {
   applyWorkspaceHitlStepResponse,
   expireWorkspaceHitlSteps,
@@ -650,7 +651,7 @@ function buildToolExecutionsFromLegacyOutputs(
     return [];
   }
 
-  return toolCalls.map((toolCall, index) => {
+  return toolCalls.flatMap((toolCall, index) => {
     const matchingResult = toolResults.find((entry) => {
       if (typeof entry !== 'object' || entry === null) {
         return false;
@@ -659,6 +660,10 @@ function buildToolExecutionsFromLegacyOutputs(
       return (entry as Record<string, unknown>).toolCallId === toolCall.id;
     }) as Record<string, unknown> | undefined;
 
+    if (!matchingResult) {
+      return [];
+    }
+
     const recordedAt =
       typeof matchingResult?.recordedAt === 'string'
         ? matchingResult.recordedAt
@@ -666,43 +671,45 @@ function buildToolExecutionsFromLegacyOutputs(
     const content =
       typeof matchingResult?.content === 'string' ? matchingResult.content : '';
 
-    return {
-      id:
-        typeof matchingResult?.id === 'string'
-          ? matchingResult.id
-          : `tool_exec_${randomUUID()}`,
-      attempt:
-        typeof matchingResult?.attempt === 'number' &&
-        Number.isFinite(matchingResult.attempt) &&
-        matchingResult.attempt > 0
-          ? matchingResult.attempt
-          : index + 1,
-      status:
-        typeof matchingResult?.isError === 'boolean' && matchingResult.isError
-          ? 'failed'
-          : 'succeeded',
-      startedAt:
-        typeof matchingResult?.startedAt === 'string'
-          ? matchingResult.startedAt
-          : recordedAt,
-      finishedAt:
-        typeof matchingResult?.finishedAt === 'string'
-          ? matchingResult.finishedAt
-          : recordedAt,
-      latencyMs:
-        typeof matchingResult?.latencyMs === 'number'
-          ? matchingResult.latencyMs
-          : null,
-      request: toolCall,
-      result:
-        matchingResult && content.length > 0
-          ? {
-              content,
-              isError: Boolean(matchingResult.isError),
-              recordedAt,
-            }
-          : null,
-    } satisfies WorkspaceRunToolExecution;
+    return [
+      {
+        id:
+          typeof matchingResult?.id === 'string'
+            ? matchingResult.id
+            : `tool_exec_${randomUUID()}`,
+        attempt:
+          typeof matchingResult?.attempt === 'number' &&
+          Number.isFinite(matchingResult.attempt) &&
+          matchingResult.attempt > 0
+            ? matchingResult.attempt
+            : index + 1,
+        status:
+          typeof matchingResult?.isError === 'boolean' && matchingResult.isError
+            ? 'failed'
+            : 'succeeded',
+        startedAt:
+          typeof matchingResult?.startedAt === 'string'
+            ? matchingResult.startedAt
+            : recordedAt,
+        finishedAt:
+          typeof matchingResult?.finishedAt === 'string'
+            ? matchingResult.finishedAt
+            : recordedAt,
+        latencyMs:
+          typeof matchingResult?.latencyMs === 'number'
+            ? matchingResult.latencyMs
+            : null,
+        request: toolCall,
+        result:
+          content.length > 0
+            ? {
+                content,
+                isError: Boolean(matchingResult.isError),
+                recordedAt,
+              }
+            : null,
+      } satisfies WorkspaceRunToolExecution,
+    ];
   });
 }
 
@@ -2104,12 +2111,42 @@ export function createWorkspaceService(options: {
       const items = pendingActions.map((item, index) =>
         index === pendingActionIndex ? responseResult.item : item
       );
+      const toolApprovalResolution = buildWorkspaceToolApprovalResolution({
+        appName: conversation.app.name,
+        attempt: run.toolExecutions.length + 1,
+        outputs: run.outputs,
+        step: responseResult.item,
+      });
+      const nextMessages = toolApprovalResolution
+        ? [...conversation.messages, toolApprovalResolution.toolMessage, toolApprovalResolution.assistantMessage]
+        : conversation.messages;
+      const nextOutputs = toolApprovalResolution
+        ? {
+            ...toolApprovalResolution.nextOutputs,
+            pendingActions: items,
+          }
+        : {
+            ...run.outputs,
+            pendingActions: items,
+          };
 
-      run.outputs = {
-        ...run.outputs,
-        pendingActions: items,
-      };
+      run.outputs = nextOutputs;
+      run.toolExecutions = toolApprovalResolution?.nextToolExecutions ?? run.toolExecutions;
+      conversation.messages = nextMessages;
       conversation.updatedAt = respondedAt;
+
+      if (toolApprovalResolution) {
+        run.timeline.push({
+          id: `timeline_${randomUUID()}`,
+          type: 'output_recorded',
+          createdAt: respondedAt,
+          metadata: {
+            keys: ['pendingActions', 'assistant', 'toolExecutions', 'toolResults'],
+            resolutionAction: responseResult.item.response?.action ?? null,
+            toolExecutionCount: run.toolExecutions.length,
+          },
+        });
+      }
 
       return {
         ok: true,

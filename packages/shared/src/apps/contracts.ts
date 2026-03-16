@@ -355,6 +355,7 @@ type WorkspaceHitlStepBase = {
   createdAt: string;
   updatedAt: string;
   expiresAt: string | null;
+  metadata?: Record<string, string>;
   response?: WorkspaceHitlStepResponse | null;
 };
 

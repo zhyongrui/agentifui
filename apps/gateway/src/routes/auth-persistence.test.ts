@@ -3300,6 +3300,207 @@ describe.sequential('persistent auth runtime', () => {
   );
 
   it(
+    'persists approval-required tool responses across app restarts',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Tenant Admin',
+          },
+        });
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'admin@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const sessionToken = (login.json().data as { sessionToken: string }).sessionToken;
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${sessionToken}`,
+          },
+          payload: {
+            appId: 'app_tenant_control',
+            activeGroupId: 'grp_product',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+        const conversationId = launchBody.data.conversationId;
+
+        if (!conversationId) {
+          throw new Error('expected launch payload to include conversation id');
+        }
+
+        const completion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${sessionToken}`,
+          },
+          payload: {
+            app_id: 'app_tenant_control',
+            conversation_id: conversationId,
+            messages: [
+              {
+                role: 'user',
+                content: 'Review the pending tenant access changes.',
+              },
+            ],
+            tool_choice: {
+              type: 'function',
+              function: {
+                name: 'tenant.access.review',
+              },
+            },
+          },
+        });
+
+        expect(completion.statusCode).toBe(200);
+
+        const completionBody = completion.json() as ChatCompletionResponse;
+        const runId = completionBody.metadata?.run_id;
+
+        if (!runId) {
+          throw new Error('expected completion payload to include run id');
+        }
+
+        const pendingActions = await app.inject({
+          method: 'GET',
+          url: `/workspace/conversations/${conversationId}/pending-actions`,
+          headers: {
+            authorization: `Bearer ${sessionToken}`,
+          },
+        });
+
+        expect(pendingActions.statusCode).toBe(200);
+
+        const stepId = (
+          pendingActions.json() as WorkspacePendingActionsResponse
+        ).data.items[0]?.id;
+
+        if (!stepId) {
+          throw new Error('expected a pending action id');
+        }
+
+        const response = await app.inject({
+          method: 'POST',
+          url: `/workspace/conversations/${conversationId}/pending-actions/${stepId}/respond`,
+          headers: {
+            authorization: `Bearer ${sessionToken}`,
+          },
+          payload: {
+            action: 'approve',
+            note: 'Approved during the change window.',
+          },
+        });
+
+        expect(response.statusCode).toBe(200);
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+
+        try {
+          const conversationResponse = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/conversations/${conversationId}`,
+            headers: {
+              authorization: `Bearer ${sessionToken}`,
+            },
+          });
+
+          expect(conversationResponse.statusCode).toBe(200);
+          expect(
+            (conversationResponse.json() as WorkspaceConversationResponse).data.messages
+          ).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                role: 'tool',
+                toolName: 'tenant.access.review',
+                content: expect.stringContaining('executed after approval'),
+              }),
+              expect.objectContaining({
+                role: 'assistant',
+                content: expect.stringContaining(
+                  'Tenant Control completed tenant.access.review after approval.'
+                ),
+              }),
+            ])
+          );
+
+          const runResponse = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/runs/${runId}`,
+            headers: {
+              authorization: `Bearer ${sessionToken}`,
+            },
+          });
+
+          expect(runResponse.statusCode).toBe(200);
+          expect((runResponse.json() as WorkspaceRunResponse).data).toMatchObject({
+            toolExecutions: [
+              expect.objectContaining({
+                status: 'succeeded',
+                request: expect.objectContaining({
+                  function: expect.objectContaining({
+                    name: 'tenant.access.review',
+                  }),
+                }),
+                result: expect.objectContaining({
+                  isError: false,
+                  content: expect.stringContaining('executed after approval'),
+                }),
+              }),
+            ],
+            outputs: expect.objectContaining({
+              pendingActions: [
+                expect.objectContaining({
+                  id: stepId,
+                  status: 'approved',
+                }),
+              ],
+              assistant: expect.objectContaining({
+                content: expect.stringContaining(
+                  'Tenant Control completed tenant.access.review after approval.'
+                ),
+              }),
+            }),
+          });
+        } finally {
+          await restartedApp.close();
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
     'expires pending actions on read across app restarts and records audit',
     async () => {
       await resetPersistentTestDatabase();

@@ -431,6 +431,150 @@ describe("chat routes", () => {
     }
   });
 
+  it("returns approval-required tool calls as pending actions without recording executions yet", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "admin@iflabx.com",
+      password: "Secure123",
+      displayName: "Tenant Admin",
+    });
+
+    const login = authService.login({
+      email: "admin@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected tenant admin login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+          "x-active-group-id": "grp_product",
+        },
+        payload: {
+          app_id: "app_tenant_control",
+          messages: [
+            {
+              role: "user",
+              content: "Review the pending tenant access changes.",
+            },
+          ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "tenant.access.review",
+            },
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const responseBody = response.json() as ChatCompletionResponse;
+      expect(responseBody).toMatchObject({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: expect.stringContaining("Tool approval required"),
+              tool_calls: [
+                expect.objectContaining({
+                  function: expect.objectContaining({
+                    name: "tenant.access.review",
+                  }),
+                }),
+              ],
+              pending_actions: [
+                expect.objectContaining({
+                  kind: "approval",
+                  status: "pending",
+                  metadata: expect.objectContaining({
+                    kind: "tool_approval",
+                    toolName: "tenant.access.review",
+                    policyTag: "tenant_access_review",
+                  }),
+                }),
+              ],
+            },
+          },
+        ],
+      });
+
+      const runId = responseBody.metadata?.run_id;
+      if (!runId) {
+        throw new Error("expected run id in response metadata");
+      }
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${runId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data).toMatchObject({
+        toolExecutions: [],
+        outputs: expect.objectContaining({
+          toolCalls: [
+            expect.objectContaining({
+              function: expect.objectContaining({
+                name: "tenant.access.review",
+              }),
+            }),
+          ],
+          pendingActions: [
+            expect.objectContaining({
+              status: "pending",
+            }),
+          ],
+        }),
+      });
+
+      const conversationResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${responseBody.conversation_id}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversationResponse.statusCode).toBe(200);
+      expect(
+        (conversationResponse.json() as WorkspaceConversationResponse).data.messages,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: "assistant",
+            toolCalls: [
+              expect.objectContaining({
+                function: expect.objectContaining({
+                  name: "tenant.access.review",
+                }),
+              }),
+            ],
+          }),
+          expect.objectContaining({
+            role: "assistant",
+            content: expect.stringContaining("Tool approval required"),
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects invalid function tool selectors", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);

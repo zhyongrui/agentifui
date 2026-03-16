@@ -1306,17 +1306,11 @@ export default function ConversationPage() {
       setPendingActionDrafts((currentDrafts) =>
         buildPendingActionDraftValues(result.data.items, currentDrafts),
       );
-      setSelectedRun((currentRun) =>
-        currentRun && currentRun.id === result.data.runId
-          ? {
-              ...currentRun,
-              outputs: {
-                ...currentRun.outputs,
-                pendingActions: result.data.items,
-              },
-            }
-          : currentRun,
-      );
+      await loadConversation(session.sessionToken, {
+        preferredRunId: result.data.runId,
+        syncMessages: true,
+        withSpinner: false,
+      });
     } catch {
       setPendingActionError(
         "Saving the pending action response failed. Please retry.",
