@@ -126,7 +126,7 @@ Execution status:
 | completed | `P2-E2` | perf seed/smoke、JSON artifact、预算门槛和 release gate 已闭环 |
 | completed | `P2-E3` | tenant usage analytics、per-app/quota/export、tests 和 browser QA 已闭环 |
 | completed | `P2-E4` | backup/export 脚本、restore sanity 校验、checksum 和 post-restore HTTP smoke 已闭环 |
-| active    | `P3-A`  | 进行中，shared ingestion boundary、chunking、retrieval query abstraction 已完成，下一项是 citation/source block backfeed |
+| active    | `P3-A`  | 进行中，retrieval 已回流到 citation/source blocks，下一项是 indexed source access control |
 
 ## 5. First Batch Definition
 
@@ -170,7 +170,7 @@ Current batch status:
 - `P2-D3` complete
 - `P2-D4` complete
 - `P2-E3` complete
-- the active follow-on item is `P3-A-06`
+- the active follow-on item is `P3-A-08`
 
 ## 6. Detailed Execution Notes
 
@@ -697,7 +697,7 @@ Legend:
 - [x] `P3-A-03` Choose and implement a chunking strategy for text-heavy sources
 - [x] `P3-A-04` Add metadata normalization for title, URL, owner, labels, and updated timestamp
 - [x] `P3-A-05` Add a retrieval query abstraction usable by runtime adapters
-- [ ] `P3-A-06` Connect retrieval results to the citation/source block model
+- [x] `P3-A-06` Connect retrieval results to the citation/source block model
 - [x] `P3-A-07` Add admin visibility into indexing progress and failure reasons
 - [ ] `P3-A-08` Add tenant/group access controls for indexed knowledge sources
 - [ ] `P3-A-09` Add unit and persistence coverage for ingestion state transitions

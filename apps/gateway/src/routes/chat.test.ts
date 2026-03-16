@@ -477,6 +477,10 @@ describe("chat routes", () => {
                   kind: "workspace_context",
                   title: "Policy Watch workspace context",
                 }),
+                expect.objectContaining({
+                  kind: "knowledge",
+                  title: "Policy Watch handbook",
+                }),
               ]),
               suggested_prompts: expect.arrayContaining([
                 expect.stringContaining("Summarize the key takeaways about"),
@@ -534,6 +538,9 @@ describe("chat routes", () => {
                 label: "S1",
                 title: "Policy Watch workspace context",
               }),
+              expect.objectContaining({
+                title: "Policy Watch handbook",
+              }),
             ]),
             status: "completed",
             suggestedPrompts: expect.arrayContaining([
@@ -572,6 +579,14 @@ describe("chat routes", () => {
           ]),
         },
       });
+      expect((runResponse.json() as WorkspaceRunResponse).data.sourceBlocks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "knowledge",
+            title: "Policy Watch handbook",
+          }),
+        ]),
+      );
     } finally {
       await app.close();
     }

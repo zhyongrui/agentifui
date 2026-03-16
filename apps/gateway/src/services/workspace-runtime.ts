@@ -185,6 +185,7 @@ function buildAssistantSources(input: {
   attachments: WorkspaceConversationAttachment[];
   conversation: WorkspaceConversation;
   latestPrompt: string;
+  retrieval: KnowledgeRetrievalResult | null;
 }) {
   const sourceBlocks: WorkspaceSourceBlock[] = [
     {
@@ -223,6 +224,24 @@ function buildAssistantSources(input: {
         attachmentId: attachment.id,
         contentType: attachment.contentType,
         sizeBytes: attachment.sizeBytes.toString(),
+      },
+    })),
+    ...(input.retrieval?.matches ?? []).map(match => ({
+      id: `source_${randomUUID()}`,
+      kind: "knowledge" as const,
+      title: match.title,
+      href: match.sourceUri,
+      snippet: match.preview,
+      metadata: {
+        sourceId: match.sourceId,
+        chunkId: match.chunkId,
+        scope: match.scope,
+        score: match.score.toString(),
+        ...(match.headingPath.length > 0
+          ? {
+              headingPath: match.headingPath.join(" / "),
+            }
+          : {}),
       },
     })),
   ];
@@ -345,6 +364,7 @@ function createPlaceholderAdapter(input: {
         attachments: runtimeInput.attachments,
         conversation: runtimeInput.conversation,
         latestPrompt,
+        retrieval: runtimeInput.retrieval,
       });
       const safetySignals = resolveSafetySignals({
         latestPrompt,

@@ -130,6 +130,10 @@ describe("workspace runtime service", () => {
         expect.objectContaining({
           kind: "workspace_context",
         }),
+        expect.objectContaining({
+          kind: "knowledge",
+          title: "Runbook policy",
+        }),
       ]),
     });
   });

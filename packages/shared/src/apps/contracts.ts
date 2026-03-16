@@ -245,6 +245,7 @@ export type WorkspaceSourceBlockKind =
   | "workspace_context"
   | "app_reference"
   | "attachment"
+  | "knowledge"
   | "web";
 
 export type WorkspaceSourceBlock = {
