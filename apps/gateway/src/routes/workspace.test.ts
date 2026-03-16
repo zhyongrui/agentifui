@@ -2,6 +2,7 @@ import type {
   WorkspaceArtifactResponse,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceCommentCreateResponse,
   WorkspaceConversationListResponse,
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationPresenceResponse,
@@ -1206,6 +1207,245 @@ describe("workspace routes", () => {
               conversationId,
               rating: "positive",
             }),
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("creates workspace comment threads for messages, runs and artifacts", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "comments@iflabx.com",
+      password: "Secure123",
+      displayName: "Comments Reviewer",
+    });
+
+    const login = authService.login({
+      email: "comments@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch to return a conversation id");
+      }
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Summarize the latest policy changes.",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const conversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(conversation.statusCode).toBe(200);
+
+      const conversationBody = conversation.json() as WorkspaceConversationResponse;
+      const assistantMessage = [...conversationBody.data.messages]
+        .reverse()
+        .find((message) => message.role === "assistant");
+
+      if (!assistantMessage) {
+        throw new Error("expected assistant message to exist");
+      }
+
+      const runs = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}/runs`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runs.statusCode).toBe(200);
+
+      const latestRunId = (runs.json() as WorkspaceConversationRunsResponse).data.runs[0]?.id;
+
+      if (!latestRunId) {
+        throw new Error("expected latest run to exist");
+      }
+
+      const run = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${latestRunId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(run.statusCode).toBe(200);
+
+      const artifactId = (run.json() as WorkspaceRunResponse).data.artifacts[0]?.id;
+
+      if (!artifactId) {
+        throw new Error("expected generated artifact to exist");
+      }
+
+      const messageComment = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/comments`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          targetType: "message",
+          targetId: assistantMessage.id,
+          content: "Please tighten the summary before sharing.",
+        },
+      });
+
+      expect(messageComment.statusCode).toBe(200);
+      expect(messageComment.json()).toMatchObject({
+        ok: true,
+        data: {
+          conversationId,
+          targetType: "message",
+          targetId: assistantMessage.id,
+          comment: expect.objectContaining({
+            content: "Please tighten the summary before sharing.",
+          }),
+          thread: [
+            expect.objectContaining({
+              content: "Please tighten the summary before sharing.",
+            }),
+          ],
+        },
+      } satisfies WorkspaceCommentCreateResponse);
+
+      const runComment = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/comments`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          targetType: "run",
+          targetId: latestRunId,
+          content: "This run is ready for operator review.",
+        },
+      });
+
+      expect(runComment.statusCode).toBe(200);
+
+      const artifactComment = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/comments`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          targetType: "artifact",
+          targetId: artifactId,
+          content: "Use this artifact in the weekly digest.",
+        },
+      });
+
+      expect(artifactComment.statusCode).toBe(200);
+
+      const refreshedConversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(refreshedConversation.statusCode).toBe(200);
+      expect(
+        (refreshedConversation.json() as WorkspaceConversationResponse).data.messages,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: assistantMessage.id,
+            comments: [
+              expect.objectContaining({
+                content: "Please tighten the summary before sharing.",
+              }),
+            ],
+          }),
+        ]),
+      );
+
+      const refreshedRun = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${latestRunId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(refreshedRun.statusCode).toBe(200);
+      expect((refreshedRun.json() as WorkspaceRunResponse).data.comments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            content: "This run is ready for operator review.",
+          }),
+        ]),
+      );
+
+      const refreshedArtifact = await app.inject({
+        method: "GET",
+        url: `/workspace/artifacts/${artifactId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(refreshedArtifact.statusCode).toBe(200);
+      expect(
+        (refreshedArtifact.json() as WorkspaceArtifactResponse).data.comments,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            content: "Use this artifact in the weekly digest.",
           }),
         ]),
       );

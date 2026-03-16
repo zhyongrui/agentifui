@@ -39,6 +39,7 @@ import { useI18n } from "../../../../components/i18n-provider";
 import { MainSectionNav } from "../../../../components/main-section-nav";
 import { ChatMarkdown } from "../../../../components/chat-markdown";
 import { ConversationSharePanel } from "../../../../components/conversation-share-panel";
+import { WorkspaceCommentThread } from "../../../../components/workspace-comments";
 import { WorkspaceArtifactLinkList } from "../../../../components/workspace-artifacts";
 import {
   WorkspaceRuntimeDegradedBanner,
@@ -57,6 +58,7 @@ import {
 } from "../../../../components/workspace-tool-summary";
 import {
   fetchWorkspaceCatalog,
+  createWorkspaceComment,
   fetchWorkspaceConversation,
   fetchWorkspaceConversationPresence,
   fetchWorkspacePendingActions,
@@ -109,6 +111,10 @@ function toGatewayFileReferences(
     file_id: attachment.id,
     transfer_method: "local_file" as const,
   }));
+}
+
+function buildCommentTargetKey(targetType: "artifact" | "message" | "run", targetId: string) {
+  return `${targetType}:${targetId}`;
 }
 
 function isGatewayErrorResponse(
@@ -437,6 +443,12 @@ export default function ConversationPage() {
   const [conversationActionError, setConversationActionError] = useState<
     string | null
   >(null);
+  const [commentErrorByTarget, setCommentErrorByTarget] = useState<
+    Record<string, string>
+  >({});
+  const [activeCommentTarget, setActiveCommentTarget] = useState<string | null>(
+    null,
+  );
   const [activeConversationAction, setActiveConversationAction] = useState<
     "archive" | "delete" | "pin" | "rename" | "restore" | "unpin" | null
   >(null);
@@ -514,6 +526,13 @@ export default function ConversationPage() {
           selectRun: "请选择一条运行。",
           selectRunLead: "第一次 completion 后会自动加载最新运行。",
           chatHistory: "对话历史",
+          comments: "评论线程",
+          messageComments: "消息评论",
+          runComments: "运行评论",
+          addComment: "添加评论",
+          addingComment: "提交中...",
+          commentInput: "评论内容",
+          noComments: "还没有评论，先留下一条上下文备注。",
         }
       : {
           checking: "Checking your session...",
@@ -577,6 +596,13 @@ export default function ConversationPage() {
           selectRun: "Select a run.",
           selectRunLead: "The latest run will be loaded automatically after the first completion.",
           chatHistory: "Chat history",
+          comments: "Comment thread",
+          messageComments: "Message comments",
+          runComments: "Run comments",
+          addComment: "Add comment",
+          addingComment: "Saving...",
+          commentInput: "Comment",
+          noComments: "No comments yet.",
         };
 
   async function refreshGatewayRuntimeHealth() {
@@ -1695,6 +1721,93 @@ export default function ConversationPage() {
     }
   }
 
+  async function handleCreateComment(
+    targetType: "message" | "run",
+    targetId: string,
+    content: string,
+  ) {
+    if (!session || !conversation) {
+      return;
+    }
+
+    const targetKey = buildCommentTargetKey(targetType, targetId);
+    setActiveCommentTarget(targetKey);
+    setCommentErrorByTarget((current) => {
+      const next = { ...current };
+      delete next[targetKey];
+      return next;
+    });
+
+    try {
+      const result = await createWorkspaceComment(
+        session.sessionToken,
+        conversation.id,
+        {
+          targetType,
+          targetId,
+          content,
+        },
+      );
+
+      if (!result.ok) {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+          clearAuthSession(window.sessionStorage);
+          router.replace("/login");
+          return;
+        }
+
+        setCommentErrorByTarget((current) => ({
+          ...current,
+          [targetKey]: result.error.message,
+        }));
+        return;
+      }
+
+      if (targetType === "message") {
+        setMessages((currentMessages) =>
+          currentMessages.map((message) =>
+            message.id === targetId
+              ? { ...message, comments: result.data.thread }
+              : message,
+          ),
+        );
+      }
+
+      setConversation((currentConversation) =>
+        !currentConversation
+          ? currentConversation
+          : {
+              ...currentConversation,
+              messages: currentConversation.messages.map((message) =>
+                targetType === "message" && message.id === targetId
+                  ? { ...message, comments: result.data.thread }
+                  : message,
+              ),
+            },
+      );
+
+      if (targetType === "run") {
+        setSelectedRun((currentRun) =>
+          currentRun && currentRun.id === targetId
+            ? { ...currentRun, comments: result.data.thread }
+            : currentRun,
+        );
+      }
+    } catch {
+      setCommentErrorByTarget((current) => ({
+        ...current,
+        [targetKey]:
+          locale === "zh-CN"
+            ? "评论提交失败，请稍后重试。"
+            : "Comment submission failed. Please retry.",
+      }));
+    } finally {
+      setActiveCommentTarget((currentTarget) =>
+        currentTarget === targetKey ? null : currentTarget,
+      );
+    }
+  }
+
   if (isLoading) {
     return <p className="lead">{copy.checking}</p>;
   }
@@ -2373,6 +2486,31 @@ export default function ConversationPage() {
                     />
                   </div>
                 ) : null}
+                <WorkspaceCommentThread
+                  title={copy.messageComments}
+                  comments={message.comments ?? []}
+                  locale={locale}
+                  emptyText={copy.noComments}
+                  textareaLabel={copy.commentInput}
+                  submitLabel={copy.addComment}
+                  submittingLabel={copy.addingComment}
+                  isSubmitting={
+                    activeCommentTarget ===
+                    buildCommentTargetKey("message", message.id)
+                  }
+                  submitError={
+                    commentErrorByTarget[
+                      buildCommentTargetKey("message", message.id)
+                    ] ?? null
+                  }
+                  onSubmit={
+                    isConversationReadOnly
+                      ? undefined
+                      : async (content) => {
+                          await handleCreateComment("message", message.id, content);
+                        }
+                  }
+                />
               </article>
             ))}
           </div>
@@ -2787,6 +2925,31 @@ export default function ConversationPage() {
                       />
                     </article>
                   ) : null}
+                  <WorkspaceCommentThread
+                    title={copy.runComments}
+                    comments={selectedRun.comments}
+                    locale={locale}
+                    emptyText={copy.noComments}
+                    textareaLabel={copy.commentInput}
+                    submitLabel={copy.addComment}
+                    submittingLabel={copy.addingComment}
+                    isSubmitting={
+                      activeCommentTarget ===
+                      buildCommentTargetKey("run", selectedRun.id)
+                    }
+                    submitError={
+                      commentErrorByTarget[
+                        buildCommentTargetKey("run", selectedRun.id)
+                      ] ?? null
+                    }
+                    onSubmit={
+                      isConversationReadOnly
+                        ? undefined
+                        : async (content) => {
+                            await handleCreateComment("run", selectedRun.id, content);
+                          }
+                    }
+                  />
                   <article className="chat-bubble assistant">
                     <div className="chat-bubble-meta">
                       <span className="chat-bubble-label">

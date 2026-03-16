@@ -141,8 +141,9 @@ Execution status:
 | completed | `P3-C-01` | conversation presence/session 合同、owner route、service 和 client 已落地                              |
 | completed | `P3-C-02` | `/chat/[conversationId]` 已加 live refresh / polling、presence heartbeat 和 last-sync surfacing       |
 | completed | `P3-C-03` | shared conversation presence route、viewer chips 和 shared-surface heartbeat 已闭环                    |
+| completed | `P3-C-04` | conversation-scoped comment threads 已接到 message / run / artifact 三类目标                          |
 | completed | `P3-C-09` | multi-user collaboration browser coverage 已补齐并适配默认中文 UI                                      |
-| active    | `P3-C-04` | 下一项，补 runs / artifacts / messages 挂载评论线程                                                     |
+| active    | `P3-C-08` | 下一项，补 collaborative edits / comment actions 的 audit coverage                                     |
 
 ## 5. First Batch Definition
 
@@ -192,7 +193,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-C-04`
+- the active follow-on item is `P3-C-08`
 
 ## 6. Detailed Execution Notes
 
@@ -759,7 +760,7 @@ Legend:
 - [x] `P3-C-01` Define a presence/session model for multiple viewers on the same conversation
 - [x] `P3-C-02` Add live refresh or polling for new messages and run status changes
 - [x] `P3-C-03` Add collaborator identity chips or cursors on shared conversation surfaces
-- [ ] `P3-C-04` Add comment or note threads attached to runs, artifacts, or messages
+- [x] `P3-C-04` Add comment or note threads attached to runs, artifacts, or messages
 - [ ] `P3-C-05` Add mention/notification primitives for shared work review
 - [ ] `P3-C-06` Add fine-grained permission modes for commenter vs editor vs owner
 - [ ] `P3-C-07` Add conflict handling for concurrent conversation metadata edits

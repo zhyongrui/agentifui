@@ -215,6 +215,7 @@ export type WorkspaceArtifactSummary = {
   summary: string | null;
   mimeType: string | null;
   sizeBytes: number | null;
+  comments?: WorkspaceComment[];
 };
 
 type WorkspaceArtifactBase = WorkspaceArtifactSummary;
@@ -295,6 +296,20 @@ export type WorkspaceConversationMessageFeedback = {
   updatedAt: string;
 };
 
+export type WorkspaceCommentTargetType = "message" | "run" | "artifact";
+
+export type WorkspaceComment = {
+  id: string;
+  conversationId: string;
+  targetType: WorkspaceCommentTargetType;
+  targetId: string;
+  content: string;
+  authorUserId: string;
+  authorDisplayName: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type WorkspaceConversationMessageRole = "user" | "assistant" | "tool";
 
 export type WorkspaceConversationMessage = {
@@ -308,6 +323,7 @@ export type WorkspaceConversationMessage = {
   citations?: WorkspaceCitation[];
   safetySignals?: WorkspaceSafetySignal[];
   feedback?: WorkspaceConversationMessageFeedback | null;
+  comments?: WorkspaceComment[];
   suggestedPrompts?: string[];
   toolCallId?: string;
   toolName?: string;
@@ -500,6 +516,7 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   runtime: WorkspaceRunRuntime | null;
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  comments: WorkspaceComment[];
   toolExecutions: WorkspaceRunToolExecution[];
   artifacts: WorkspaceArtifact[];
   citations: WorkspaceCitation[];
@@ -551,6 +568,23 @@ export type WorkspaceConversation = {
   activeGroup: WorkspaceGroup;
   messages: WorkspaceConversationMessage[];
   run: WorkspaceRunSummary;
+};
+
+export type WorkspaceCommentCreateRequest = {
+  targetType: WorkspaceCommentTargetType;
+  targetId: string;
+  content: string;
+};
+
+export type WorkspaceCommentCreateResponse = {
+  ok: true;
+  data: {
+    conversationId: string;
+    targetType: WorkspaceCommentTargetType;
+    targetId: string;
+    comment: WorkspaceComment;
+    thread: WorkspaceComment[];
+  };
 };
 
 export type WorkspaceConversationListItem = {

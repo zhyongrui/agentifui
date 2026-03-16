@@ -8,6 +8,8 @@ import type {
   WorkspaceConversationListFeedbackFilter,
   WorkspaceConversationListResponse,
   WorkspaceConversationListStatusFilter,
+  WorkspaceCommentCreateRequest,
+  WorkspaceCommentCreateResponse,
   WorkspaceConversationMessageFeedbackRequest,
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationPresenceResponse,
@@ -177,6 +179,21 @@ export async function fetchWorkspaceConversation(
     {
       method: 'GET',
       sessionToken,
+    }
+  );
+}
+
+export async function createWorkspaceComment(
+  sessionToken: string,
+  conversationId: string,
+  input: WorkspaceCommentCreateRequest
+): Promise<WorkspaceCommentCreateResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceCommentCreateResponse>(
+    `/workspace/conversations/${conversationId}/comments`,
+    {
+      method: 'POST',
+      sessionToken,
+      body: input,
     }
   );
 }

@@ -733,6 +733,56 @@ button:disabled {
   line-height: 1.4;
 }
 
+.workspace-comment-thread {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.workspace-comment-thread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-comment-thread-header h3,
+.workspace-comment-card p,
+.workspace-comment-empty {
+  margin: 0;
+}
+
+.workspace-comment-list,
+.workspace-comment-composer {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-comment-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(244, 247, 250, 0.9);
+}
+
+.workspace-comment-card p,
+.workspace-comment-empty {
+  white-space: pre-wrap;
+}
+
+.workspace-comment-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .run-history-grid {
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);

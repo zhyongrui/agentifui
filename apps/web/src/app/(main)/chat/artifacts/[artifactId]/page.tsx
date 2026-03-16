@@ -6,11 +6,13 @@ import { useEffect, useState } from "react";
 
 import { useI18n } from "../../../../../components/i18n-provider";
 import { MainSectionNav } from "../../../../../components/main-section-nav";
+import { WorkspaceCommentThread } from "../../../../../components/workspace-comments";
 import {
   WorkspaceArtifactPreview,
   formatWorkspaceArtifactSize,
 } from "../../../../../components/workspace-artifacts";
 import {
+  createWorkspaceComment,
   downloadWorkspaceArtifact,
   fetchWorkspaceArtifact,
 } from "../../../../../lib/apps-client";
@@ -38,6 +40,8 @@ export default function ArtifactPreviewPage() {
   > | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [isCommentSubmitting, setIsCommentSubmitting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const artifactId =
     typeof params?.artifactId === "string" ? params.artifactId.trim() : "";
@@ -69,6 +73,11 @@ export default function ArtifactPreviewPage() {
           download: "下载产物",
           downloading: "下载中...",
           renderedArtifact: "渲染后的产物",
+          comments: "产物评论",
+          commentInput: "评论内容",
+          addComment: "添加评论",
+          addingComment: "提交中...",
+          noComments: "还没有评论，先记录一下复核意见。",
           previewLead: '预览直接使用持久化产物载荷，而不是转录摘要，因此表格、JSON、文本、Markdown 和链接输出都可以复用同一路由渲染。',
           backToShared: "返回共享会话",
           backToApps: "返回应用工作台",
@@ -96,6 +105,11 @@ export default function ArtifactPreviewPage() {
           download: "Download artifact",
           downloading: "Downloading...",
           renderedArtifact: "Rendered artifact",
+          comments: "Artifact comments",
+          commentInput: "Comment",
+          addComment: "Add comment",
+          addingComment: "Saving...",
+          noComments: "No comments yet.",
           previewLead: 'The preview uses the persisted artifact payload, not the transcript summary, so tables, JSON, text, markdown, and link outputs can all render from the same workspace route.',
           backToShared: "Back to shared conversation",
           backToApps: "Back to Apps workspace",
@@ -188,6 +202,54 @@ export default function ArtifactPreviewPage() {
       setDownloadError(copy.downloadFailed);
     } finally {
       setIsDownloading(false);
+    }
+  }
+
+  async function handleCreateComment(content: string) {
+    if (!session || !artifactId || !conversationId || isCommentSubmitting) {
+      return;
+    }
+
+    setIsCommentSubmitting(true);
+    setCommentError(null);
+
+    try {
+      const result = await createWorkspaceComment(
+        session.sessionToken,
+        conversationId,
+        {
+          targetType: "artifact",
+          targetId: artifactId,
+          content,
+        },
+      );
+
+      if (!result.ok) {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+          clearAuthSession(window.sessionStorage);
+          router.replace("/login");
+          return;
+        }
+
+        setCommentError(result.error.message);
+        return;
+      }
+
+      setPayload((current) =>
+        current && current.ok
+          ? {
+              ...current,
+              data: {
+                ...current.data,
+                comments: result.data.thread,
+              },
+            }
+          : current,
+      );
+    } catch {
+      setCommentError(copy.loadFailed);
+    } finally {
+      setIsCommentSubmitting(false);
     }
   }
 
@@ -295,6 +357,19 @@ export default function ArtifactPreviewPage() {
           </div>
           <WorkspaceArtifactPreview artifact={artifact} />
         </article>
+        <WorkspaceCommentThread
+          title={copy.comments}
+          comments={artifact.comments ?? []}
+          locale={locale}
+          emptyText={copy.noComments}
+          textareaLabel={copy.commentInput}
+          submitLabel={copy.addComment}
+          submittingLabel={copy.addingComment}
+          isSubmitting={isCommentSubmitting}
+          submitError={commentError}
+          readOnly={Boolean(shareId)}
+          onSubmit={shareId ? undefined : handleCreateComment}
+        />
       </section>
 
       <div className="actions">

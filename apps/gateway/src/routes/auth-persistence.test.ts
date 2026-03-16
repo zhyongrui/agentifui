@@ -12,6 +12,7 @@ import type {
   WorkspaceArtifactResponse,
   WorkspaceAppLaunchResponse,
   WorkspaceCatalogResponse,
+  WorkspaceConversationRunsResponse,
   WorkspaceConversationListResponse,
   WorkspacePendingActionRespondResponse,
   WorkspacePendingActionsResponse,
@@ -1984,6 +1985,245 @@ describe.sequential('persistent auth runtime', () => {
               }),
             ],
           });
+        } finally {
+          if (!restartedAppClosed) {
+            await restartedApp.close();
+            restartedAppClosed = true;
+          }
+        }
+      } finally {
+        if (!appClosed) {
+          await app.close();
+          appClosed = true;
+        }
+      }
+    },
+    PERSISTENCE_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'persists workspace comments for messages, runs and artifacts across app restarts',
+    async () => {
+      await resetPersistentTestDatabase();
+
+      const app = await createPersistentApp();
+      let appClosed = false;
+
+      try {
+        const register = await app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: {
+            email: 'comments@iflabx.com',
+            password: 'Secure123',
+            displayName: 'Comments Reviewer',
+          },
+        });
+
+        expect(register.statusCode).toBe(201);
+
+        const login = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: {
+            email: 'comments@iflabx.com',
+            password: 'Secure123',
+          },
+        });
+
+        expect(login.statusCode).toBe(200);
+
+        const loginPayload = login.json().data as {
+          sessionToken: string;
+        };
+
+        const launch = await app.inject({
+          method: 'POST',
+          url: '/workspace/apps/launch',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            appId: 'app_policy_watch',
+            activeGroupId: 'grp_research',
+          },
+        });
+
+        expect(launch.statusCode).toBe(200);
+
+        const launchBody = launch.json() as WorkspaceAppLaunchResponse;
+        const conversationId = launchBody.data.conversationId;
+
+        if (!conversationId) {
+          throw new Error('expected conversation id');
+        }
+
+        const completion = await app.inject({
+          method: 'POST',
+          url: '/v1/chat/completions',
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+          payload: {
+            app_id: 'app_policy_watch',
+            conversation_id: conversationId,
+            messages: [
+              {
+                role: 'user',
+                content: 'Summarize the latest policy changes.',
+              },
+            ],
+          },
+        });
+
+        expect(completion.statusCode).toBe(200);
+
+        const runs = await app.inject({
+          method: 'GET',
+          url: `/workspace/conversations/${conversationId}/runs`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(runs.statusCode).toBe(200);
+
+        const runId = (runs.json() as WorkspaceConversationRunsResponse).data.runs[0]?.id;
+
+        if (!runId) {
+          throw new Error('expected run id');
+        }
+
+        const conversation = await app.inject({
+          method: 'GET',
+          url: `/workspace/conversations/${conversationId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(conversation.statusCode).toBe(200);
+
+        const assistantMessage = (conversation.json() as WorkspaceConversationResponse).data.messages
+          .slice()
+          .reverse()
+          .find((message) => message.role === 'assistant');
+
+        if (!assistantMessage) {
+          throw new Error('expected assistant message');
+        }
+
+        const run = await app.inject({
+          method: 'GET',
+          url: `/workspace/runs/${runId}`,
+          headers: {
+            authorization: `Bearer ${loginPayload.sessionToken}`,
+          },
+        });
+
+        expect(run.statusCode).toBe(200);
+
+        const artifactId = (run.json() as WorkspaceRunResponse).data.artifacts[0]?.id;
+
+        if (!artifactId) {
+          throw new Error('expected artifact id');
+        }
+
+        for (const payload of [
+          {
+            targetType: 'message',
+            targetId: assistantMessage.id,
+            content: 'Message review note.',
+          },
+          {
+            targetType: 'run',
+            targetId: runId,
+            content: 'Run review note.',
+          },
+          {
+            targetType: 'artifact',
+            targetId: artifactId,
+            content: 'Artifact review note.',
+          },
+        ] as const) {
+          const response = await app.inject({
+            method: 'POST',
+            url: `/workspace/conversations/${conversationId}/comments`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+            payload,
+          });
+
+          expect(response.statusCode).toBe(200);
+        }
+
+        await app.close();
+        appClosed = true;
+
+        const restartedApp = await createPersistentApp();
+        let restartedAppClosed = false;
+
+        try {
+          const refreshedConversation = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/conversations/${conversationId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(refreshedConversation.statusCode).toBe(200);
+          expect(
+            (refreshedConversation.json() as WorkspaceConversationResponse).data.messages,
+          ).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                id: assistantMessage.id,
+                comments: [
+                  expect.objectContaining({
+                    content: 'Message review note.',
+                  }),
+                ],
+              }),
+            ]),
+          );
+
+          const refreshedRun = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/runs/${runId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(refreshedRun.statusCode).toBe(200);
+          expect((refreshedRun.json() as WorkspaceRunResponse).data.comments).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                content: 'Run review note.',
+              }),
+            ]),
+          );
+
+          const refreshedArtifact = await restartedApp.inject({
+            method: 'GET',
+            url: `/workspace/artifacts/${artifactId}`,
+            headers: {
+              authorization: `Bearer ${loginPayload.sessionToken}`,
+            },
+          });
+
+          expect(refreshedArtifact.statusCode).toBe(200);
+          expect(
+            (refreshedArtifact.json() as WorkspaceArtifactResponse).data.comments,
+          ).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                content: 'Artifact review note.',
+              }),
+            ]),
+          );
         } finally {
           if (!restartedAppClosed) {
             await restartedApp.close();

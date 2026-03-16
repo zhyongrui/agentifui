@@ -7,7 +7,9 @@ import type {
   WorkspaceArtifactJsonValue,
   WorkspaceArtifactSummary,
   WorkspaceCitation,
+  WorkspaceComment,
   WorkspaceCatalog,
+  WorkspaceCommentCreateRequest,
   WorkspaceConversationAttachment,
   WorkspaceConversation,
   WorkspaceConversationListAttachmentFilter,
@@ -179,6 +181,11 @@ type WorkspaceConversationAttachmentLookupInput = {
   fileIds: string[];
 };
 
+type WorkspaceCommentCreateInput = {
+  conversationId: string;
+  request: WorkspaceCommentCreateRequest;
+};
+
 type WorkspaceConversationShareCreateInput = {
   conversationId: string;
   groupId: string;
@@ -275,6 +282,26 @@ type WorkspaceConversationAttachmentLookupResult =
       data: WorkspaceConversationAttachment[];
     }
   | WorkspaceLookupFailure;
+
+type WorkspaceCommentCreateResult =
+  | {
+      ok: true;
+      data: {
+        conversationId: string;
+        targetType: WorkspaceComment["targetType"];
+        targetId: string;
+        comment: WorkspaceComment;
+        thread: WorkspaceComment[];
+      };
+    }
+  | WorkspaceLookupFailure
+  | {
+      ok: false;
+      statusCode: 400;
+      code: "WORKSPACE_INVALID_PAYLOAD";
+      message: string;
+      details?: unknown;
+    };
 
 type WorkspaceArtifactResult =
   | {
@@ -383,6 +410,10 @@ type WorkspaceService = {
   ):
     | WorkspaceConversationAttachmentLookupResult
     | Promise<WorkspaceConversationAttachmentLookupResult>;
+  createCommentForUser(
+    user: AuthUser,
+    input: WorkspaceCommentCreateInput
+  ): WorkspaceCommentCreateResult | Promise<WorkspaceCommentCreateResult>;
   getArtifactForUser(
     user: AuthUser,
     artifactId: string
@@ -477,6 +508,10 @@ type WorkspaceArtifactRecord = WorkspaceArtifact & {
   conversationId: string;
   runId: string;
   sequence: number;
+  userId: string;
+};
+
+type WorkspaceCommentRecord = WorkspaceComment & {
   userId: string;
 };
 
@@ -1158,6 +1193,51 @@ function createWorkspaceArtifactRecord(input: {
   };
 }
 
+function createWorkspaceCommentRecord(input: {
+  authorDisplayName: string | null;
+  content: string;
+  conversationId: string;
+  targetId: string;
+  targetType: WorkspaceComment["targetType"];
+  userId: string;
+}): WorkspaceCommentRecord {
+  const createdAt = new Date().toISOString();
+
+  return {
+    id: `comment_${randomUUID()}`,
+    conversationId: input.conversationId,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    content: input.content,
+    authorUserId: input.userId,
+    authorDisplayName: input.authorDisplayName,
+    createdAt,
+    updatedAt: createdAt,
+    userId: input.userId,
+  };
+}
+
+function normalizeCommentContent(content: string) {
+  return content.trim().replace(/\s+\n/g, "\n").slice(0, 2000);
+}
+
+function mergeMessageCommentThreads(
+  nextMessages: WorkspaceConversationMessage[],
+  currentMessages: WorkspaceConversationMessage[],
+) {
+  const commentsByMessageId = new Map(
+    currentMessages
+      .filter((message) => Array.isArray(message.comments) && message.comments.length > 0)
+      .map((message) => [message.id, message.comments ?? []] as const),
+  );
+
+  return nextMessages.map((message) => {
+    const comments = commentsByMessageId.get(message.id);
+
+    return comments ? { ...message, comments } : message;
+  });
+}
+
 function createRunTimelineEvent(input: {
   createdAt?: string;
   metadata?: Record<string, unknown>;
@@ -1349,6 +1429,7 @@ function createRunRecord(input: {
     runtime: null,
     inputs: {},
     outputs: {},
+    comments: [],
     toolExecutions: [],
     artifacts: [],
     citations: [],
@@ -1499,13 +1580,24 @@ export function createWorkspaceService(options: {
   }
 
   function syncRunArtifacts(run: WorkspaceRunRecord, userId: string) {
+    const existingCommentsByArtifactId = new Map<string, WorkspaceComment[]>();
+
     for (const artifactId of artifactIdsByRunId.get(run.id) ?? []) {
+      const existingArtifact = artifactsById.get(artifactId);
+
+      if (existingArtifact?.comments?.length) {
+        existingCommentsByArtifactId.set(artifactId, existingArtifact.comments);
+      }
+
       artifactsById.delete(artifactId);
     }
 
     const nextArtifactIds = run.artifacts.map((artifact, index) => {
       const record = createWorkspaceArtifactRecord({
-        artifact,
+        artifact: {
+          ...artifact,
+          comments: artifact.comments ?? existingCommentsByArtifactId.get(artifact.id),
+        },
         conversationId: run.conversationId,
         runId: run.id,
         sequence: index,
@@ -2063,6 +2155,131 @@ export function createWorkspaceService(options: {
       return {
         ok: true,
         data: attachments,
+      };
+    },
+    createCommentForUser(user, input) {
+      const conversation = conversationsById.get(input.conversationId);
+
+      if (!conversation || conversation.userId !== user.id) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const content = normalizeCommentContent(input.request.content);
+
+      if (!content || input.request.targetId.trim().length === 0) {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: 'WORKSPACE_INVALID_PAYLOAD',
+          message:
+            'Workspace comments require a non-empty target id and comment content.',
+        };
+      }
+
+      const targetId = input.request.targetId.trim();
+      const targetType = input.request.targetType;
+      const comment = createWorkspaceCommentRecord({
+        authorDisplayName: user.displayName ?? null,
+        content,
+        conversationId: input.conversationId,
+        targetId,
+        targetType,
+        userId: user.id,
+      });
+
+      if (targetType === 'message') {
+        const messageIndex = conversation.messages.findIndex(
+          message => message.id === targetId
+        );
+        const currentMessage =
+          messageIndex >= 0 ? conversation.messages[messageIndex] ?? null : null;
+
+        if (!currentMessage) {
+          return {
+            ok: false,
+            statusCode: 404,
+            code: 'WORKSPACE_NOT_FOUND',
+            message: 'The target workspace message could not be found.',
+          };
+        }
+
+        const nextThread = [...(currentMessage.comments ?? []), comment];
+        conversation.messages = conversation.messages.map((message, index) =>
+          index === messageIndex ? { ...message, comments: nextThread } : message
+        );
+        conversation.updatedAt = comment.updatedAt;
+
+        return {
+          ok: true,
+          data: {
+            conversationId: input.conversationId,
+            targetType,
+            targetId,
+            comment,
+            thread: nextThread,
+          },
+        };
+      }
+
+      if (targetType === 'run') {
+        const run = runsById.get(targetId);
+
+        if (!run || run.conversationId !== input.conversationId || run.userId !== user.id) {
+          return {
+            ok: false,
+            statusCode: 404,
+            code: 'WORKSPACE_NOT_FOUND',
+            message: 'The target workspace run could not be found.',
+          };
+        }
+
+        run.comments = [...run.comments, comment];
+        conversation.updatedAt = comment.updatedAt;
+
+        return {
+          ok: true,
+          data: {
+            conversationId: input.conversationId,
+            targetType,
+            targetId,
+            comment,
+            thread: run.comments,
+          },
+        };
+      }
+
+      const artifact = artifactsById.get(targetId);
+
+      if (
+        !artifact ||
+        artifact.conversationId !== input.conversationId ||
+        artifact.userId !== user.id
+      ) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace artifact could not be found.',
+        };
+      }
+
+      artifact.comments = [...(artifact.comments ?? []), comment];
+      conversation.updatedAt = comment.updatedAt;
+
+      return {
+        ok: true,
+        data: {
+          conversationId: input.conversationId,
+          targetType,
+          targetId,
+          comment,
+          thread: artifact.comments,
+        },
       };
     },
     getArtifactForUser(user, artifactId) {
@@ -2782,7 +2999,10 @@ export function createWorkspaceService(options: {
       run.usage = buildUsageFromOutputs(run);
 
       if (input.messageHistory) {
-        conversation.messages = input.messageHistory;
+        conversation.messages = mergeMessageCommentThreads(
+          input.messageHistory,
+          conversation.messages,
+        );
       }
 
       updateConversationLatestRun(conversation, run);
@@ -2797,6 +3017,8 @@ export function createWorkspaceService(options: {
 
 export type {
   WorkspaceArtifactResult,
+  WorkspaceCommentCreateInput,
+  WorkspaceCommentCreateResult,
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
   WorkspaceConversationMessageFeedbackResult,

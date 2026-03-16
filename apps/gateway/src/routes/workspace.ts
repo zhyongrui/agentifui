@@ -12,6 +12,8 @@ import type {
   WorkspaceConversationListFeedbackFilter,
   WorkspaceConversationListResponse,
   WorkspaceConversationListStatusFilter,
+  WorkspaceCommentCreateRequest,
+  WorkspaceCommentCreateResponse,
   WorkspaceConversationMessageFeedbackRequest,
   WorkspaceConversationPresenceResponse,
   WorkspaceConversationPresenceUpdateRequest,
@@ -79,6 +81,24 @@ function isStringArray(value: unknown): value is string[] {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function isWorkspaceCommentCreateRequest(
+  value: unknown
+): value is WorkspaceCommentCreateRequest {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const request = value as Record<string, unknown>;
+
+  return (
+    (request.targetType === 'message' ||
+      request.targetType === 'run' ||
+      request.targetType === 'artifact') &&
+    typeof request.targetId === 'string' &&
+    typeof request.content === 'string'
+  );
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -1106,6 +1126,46 @@ export async function registerWorkspaceRoutes(
         rating: body.rating,
       },
     });
+
+    return response;
+  });
+
+  app.post('/workspace/conversations/:conversationId/comments', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      conversationId?: string;
+    };
+    const conversationId = params.conversationId?.trim();
+    const body = request.body;
+
+    if (!conversationId || !isWorkspaceCommentCreateRequest(body)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace comments require a conversation id plus a valid message/run/artifact target and non-empty content.'
+      );
+    }
+
+    const result = await workspaceService.createCommentForUser(access.user, {
+      conversationId,
+      request: body,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceCommentCreateResponse = {
+      ok: true,
+      data: result.data,
+    };
 
     return response;
   });

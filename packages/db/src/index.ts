@@ -25,6 +25,7 @@ export const schemaModules = [
   'run_timeline_events',
   'workspace_uploaded_files',
   'workspace_artifacts',
+  'workspace_comments',
   'knowledge_sources',
   'knowledge_source_chunks',
   'workspace_app_launches',

@@ -9,6 +9,7 @@ import {
   type WorkspaceArtifactJsonValue,
   type WorkspaceArtifactSummary,
   type WorkspaceCitation,
+  type WorkspaceComment,
   type WorkspaceConversationAttachment,
   type WorkspaceConversation,
   type WorkspaceConversationMessageFeedback,
@@ -45,6 +46,8 @@ import {
 } from "./workspace-catalog-fixtures.js";
 import type {
   WorkspaceArtifactResult,
+  WorkspaceCommentCreateInput,
+  WorkspaceCommentCreateResult,
   WorkspaceConversationAttachmentLookupInput,
   WorkspaceConversationAttachmentLookupResult,
   WorkspaceConversationListInput,
@@ -220,6 +223,18 @@ type WorkspaceArtifactRow = {
   status: WorkspaceArtifact["status"];
   summary: string | null;
   title: string;
+  updated_at: Date | string;
+  user_id: string;
+};
+
+type WorkspaceCommentRow = {
+  author_display_name: string | null;
+  content: string;
+  conversation_id: string;
+  created_at: Date | string;
+  id: string;
+  target_id: string;
+  target_type: WorkspaceComment["targetType"];
   updated_at: Date | string;
   user_id: string;
 };
@@ -1322,6 +1337,69 @@ function toWorkspaceArtifactFromRow(row: WorkspaceArtifactRow): WorkspaceArtifac
   });
 }
 
+function toWorkspaceComment(row: WorkspaceCommentRow): WorkspaceComment {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    targetType: row.target_type,
+    targetId: row.target_id,
+    content: row.content,
+    authorUserId: row.user_id,
+    authorDisplayName: row.author_display_name,
+    createdAt: toIso(row.created_at)!,
+    updatedAt: toIso(row.updated_at)!,
+  };
+}
+
+function normalizeCommentContent(content: string) {
+  return content.trim().replace(/\s+\n/g, "\n").slice(0, 2000);
+}
+
+function attachConversationComments(
+  conversation: WorkspaceConversation,
+  comments: WorkspaceComment[],
+) {
+  const commentsByTargetId = new Map<string, WorkspaceComment[]>();
+
+  for (const comment of comments) {
+    if (comment.targetType !== "message") {
+      continue;
+    }
+
+    commentsByTargetId.set(comment.targetId, [
+      ...(commentsByTargetId.get(comment.targetId) ?? []),
+      comment,
+    ]);
+  }
+
+  conversation.messages = conversation.messages.map((message) => ({
+    ...message,
+    ...(commentsByTargetId.has(message.id)
+      ? { comments: commentsByTargetId.get(message.id) }
+      : {}),
+  }));
+}
+
+function attachRunComments(run: WorkspaceRun, comments: WorkspaceComment[]) {
+  run.comments = comments.filter(
+    (comment) => comment.targetType === "run" && comment.targetId === run.id,
+  );
+}
+
+function attachArtifactComments(
+  artifact: WorkspaceArtifact,
+  comments: WorkspaceComment[],
+) {
+  const thread = comments.filter(
+    (comment) =>
+      comment.targetType === "artifact" && comment.targetId === artifact.id,
+  );
+
+  if (thread.length > 0) {
+    artifact.comments = thread;
+  }
+}
+
 function toWorkspaceConversationMessages(
   value: Record<string, unknown> | string | null | undefined,
 ): WorkspaceConversationMessage[] {
@@ -1667,6 +1745,7 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
     runtime: toWorkspaceRunRuntime(outputs.runtime),
     inputs: normalizeJsonRecord(row.inputs),
     outputs,
+    comments: [],
     toolExecutions: toWorkspaceRunToolExecutions(
       outputs.toolExecutions,
       outputs,
@@ -2194,7 +2273,14 @@ async function readConversationForUser(
     limit 1
   `;
 
-  return row ? toWorkspaceConversation(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const conversation = toWorkspaceConversation(row);
+  const comments = await readCommentsForConversation(database, conversationId);
+  attachConversationComments(conversation, comments);
+  return conversation;
 }
 
 async function readConversationById(
@@ -2245,7 +2331,66 @@ async function readConversationById(
     limit 1
   `;
 
-  return row ? toWorkspaceConversation(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const conversation = toWorkspaceConversation(row);
+  const comments = await readCommentsForConversation(database, conversationId);
+  attachConversationComments(conversation, comments);
+  return conversation;
+}
+
+async function readCommentsForConversation(
+  database: DatabaseClient,
+  conversationId: string,
+): Promise<WorkspaceComment[]> {
+  const rows = await database<WorkspaceCommentRow[]>`
+    select
+      id,
+      conversation_id,
+      target_type,
+      target_id,
+      content,
+      user_id,
+      author_display_name,
+      created_at,
+      updated_at
+    from workspace_comments
+    where conversation_id = ${conversationId}
+    order by created_at asc
+  `;
+
+  return rows.map(toWorkspaceComment);
+}
+
+async function readCommentThreadForTarget(
+  database: DatabaseClient,
+  input: {
+    conversationId: string;
+    targetId: string;
+    targetType: WorkspaceComment["targetType"];
+  },
+): Promise<WorkspaceComment[]> {
+  const rows = await database<WorkspaceCommentRow[]>`
+    select
+      id,
+      conversation_id,
+      target_type,
+      target_id,
+      content,
+      user_id,
+      author_display_name,
+      created_at,
+      updated_at
+    from workspace_comments
+    where conversation_id = ${input.conversationId}
+      and target_type = ${input.targetType}
+      and target_id = ${input.targetId}
+    order by created_at asc
+  `;
+
+  return rows.map(toWorkspaceComment);
 }
 
 async function readConversationRunsForUser(
@@ -2542,6 +2687,14 @@ async function readRunForUser(
       return artifact ? [artifact] : [];
     });
   }
+  attachRunComments(
+    run,
+    await readCommentThreadForTarget(database, {
+      conversationId: run.conversationId,
+      targetType: "run",
+      targetId: run.id,
+    }),
+  );
   run.timeline = await readRunTimelineForUser(database, user, runId);
 
   return run;
@@ -2575,7 +2728,168 @@ async function readArtifactForUser(
     limit 1
   `;
 
-  return row ? toWorkspaceArtifactFromRow(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const artifact = toWorkspaceArtifactFromRow(row);
+
+  if (!artifact) {
+    return null;
+  }
+
+  attachArtifactComments(
+    artifact,
+    await readCommentThreadForTarget(database, {
+      conversationId: row.conversation_id,
+      targetType: "artifact",
+      targetId: row.id,
+    }),
+  );
+
+  return artifact;
+}
+
+async function createCommentForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceCommentCreateInput,
+): Promise<WorkspaceCommentCreateResult> {
+  const conversation = await readConversationForUser(
+    database,
+    user,
+    input.conversationId,
+  );
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace conversation could not be found.",
+    };
+  }
+
+  const content = normalizeCommentContent(input.request.content);
+  const targetId = input.request.targetId.trim();
+
+  if (!content || targetId.length === 0) {
+    return {
+      ok: false,
+      statusCode: 400,
+      code: "WORKSPACE_INVALID_PAYLOAD",
+      message:
+        "Workspace comments require a non-empty target id and comment content.",
+    };
+  }
+
+  if (input.request.targetType === "message") {
+    const hasMessage = conversation.messages.some((message) => message.id === targetId);
+
+    if (!hasMessage) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "WORKSPACE_NOT_FOUND",
+        message: "The target workspace message could not be found.",
+      };
+    }
+  } else if (input.request.targetType === "run") {
+    const [row] = await database<{ id: string }[]>`
+      select r.id
+      from runs r
+      inner join conversations c on c.id = r.conversation_id
+      where r.id = ${targetId}
+        and r.conversation_id = ${input.conversationId}
+        and c.user_id = ${user.id}
+      limit 1
+    `;
+
+    if (!row) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "WORKSPACE_NOT_FOUND",
+        message: "The target workspace run could not be found.",
+      };
+    }
+  } else {
+    const [row] = await database<{ id: string }[]>`
+      select wa.id
+      from workspace_artifacts wa
+      inner join conversations c on c.id = wa.conversation_id
+      where wa.id = ${targetId}
+        and wa.conversation_id = ${input.conversationId}
+        and c.user_id = ${user.id}
+      limit 1
+    `;
+
+    if (!row) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "WORKSPACE_NOT_FOUND",
+        message: "The target workspace artifact could not be found.",
+      };
+    }
+  }
+
+  const commentId = `comment_${randomUUID()}`;
+  const createdAt = new Date().toISOString();
+
+  await database`
+    insert into workspace_comments (
+      id,
+      tenant_id,
+      user_id,
+      conversation_id,
+      target_type,
+      target_id,
+      content,
+      author_display_name,
+      created_at,
+      updated_at
+    )
+    values (
+      ${commentId},
+      ${user.tenantId},
+      ${user.id},
+      ${input.conversationId},
+      ${input.request.targetType},
+      ${targetId},
+      ${content},
+      ${user.displayName ?? null},
+      ${createdAt}::timestamptz,
+      ${createdAt}::timestamptz
+    )
+  `;
+
+  const thread = await readCommentThreadForTarget(database, {
+    conversationId: input.conversationId,
+    targetType: input.request.targetType,
+    targetId,
+  });
+  const comment = thread[thread.length - 1];
+
+  if (!comment) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace comment thread could not be found.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      conversationId: input.conversationId,
+      targetType: input.request.targetType,
+      targetId,
+      comment,
+      thread,
+    },
+  };
 }
 
 async function listPendingActionsForUser(
@@ -4244,6 +4558,12 @@ export function createPersistentWorkspaceService(
       input,
     ): Promise<WorkspaceConversationAttachmentLookupResult> {
       return listConversationAttachmentsForUser(database, user, input);
+    },
+    async createCommentForUser(
+      user,
+      input,
+    ): Promise<WorkspaceCommentCreateResult> {
+      return createCommentForUser(database, user, input);
     },
     async getArtifactForUser(user, artifactId) {
       const artifact = await readArtifactForUser(database, user, artifactId);

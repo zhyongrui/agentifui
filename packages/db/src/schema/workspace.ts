@@ -69,6 +69,11 @@ export const workspaceArtifactStatusEnum = pgEnum('workspace_artifact_status', [
   'draft',
   'stable',
 ]);
+export const workspaceCommentTargetTypeEnum = pgEnum('workspace_comment_target_type', [
+  'message',
+  'run',
+  'artifact',
+]);
 export const knowledgeSourceKindEnum = pgEnum('knowledge_source_kind', [
   'url',
   'markdown',
@@ -410,6 +415,41 @@ export const workspaceArtifacts = pgTable(
       table.runId,
       table.sequence
     ),
+  })
+);
+
+export const workspaceComments = pgTable(
+  'workspace_comments',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: varchar('user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    conversationId: varchar('conversation_id', { length: 120 })
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    targetType: workspaceCommentTargetTypeEnum('target_type').notNull(),
+    targetId: varchar('target_id', { length: 120 }).notNull(),
+    content: text('content').notNull(),
+    authorDisplayName: varchar('author_display_name', { length: 160 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workspaceCommentsTenantIndex: index('workspace_comments_tenant_idx').on(table.tenantId),
+    workspaceCommentsConversationIndex: index('workspace_comments_conversation_idx').on(
+      table.conversationId,
+      table.createdAt
+    ),
+    workspaceCommentsTargetIndex: index('workspace_comments_target_idx').on(
+      table.targetType,
+      table.targetId,
+      table.createdAt
+    ),
+    workspaceCommentsUserIndex: index('workspace_comments_user_idx').on(table.userId),
   })
 );
 
