@@ -15,6 +15,7 @@ import {
   fetchAdminAudit,
   fetchAdminTenants,
 } from '../../../lib/admin-client';
+import { useI18n } from '../../../components/i18n-provider';
 import { useProtectedSession } from '../../../lib/use-protected-session';
 
 type AuditFilterFormState = {
@@ -109,6 +110,7 @@ function resolveTenantLabel(
 
 export default function AdminAuditPage() {
   const router = useRouter();
+  const { locale, formatDateTime } = useI18n();
   const { session, isLoading: isSessionLoading } = useProtectedSession('/admin');
   const [capabilities, setCapabilities] =
     useState<AdminAuditResponse['data']['capabilities'] | null>(null);
@@ -122,6 +124,136 @@ export default function AdminAuditPage() {
   const [draftFilters, setDraftFilters] = useState<AuditFilterFormState>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<AuditFilterFormState>(EMPTY_FILTERS);
   const [didBootstrapPlatformScope, setDidBootstrapPlatformScope] = useState(false);
+  const copy =
+    locale === 'zh-CN'
+      ? {
+          unknownTenant: '未知租户',
+          loadFailed: '管理审计加载失败，请稍后重试。',
+          platformTenantLoadFailed: '平台租户清单加载失败，请稍后重试。',
+          loading: '正在加载管理审计...',
+          exportReady: (format: string, filename: string) => `${format.toUpperCase()} 导出已就绪：${filename}`,
+          exportDownloaded: (format: string, filename: string) => `${format.toUpperCase()} 导出已下载：${filename}`,
+          exportBrowserFailed: '导出已生成，但当前浏览器无法自动开始下载。',
+          exportFailed: '审计导出失败，请稍后重试。',
+          title: '审计',
+          platformLead: '跨租户查看带运行上下文的审计记录，支持高风险摘要和租户范围切换。',
+          tenantLead: '在租户范围内按动作、执行人和 trace 检索持久化的运行审计记录。',
+          filters: '筛选条件',
+          filtersLead: '按动作、执行人或工作台执行 trace 缩小审计事件范围。',
+          scope: '范围',
+          tenant: '租户',
+          allTenants: '全部租户',
+          action: '动作',
+          level: '级别',
+          allLevels: '全部级别',
+          entityType: '实体类型',
+          allEntityTypes: '全部实体类型',
+          actorUserId: '执行人用户 ID',
+          traceId: 'Trace ID',
+          runId: 'Run ID',
+          conversationId: '会话 ID',
+          payload: '载荷',
+          limit: '条数限制',
+          actions: '操作',
+          apply: '应用筛选',
+          clear: '清空',
+          exportingJson: '导出 JSON 中...',
+          exportJson: '导出 JSON',
+          exportingCsv: '导出 CSV 中...',
+          exportCsv: '导出 CSV',
+          noPlatformFilters: '未应用筛选，当前显示最新的平台级审计窗口。',
+          noTenantFilters: '未应用筛选，当前显示最新的租户级审计窗口。',
+          snapshot: '快照',
+          matchingEvents: '条匹配事件',
+          highRisk: '高风险',
+          tenantSpread: '租户分布',
+          topActions: '高频动作',
+          topActionsPlatformLead: '当前筛选后的平台级审计量按动作分组。',
+          topActionsTenantLead: '当前筛选后的租户级审计量按动作分组。',
+          noAuditEvents: '没有审计事件',
+          tenantSpreadTitle: '租户分布',
+          tenantSpreadLead: '当前审计窗口在各租户间的分布情况。',
+          noTenantMatches: '没有匹配的租户',
+          noMatchedEvents: '当前筛选条件下没有匹配的审计事件。',
+          occurred: '发生时间',
+          actor: '执行人',
+          system: '系统',
+          ip: 'IP',
+          notAvailable: '无',
+          app: '应用',
+          group: '群组',
+          sensitivePayload: '敏感载荷',
+          piiDetected: '检测到 PII',
+          matches: '处命中',
+          maskedLead: '敏感字段默认已脱敏。切换到 raw 可查看原始值。',
+          rawLead: '当前为 raw 载荷模式，下方会显示敏感原始值。',
+          hideRaw: '隐藏 raw 载荷',
+          showRaw: '显示 raw 载荷',
+        }
+      : {
+          unknownTenant: 'Unknown tenant',
+          loadFailed: 'Admin audit failed to load. Please retry.',
+          platformTenantLoadFailed: 'Platform tenant inventory failed to load. Please retry.',
+          loading: 'Loading admin audit...',
+          exportReady: (format: string, filename: string) => `${format.toUpperCase()} export ready: ${filename}`,
+          exportDownloaded: (format: string, filename: string) => `${format.toUpperCase()} export downloaded: ${filename}`,
+          exportBrowserFailed: 'Audit export is ready, but this browser could not start the download automatically.',
+          exportFailed: 'Audit export failed. Please retry in a moment.',
+          title: 'Audit',
+          platformLead: 'Platform audit visibility across tenants with run-aware filters, high-risk summaries and tenant scope switching.',
+          tenantLead: 'Tenant-level audit visibility with action, actor and trace filters for persisted run-aware governance review.',
+          filters: 'Filters',
+          filtersLead: 'Narrow audit events by action, actor or workspace execution trace.',
+          scope: 'Scope',
+          tenant: 'Tenant',
+          allTenants: 'All tenants',
+          action: 'Action',
+          level: 'Level',
+          allLevels: 'All levels',
+          entityType: 'Entity Type',
+          allEntityTypes: 'All entity types',
+          actorUserId: 'Actor User ID',
+          traceId: 'Trace ID',
+          runId: 'Run ID',
+          conversationId: 'Conversation ID',
+          payload: 'Payload',
+          limit: 'Limit',
+          actions: 'Actions',
+          apply: 'Apply filters',
+          clear: 'Clear',
+          exportingJson: 'Exporting JSON...',
+          exportJson: 'Export JSON',
+          exportingCsv: 'Exporting CSV...',
+          exportCsv: 'Export CSV',
+          noPlatformFilters: 'No filters applied. Showing the latest platform audit window.',
+          noTenantFilters: 'No filters applied. Showing the latest tenant audit window.',
+          snapshot: 'Snapshot',
+          matchingEvents: 'matching events',
+          highRisk: 'High risk',
+          tenantSpread: 'Tenant spread',
+          topActions: 'Top actions',
+          topActionsPlatformLead: 'Filtered platform-wide audit volume grouped by action.',
+          topActionsTenantLead: 'Filtered tenant-wide audit volume grouped by action.',
+          noAuditEvents: 'No audit events',
+          tenantSpreadTitle: 'Tenant spread',
+          tenantSpreadLead: 'How the current audit window is distributed across tenants.',
+          noTenantMatches: 'No tenant matches',
+          noMatchedEvents: 'No audit events matched the current filter set.',
+          occurred: 'Occurred',
+          actor: 'Actor',
+          system: 'System',
+          ip: 'IP',
+          notAvailable: 'N/A',
+          app: 'App',
+          group: 'Group',
+          sensitivePayload: 'Sensitive payload',
+          piiDetected: 'PII detected',
+          matches: 'matches',
+          maskedLead: 'Sensitive fields are masked by default. Switch Payload mode to raw to inspect the original values.',
+          rawLead: 'Raw payload mode is active. Sensitive values are visible in the payload block below.',
+          hideRaw: 'Hide raw payloads',
+          showRaw: 'Show raw payloads',
+        };
 
   useEffect(() => {
     if (!session) {
@@ -189,7 +321,7 @@ export default function AdminAuditPage() {
       .catch(() => {
         if (!isCancelled) {
           setData(null);
-          setError('Admin audit 加载失败，请稍后重试。');
+          setError(copy.loadFailed);
         }
       })
       .finally(() => {
@@ -234,7 +366,7 @@ export default function AdminAuditPage() {
       .catch(() => {
         if (!isCancelled) {
           setPlatformTenants([]);
-          setError(currentValue => currentValue ?? 'Platform tenant inventory 加载失败，请稍后重试。');
+          setError(currentValue => currentValue ?? copy.platformTenantLoadFailed);
         }
       });
 
@@ -253,7 +385,7 @@ export default function AdminAuditPage() {
       : EMPTY_FILTERS;
 
   if (isSessionLoading || (isDataLoading && !data)) {
-    return <p className="lead">Loading admin audit...</p>;
+    return <p className="lead">{copy.loading}</p>;
   }
 
   async function handleExport(format: 'csv' | 'json') {
@@ -283,7 +415,7 @@ export default function AdminAuditPage() {
         return;
       }
 
-      setExportNotice(`${format.toUpperCase()} export ready: ${result.metadata.filename}`);
+      setExportNotice(copy.exportReady(format, result.metadata.filename));
 
       try {
         const objectUrl = URL.createObjectURL(result.blob);
@@ -298,14 +430,12 @@ export default function AdminAuditPage() {
           URL.revokeObjectURL(objectUrl);
         }, 0);
 
-        setExportNotice(`${format.toUpperCase()} export downloaded: ${result.metadata.filename}`);
+        setExportNotice(copy.exportDownloaded(format, result.metadata.filename));
       } catch {
-        setExportError(
-          'Audit export is ready, but this browser could not start the download automatically.'
-        );
+        setExportError(copy.exportBrowserFailed);
       }
     } catch {
-      setExportError('Audit export failed. Please retry in a moment.');
+      setExportError(copy.exportFailed);
     } finally {
       setExportingFormat(null);
     }
@@ -314,19 +444,15 @@ export default function AdminAuditPage() {
   return (
     <div className="stack">
       <div>
-        <h1>Audit</h1>
-        <p className="lead">
-          {capabilities?.canReadPlatformAdmin
-            ? 'Platform audit visibility across tenants with run-aware filters, high-risk summaries and tenant scope switching.'
-            : 'Tenant-level audit visibility with action, actor and trace filters for persisted run-aware governance review.'}
-        </p>
+        <h1>{copy.title}</h1>
+        <p className="lead">{capabilities?.canReadPlatformAdmin ? copy.platformLead : copy.tenantLead}</p>
       </div>
 
       <section className="admin-card stack">
         <div className="section-header">
           <div>
             <h2>Filters</h2>
-            <p>Narrow audit events by action, actor or workspace execution trace.</p>
+            <p>{copy.filtersLead}</p>
           </div>
           <span className="workspace-count">{data?.events.length ?? 0}</span>
         </div>
@@ -342,7 +468,7 @@ export default function AdminAuditPage() {
             {capabilities?.canReadPlatformAdmin ? (
               <>
                 <label className="field">
-                  <span>Scope</span>
+                  <span>{copy.scope}</span>
                   <select
                     aria-label="Audit scope filter"
                     value={draftFilters.scope}
@@ -360,7 +486,7 @@ export default function AdminAuditPage() {
                   </select>
                 </label>
                 <label className="field">
-                  <span>Tenant</span>
+                  <span>{copy.tenant}</span>
                   <select
                     aria-label="Audit tenant filter"
                     value={draftFilters.tenantId}
@@ -371,7 +497,7 @@ export default function AdminAuditPage() {
                       }));
                     }}
                   >
-                    <option value="">All tenants</option>
+                    <option value="">{copy.allTenants}</option>
                     {platformTenants.map(tenant => (
                       <option key={tenant.id} value={tenant.id}>
                         {tenant.name}
@@ -382,7 +508,7 @@ export default function AdminAuditPage() {
               </>
             ) : null}
             <label className="field">
-              <span>Action</span>
+              <span>{copy.action}</span>
               <input
                 aria-label="Audit action filter"
                 value={draftFilters.action}
@@ -395,7 +521,7 @@ export default function AdminAuditPage() {
               />
             </label>
             <label className="field">
-              <span>Level</span>
+              <span>{copy.level}</span>
               <select
                 aria-label="Audit level filter"
                 value={draftFilters.level}
@@ -408,14 +534,14 @@ export default function AdminAuditPage() {
                   }));
                 }}
               >
-                <option value="">All levels</option>
+                <option value="">{copy.allLevels}</option>
                 <option value="info">info</option>
                 <option value="warning">warning</option>
                 <option value="critical">critical</option>
               </select>
             </label>
             <label className="field">
-              <span>Entity Type</span>
+              <span>{copy.entityType}</span>
               <select
                 aria-label="Audit entity type filter"
                 value={draftFilters.entityType}
@@ -428,7 +554,7 @@ export default function AdminAuditPage() {
                   }));
                 }}
               >
-                <option value="">All entity types</option>
+                <option value="">{copy.allEntityTypes}</option>
                 <option value="tenant">tenant</option>
                 <option value="user">user</option>
                 <option value="session">session</option>
@@ -441,7 +567,7 @@ export default function AdminAuditPage() {
 
           <div className="workspace-toolbar">
             <label className="field">
-              <span>Actor User ID</span>
+              <span>{copy.actorUserId}</span>
               <input
                 aria-label="Audit actor filter"
                 value={draftFilters.actorUserId}
@@ -454,7 +580,7 @@ export default function AdminAuditPage() {
               />
             </label>
             <label className="field">
-              <span>Trace ID</span>
+              <span>{copy.traceId}</span>
               <input
                 aria-label="Audit trace filter"
                 value={draftFilters.traceId}
@@ -467,7 +593,7 @@ export default function AdminAuditPage() {
               />
             </label>
             <label className="field">
-              <span>Run ID</span>
+              <span>{copy.runId}</span>
               <input
                 aria-label="Audit run filter"
                 value={draftFilters.runId}
@@ -483,7 +609,7 @@ export default function AdminAuditPage() {
 
           <div className="workspace-toolbar">
             <label className="field">
-              <span>Conversation ID</span>
+              <span>{copy.conversationId}</span>
               <input
                 aria-label="Audit conversation filter"
                 value={draftFilters.conversationId}
@@ -496,7 +622,7 @@ export default function AdminAuditPage() {
               />
             </label>
             <label className="field">
-              <span>Payload</span>
+              <span>{copy.payload}</span>
               <select
                 aria-label="Audit payload mode"
                 value={draftFilters.payloadMode}
@@ -514,7 +640,7 @@ export default function AdminAuditPage() {
               </select>
             </label>
             <label className="field">
-              <span>Limit</span>
+              <span>{copy.limit}</span>
               <input
                 aria-label="Audit limit filter"
                 inputMode="numeric"
@@ -529,10 +655,10 @@ export default function AdminAuditPage() {
               />
             </label>
             <div className="field">
-              <span>Actions</span>
+              <span>{copy.actions}</span>
               <div className="actions">
                 <button className="primary" type="submit" disabled={isDataLoading}>
-                  Apply filters
+                  {copy.apply}
                 </button>
                 <button
                   className="secondary"
@@ -543,7 +669,7 @@ export default function AdminAuditPage() {
                   }}
                   disabled={isDataLoading}
                 >
-                  Clear
+                  {copy.clear}
                 </button>
                 <button
                   className="secondary"
@@ -553,7 +679,7 @@ export default function AdminAuditPage() {
                   }}
                   disabled={isDataLoading || exportingFormat !== null}
                 >
-                  {exportingFormat === 'json' ? 'Exporting JSON...' : 'Export JSON'}
+                  {exportingFormat === 'json' ? copy.exportingJson : copy.exportJson}
                 </button>
                 <button
                   className="secondary"
@@ -563,7 +689,7 @@ export default function AdminAuditPage() {
                   }}
                   disabled={isDataLoading || exportingFormat !== null}
                 >
-                  {exportingFormat === 'csv' ? 'Exporting CSV...' : 'Export CSV'}
+                  {exportingFormat === 'csv' ? copy.exportingCsv : copy.exportCsv}
                 </button>
               </div>
             </div>
@@ -581,8 +707,8 @@ export default function AdminAuditPage() {
         ) : (
           <p className="helper-text">
             {capabilities?.canReadPlatformAdmin
-              ? 'No filters applied. Showing the latest platform audit window.'
-              : 'No filters applied. Showing the latest tenant audit window.'}
+              ? copy.noPlatformFilters
+              : copy.noTenantFilters}
           </p>
         )}
       </section>
@@ -595,16 +721,16 @@ export default function AdminAuditPage() {
         <>
           <div className="workspace-badges">
             <span className="workspace-badge">
-              Snapshot: {new Date(data.generatedAt).toLocaleString()}
+              {copy.snapshot}: {formatDateTime(data.generatedAt)}
             </span>
-            <span className="workspace-badge">Scope: {data.scope}</span>
-            <span className="workspace-badge">{data.events.length} matching events</span>
+            <span className="workspace-badge">{copy.scope}: {data.scope}</span>
+            <span className="workspace-badge">{data.events.length} {copy.matchingEvents}</span>
             <span className="workspace-badge">
-              High risk: {data.highRiskEventCount}
+              {copy.highRisk}: {data.highRiskEventCount}
             </span>
             {capabilities?.canReadPlatformAdmin ? (
               <span className="workspace-badge">
-                Tenant spread: {data.countsByTenant.length}
+                {copy.tenantSpread}: {data.countsByTenant.length}
               </span>
             ) : null}
           </div>
@@ -612,17 +738,13 @@ export default function AdminAuditPage() {
           <section className="admin-card stack">
             <div className="section-header">
               <div>
-                <h2>Top actions</h2>
-                <p>
-                  {data.scope === 'platform'
-                    ? 'Filtered platform-wide audit volume grouped by action.'
-                    : 'Filtered tenant-wide audit volume grouped by action.'}
-                </p>
+                <h2>{copy.topActions}</h2>
+                <p>{data.scope === 'platform' ? copy.topActionsPlatformLead : copy.topActionsTenantLead}</p>
               </div>
             </div>
             <div className="tag-row admin-tag-row">
               {data.countsByAction.length === 0 ? (
-                <span className="tag tag-muted">No audit events</span>
+                <span className="tag tag-muted">{copy.noAuditEvents}</span>
               ) : (
                 data.countsByAction.map(actionCount => (
                   <span className="tag" key={actionCount.action}>
@@ -637,13 +759,13 @@ export default function AdminAuditPage() {
             <section className="admin-card stack">
               <div className="section-header">
                 <div>
-                  <h2>Tenant spread</h2>
-                  <p>How the current audit window is distributed across tenants.</p>
+                  <h2>{copy.tenantSpreadTitle}</h2>
+                  <p>{copy.tenantSpreadLead}</p>
                 </div>
               </div>
               <div className="tag-row admin-tag-row">
                 {data.countsByTenant.length === 0 ? (
-                  <span className="tag tag-muted">No tenant matches</span>
+                  <span className="tag tag-muted">{copy.noTenantMatches}</span>
                 ) : (
                   data.countsByTenant.map(tenantCount => (
                     <span className="tag" key={tenantCount.tenantId}>
@@ -661,7 +783,7 @@ export default function AdminAuditPage() {
           ) : null}
 
           {data.events.length === 0 ? (
-            <div className="workspace-empty">No audit events matched the current filter set.</div>
+            <div className="workspace-empty">{copy.noMatchedEvents}</div>
           ) : (
             <div className="admin-grid">
               {data.events.map(event => (
@@ -679,69 +801,69 @@ export default function AdminAuditPage() {
 
                   <div className="detail-list">
                     <div className="detail-row">
-                      <span className="detail-label">Occurred</span>
-                      <strong>{new Date(event.occurredAt).toLocaleString()}</strong>
+                      <span className="detail-label">{copy.occurred}</span>
+                      <strong>{formatDateTime(event.occurredAt)}</strong>
                     </div>
                     <div className="detail-row">
-                      <span className="detail-label">Actor</span>
-                      <strong>{event.actorUserId ?? 'System'}</strong>
+                      <span className="detail-label">{copy.actor}</span>
+                      <strong>{event.actorUserId ?? copy.system}</strong>
                     </div>
                     {event.tenantName || event.tenantId ? (
                       <div className="detail-row">
-                        <span className="detail-label">Tenant</span>
+                        <span className="detail-label">{copy.tenant}</span>
                         <strong>
                           {resolveTenantLabel(event.tenantId, event.tenantName, tenantNameById)}
                         </strong>
                       </div>
                     ) : null}
                     <div className="detail-row">
-                      <span className="detail-label">IP</span>
-                      <strong>{event.ipAddress ?? 'N/A'}</strong>
+                      <span className="detail-label">{copy.ip}</span>
+                      <strong>{event.ipAddress ?? copy.notAvailable}</strong>
                     </div>
                     {event.context.traceId ? (
                       <div className="detail-row">
-                        <span className="detail-label">Trace</span>
+                        <span className="detail-label">{copy.traceId}</span>
                         <strong>{event.context.traceId}</strong>
                       </div>
                     ) : null}
                     {event.context.runId ? (
                       <div className="detail-row">
-                        <span className="detail-label">Run</span>
+                        <span className="detail-label">{copy.runId}</span>
                         <strong>{event.context.runId}</strong>
                       </div>
                     ) : null}
                     {event.context.conversationId ? (
                       <div className="detail-row">
-                        <span className="detail-label">Conversation</span>
+                        <span className="detail-label">{copy.conversationId}</span>
                         <strong>{event.context.conversationId}</strong>
                       </div>
                     ) : null}
                     {event.context.appName || event.context.appId ? (
                       <div className="detail-row">
-                        <span className="detail-label">App</span>
+                        <span className="detail-label">{copy.app}</span>
                         <strong>{event.context.appName ?? event.context.appId}</strong>
                       </div>
                     ) : null}
                     {event.context.activeGroupName || event.context.activeGroupId ? (
                       <div className="detail-row">
-                        <span className="detail-label">Group</span>
+                        <span className="detail-label">{copy.group}</span>
                         <strong>{event.context.activeGroupName ?? event.context.activeGroupId}</strong>
                       </div>
                     ) : null}
                   </div>
 
                   <div className="admin-code-block">
-                    <strong>Payload</strong>
+                    <strong>{copy.payload}</strong>
                     {event.payloadInspection.containsSensitiveData ? (
                       <>
                         <div className="tag-row admin-tag-row">
                           <span className="tag">
                             {event.payloadInspection.highRiskMatchCount > 0
-                              ? 'Sensitive payload'
-                              : 'PII detected'}
+                              ? copy.sensitivePayload
+                              : copy.piiDetected}
                           </span>
                           <span className="tag tag-muted">
-                            {event.payloadInspection.matches.length} matches
+                            {event.payloadInspection.matches.length} {copy.matches}
                           </span>
                           <span className="tag tag-muted">
                             mode:{event.payloadInspection.mode}
@@ -749,8 +871,8 @@ export default function AdminAuditPage() {
                         </div>
                         <p className="helper-text">
                           {event.payloadInspection.mode === 'masked'
-                            ? 'Sensitive fields are masked by default. Switch Payload mode to raw to inspect the original values.'
-                            : 'Raw payload mode is active. Sensitive values are visible in the payload block below.'}
+                            ? copy.maskedLead
+                            : copy.rawLead}
                         </p>
                         <div className="actions">
                           <button
@@ -772,8 +894,8 @@ export default function AdminAuditPage() {
                             }}
                           >
                             {data.appliedFilters.payloadMode === 'raw'
-                              ? 'Hide raw payloads'
-                              : 'Show raw payloads'}
+                              ? copy.hideRaw
+                              : copy.showRaw}
                           </button>
                         </div>
                         <div className="detail-list">

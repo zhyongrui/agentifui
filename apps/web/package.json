@@ -9,7 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "type-check": "next typegen && tsc --noEmit",
+    "type-check": "next typegen && node ./scripts/fix-next-typegen.mjs && tsc --noEmit",
     "lint": "echo 'web lint is not configured yet'"
   },
   "dependencies": {
