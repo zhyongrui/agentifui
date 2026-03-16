@@ -1,6 +1,7 @@
 import type {
   KnowledgeRetrievalMatch,
   KnowledgeRetrievalQuery,
+  KnowledgeSource,
 } from '@agentifui/shared';
 
 export const KNOWLEDGE_RETRIEVAL_DEFAULT_LIMIT = 4;
@@ -39,6 +40,13 @@ export function buildKnowledgeRetrievalQuery(input: {
     queryText: normalizeWhitespace(input.latestPrompt),
     limit: clampLimit(input.limit),
   };
+}
+
+export function isKnowledgeSourceAccessibleToGroup(
+  source: Pick<KnowledgeSource, 'groupId' | 'scope'>,
+  groupId: string | null,
+) {
+  return source.scope === 'tenant' || (groupId !== null && source.groupId === groupId);
 }
 
 export function scoreKnowledgeMatch(

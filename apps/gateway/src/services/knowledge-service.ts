@@ -14,7 +14,11 @@ import type {
 } from '@agentifui/shared';
 
 import { buildKnowledgeChunkPlan } from './knowledge-chunking.js';
-import { buildKnowledgeRetrievalQuery, rankKnowledgeMatches } from './knowledge-retrieval.js';
+import {
+  buildKnowledgeRetrievalQuery,
+  isKnowledgeSourceAccessibleToGroup,
+  rankKnowledgeMatches,
+} from './knowledge-retrieval.js';
 import { WORKSPACE_GROUPS } from './workspace-catalog-fixtures.js';
 
 type KnowledgeMutationErrorResult = {
@@ -397,10 +401,7 @@ export function createKnowledgeService(): KnowledgeService {
         sources
           .filter(source => source.tenantId === user.tenantId)
           .filter(source => source.status === 'succeeded')
-          .filter(
-            source =>
-              source.scope === 'tenant' || (query.groupId !== null && source.groupId === query.groupId),
-          )
+          .filter(source => isKnowledgeSourceAccessibleToGroup(source, query.groupId))
           .flatMap(source =>
             (sourceChunks.get(source.id) ?? []).map(chunk => ({
               sourceId: source.id,
