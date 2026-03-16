@@ -51,6 +51,10 @@ import {
   WorkspaceSourceBlockList,
 } from "../../../../components/workspace-sources";
 import {
+  WorkspaceToolCallSummaryList,
+  WorkspaceToolExecutionSummaryList,
+} from "../../../../components/workspace-tool-summary";
+import {
   fetchWorkspaceCatalog,
   fetchWorkspaceConversation,
   fetchWorkspacePendingActions,
@@ -2060,13 +2064,11 @@ export default function ConversationPage() {
                   }
                 />
                 {message.toolCalls && message.toolCalls.length > 0 ? (
-                  <ul className="chat-attachment-list">
-                    {message.toolCalls.map((toolCall) => (
-                      <li key={toolCall.id}>
-                        {copy.toolCalls}: {toolCall.function.name}
-                      </li>
-                    ))}
-                  </ul>
+                  <WorkspaceToolCallSummaryList
+                    locale={locale}
+                    title={copy.toolCalls}
+                    toolCalls={message.toolCalls}
+                  />
                 ) : null}
                 <div className="chat-message-actions">
                   <button
@@ -2616,35 +2618,10 @@ export default function ConversationPage() {
                           {selectedRun.status}
                         </span>
                       </div>
-                      <ul className="timeline-list">
-                        {selectedRun.toolExecutions.map((execution) => (
-                          <li
-                            key={execution.id}
-                            className="timeline-item"
-                          >
-                            <strong>
-                              {execution.request.function.name} · {copy.attempt}
-                              {execution.attempt}
-                              {copy.attemptSuffix}
-                            </strong>
-                            <span>
-                              {execution.latencyMs !== null
-                                ? `${execution.latencyMs} ms`
-                                : copy.latencyUnavailable}
-                            </span>
-                            <p>
-                              {execution.status}
-                              {" · "}
-                              {execution.result?.isError
-                                ? copy.errorResult
-                                : copy.resultStored}
-                            </p>
-                            {execution.result?.content ? (
-                              <p>{execution.result.content}</p>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
+                      <WorkspaceToolExecutionSummaryList
+                        executions={selectedRun.toolExecutions}
+                        locale={locale}
+                      />
                     </article>
                   ) : null}
                   <article className="chat-bubble assistant">

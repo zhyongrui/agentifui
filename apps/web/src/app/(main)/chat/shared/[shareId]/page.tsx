@@ -10,6 +10,7 @@ import { MainSectionNav } from "../../../../../components/main-section-nav";
 import { WorkspaceSafetySignalList } from "../../../../../components/workspace-safety";
 import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-artifacts";
 import { WorkspaceCitationList } from "../../../../../components/workspace-sources";
+import { WorkspaceToolCallSummaryList } from "../../../../../components/workspace-tool-summary";
 import { fetchWorkspaceSharedConversation } from "../../../../../lib/apps-client";
 import { clearAuthSession } from "../../../../../lib/auth-session";
 import { localizeWorkspaceApp } from "../../../../../lib/workspace-localization";
@@ -203,13 +204,11 @@ export default function SharedConversationPage() {
               </div>
               <ChatMarkdown content={message.content} />
               {message.toolCalls && message.toolCalls.length > 0 ? (
-                <ul className="chat-attachment-list">
-                  {message.toolCalls.map((toolCall) => (
-                    <li key={toolCall.id}>
-                      {copy.toolCalls}: {toolCall.function.name}
-                    </li>
-                  ))}
-                </ul>
+                <WorkspaceToolCallSummaryList
+                  locale={locale}
+                  title={copy.toolCalls}
+                  toolCalls={message.toolCalls}
+                />
               ) : null}
               {message.role === "assistant" &&
               message.status === "completed" &&

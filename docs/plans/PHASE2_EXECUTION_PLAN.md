@@ -134,7 +134,8 @@ Execution status:
 | completed | `P3-B-06` | tool execution / approval audit actions 已补齐到 chat、workspace route 和 persisted admin audit           |
 | completed | `P3-B-07` | tool timeout/retry/idempotency policy、attempt metadata、audit payload 和 persistence coverage 已闭环    |
 | completed | `P3-B-08` | admin tool policy controls、policy override persistence、route/client/admin page 已闭环                  |
-| active    | `P3-B-09` | 下一项，补 transcript 和 replay panel 上的 tool-call summary                                               |
+| completed | `P3-B-09` | transcript、shared transcript 和 replay panel 上的 tool-call summary 已闭环                               |
+| active    | `P3-B-10` | 下一项，补 tool-stage failure taxonomy 扩展                                                                |
 
 ## 5. First Batch Definition
 
@@ -184,7 +185,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-B-09`
+- the active follow-on item is `P3-B-10`
 
 ## 6. Detailed Execution Notes
 
@@ -741,7 +742,7 @@ Legend:
 - [x] `P3-B-06` Add audit coverage for tool execution and operator approval decisions
 - [x] `P3-B-07` Add timeout, retry, and idempotency handling for tool calls
 - [x] `P3-B-08` Add tool policy controls on admin surfaces
-- [ ] `P3-B-09` Render tool-call summaries in transcript and replay panels
+- [x] `P3-B-09` Render tool-call summaries in transcript and replay panels
 - [ ] `P3-B-10` Add failure taxonomy extensions for tool-stage errors
 - [ ] `P3-B-11` Add tests for successful, failed, cancelled, and approval-gated tool runs
 - [ ] `P3-B-12` Document how to add a new tool safely and how to test it end to end
