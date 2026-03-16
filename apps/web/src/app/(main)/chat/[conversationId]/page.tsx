@@ -34,6 +34,7 @@ import {
   type ChangeEvent,
 } from "react";
 
+import { useI18n } from "../../../../components/i18n-provider";
 import { MainSectionNav } from "../../../../components/main-section-nav";
 import { ChatMarkdown } from "../../../../components/chat-markdown";
 import { ConversationSharePanel } from "../../../../components/conversation-share-panel";
@@ -69,6 +70,10 @@ import {
   stopChatCompletion,
   streamChatCompletion,
 } from "../../../../lib/chat-client";
+import {
+  localizeAppStatus,
+  localizeWorkspaceApp,
+} from "../../../../lib/workspace-localization";
 import { useProtectedSession } from "../../../../lib/use-protected-session";
 
 function toGatewayMessages(
@@ -350,6 +355,7 @@ function findLatestSafetySignals(messages: WorkspaceConversationMessage[]) {
 export default function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
   const router = useRouter();
+  const { locale } = useI18n();
   const { session, isLoading } = useProtectedSession("/chat");
   const [conversation, setConversation] =
     useState<WorkspaceConversation | null>(null);
@@ -405,6 +411,108 @@ export default function ConversationPage() {
     typeof params?.conversationId === "string"
       ? params.conversationId.trim()
       : "";
+  const copy =
+    locale === "zh-CN"
+      ? {
+          checking: "正在检查登录状态...",
+          loading: "正在加载对话界面...",
+          backToApps: "返回应用工作台",
+          lead: "当前会话会在同一个工作台边界内持久化引用、来源块、产物和运行回放。",
+          conversation: "会话",
+          status: "状态",
+          pinned: "已置顶",
+          run: "运行",
+          trace: "链路追踪",
+          gatewayContext: "网关上下文",
+          gatewayLead: "最新会话快照来自工作台状态，每次 completion 都会落到可查询的独立运行记录。",
+          app: "应用",
+          attributedGroup: "归属群组",
+          conversationState: "会话状态",
+          pinnedHistory: "已在历史中置顶。",
+          notPinnedHistory: "未在历史中置顶。",
+          runStatus: "运行状态",
+          transcript: "转录",
+          runHistory: "运行历史",
+          conversationTitle: "会话标题",
+          streaming: "流式输出中...",
+          copied: "已复制",
+          copy: "复制",
+          quote: "引用",
+          retry: "重试",
+          regenerate: "重新生成",
+          savingFeedback: "正在保存反馈...",
+          rateReply: "给这条回复打分。",
+          helpful: "有帮助",
+          needsWork: "待改进",
+          followUp: "试试继续追问",
+          artifacts: "产物",
+          message: "消息",
+          askPlaceholder: (name: string) => `让 ${name} 处理一个具体问题...`,
+          attachments: "附件",
+          attachmentHint: `单个文件最多 ${formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)}。支持：文本、JSON、CSV、PDF、PNG、JPEG、WEBP、GIF。`,
+          remove: "移除",
+          uploading: "上传中...",
+          send: "发送消息",
+          stopping: "停止中...",
+          starting: "启动中...",
+          stopResponse: "停止回复",
+          runHistoryLead: "可查询的运行记录按最新优先排序。选择一条即可查看请求快照、输出内容和用量统计。",
+          noRuns: "还没有运行记录。",
+          noRunsLead: "第一次 completion 会创建首条可回放运行记录。",
+          selectRun: "请选择一条运行。",
+          selectRunLead: "第一次 completion 后会自动加载最新运行。",
+          chatHistory: "对话历史",
+        }
+      : {
+          checking: "Checking your session...",
+          loading: "Loading conversation surface...",
+          backToApps: "Back to Apps workspace",
+          lead: "The conversation surface now keeps persisted citations, source blocks, artifacts, and run replay on the same workspace boundary.",
+          conversation: "Conversation",
+          status: "Status",
+          pinned: "Pinned",
+          run: "Run",
+          trace: "Trace",
+          gatewayContext: "Gateway context",
+          gatewayLead: "The latest conversation snapshot still comes from workspace state, and each completion now lands in its own queryable run record.",
+          app: "App",
+          attributedGroup: "Attributed group",
+          conversationState: "Conversation state",
+          pinnedHistory: "Pinned in history.",
+          notPinnedHistory: "Not pinned in history.",
+          runStatus: "Run status",
+          transcript: "Transcript",
+          runHistory: "Run history",
+          conversationTitle: "Conversation title",
+          streaming: "Streaming...",
+          copied: "Copied",
+          copy: "Copy",
+          quote: "Quote",
+          retry: "Retry",
+          regenerate: "Regenerate",
+          savingFeedback: "Saving feedback...",
+          rateReply: "Rate this reply.",
+          helpful: "Helpful",
+          needsWork: "Needs work",
+          followUp: "Try a follow-up",
+          artifacts: "Artifacts",
+          message: "Message",
+          askPlaceholder: (name: string) => `Ask ${name} to work on something concrete...`,
+          attachments: "Attachments",
+          attachmentHint: `Up to ${formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} per file. Supported: text, JSON, CSV, PDF, PNG, JPEG, WEBP, GIF.`,
+          remove: "Remove",
+          uploading: "Uploading...",
+          send: "Send message",
+          stopping: "Stopping...",
+          starting: "Starting...",
+          stopResponse: "Stop response",
+          runHistoryLead: "Queryable run records are ordered newest first. Select one to inspect the stored request snapshot, assistant output and usage counters.",
+          noRuns: "No runs recorded yet.",
+          noRunsLead: "The first completion will create the initial replayable run record.",
+          selectRun: "Select a run.",
+          selectRunLead: "The latest run will be loaded automatically after the first completion.",
+          chatHistory: "Chat history",
+        };
 
   async function refreshGatewayRuntimeHealth() {
     const health = await fetchGatewayHealth();
@@ -1392,11 +1500,11 @@ export default function ConversationPage() {
   }
 
   if (isLoading) {
-    return <p className="lead">Checking your session...</p>;
+    return <p className="lead">{copy.checking}</p>;
   }
 
   if (isConversationLoading) {
-    return <p className="lead">Loading conversation surface...</p>;
+    return <p className="lead">{copy.loading}</p>;
   }
 
   if (conversationError) {
@@ -1406,7 +1514,7 @@ export default function ConversationPage() {
         <div className="notice error">{conversationError}</div>
         <div className="actions">
           <Link className="secondary" href="/apps">
-            Back to Apps workspace
+            {copy.backToApps}
           </Link>
         </div>
       </div>
@@ -1416,6 +1524,8 @@ export default function ConversationPage() {
   if (!session || !conversation) {
     return null;
   }
+
+  const localizedApp = localizeWorkspaceApp(conversation.app, locale);
 
   const replayMessages = selectedRun ? buildReplayMessages(selectedRun) : [];
   const replayAssistant = selectedRun ? buildAssistantReplay(selectedRun) : "";
@@ -1441,22 +1551,19 @@ export default function ConversationPage() {
         <div>
           <span className="eyebrow">P2-D2</span>
           <h1>{conversation.title}</h1>
-          <p className="lead">
-            The conversation surface now keeps persisted citations, source
-            blocks, artifacts, and run replay on the same workspace boundary.
-          </p>
+          <p className="lead">{copy.lead}</p>
         </div>
         <div className="workspace-badges">
           <span className="workspace-badge">
-            Conversation {conversation.id}
+            {copy.conversation} {conversation.id}
           </span>
-          <span className="workspace-badge">Status {conversation.status}</span>
+          <span className="workspace-badge">{copy.status} {conversation.status}</span>
           {conversation.pinned ? (
-            <span className="workspace-badge">Pinned</span>
+            <span className="workspace-badge">{copy.pinned}</span>
           ) : null}
-          <span className="workspace-badge">Run {conversation.run.id}</span>
+          <span className="workspace-badge">{copy.run} {conversation.run.id}</span>
           <span className="workspace-badge">
-            Trace {lastTraceId ?? conversation.run.traceId}
+            {copy.trace} {lastTraceId ?? conversation.run.traceId}
           </span>
         </div>
       </header>
@@ -1464,35 +1571,32 @@ export default function ConversationPage() {
       <section className="chat-panel">
         <div className="chat-panel-header">
           <div>
-            <h2>Gateway context</h2>
-            <p>
-              The latest conversation snapshot still comes from workspace state,
-              and each completion now lands in its own queryable run record.
-            </p>
+            <h2>{copy.gatewayContext}</h2>
+            <p>{copy.gatewayLead}</p>
           </div>
           <span className={`status-chip status-${conversation.app.status}`}>
-            {conversation.app.status}
+            {localizeAppStatus(conversation.app.status, locale)}
           </span>
         </div>
 
         <div className="chat-meta-grid">
           <article className="chat-meta-card">
-            <span>App</span>
-            <strong>{conversation.app.name}</strong>
-            <p>{conversation.app.summary}</p>
+            <span>{copy.app}</span>
+            <strong>{localizedApp.name}</strong>
+            <p>{localizedApp.summary}</p>
           </article>
           <article className="chat-meta-card">
-            <span>Attributed group</span>
+            <span>{copy.attributedGroup}</span>
             <strong>{conversation.activeGroup.name}</strong>
             <p>{conversation.activeGroup.description}</p>
           </article>
           <article className="chat-meta-card">
-            <span>Conversation state</span>
+            <span>{copy.conversationState}</span>
             <strong>{conversation.status}</strong>
-            <p>{conversation.pinned ? "Pinned in history." : "Not pinned in history."}</p>
+            <p>{conversation.pinned ? copy.pinnedHistory : copy.notPinnedHistory}</p>
           </article>
           <article className="chat-meta-card">
-            <span>Run status</span>
+            <span>{copy.runStatus}</span>
             <strong>{conversation.run.status}</strong>
             <p>
               Type: {conversation.run.type} · Trigger:{" "}
@@ -1500,14 +1604,14 @@ export default function ConversationPage() {
             </p>
           </article>
           <article className="chat-meta-card">
-            <span>Transcript</span>
+            <span>{copy.transcript}</span>
             <strong>{messages.length} messages</strong>
             <p>
               History is rehydrated from the workspace conversation response.
             </p>
           </article>
           <article className="chat-meta-card">
-            <span>Run history</span>
+            <span>{copy.runHistory}</span>
             <strong>{runs.length} runs</strong>
             <p>Each completion is now tracked separately for replay.</p>
           </article>
@@ -1515,7 +1619,7 @@ export default function ConversationPage() {
 
         <div className="conversation-management-panel">
           <label className="field" htmlFor="conversation-title">
-            Conversation title
+            {copy.conversationTitle}
           </label>
           <input
             id="conversation-title"
@@ -1897,7 +2001,7 @@ export default function ConversationPage() {
                   <span className="chat-bubble-label">
                     {message.role === "user"
                       ? session.user.displayName
-                      : conversation.app.name}
+                      : localizedApp.name}
                   </span>
                   <span
                     className={`chat-bubble-status status-${message.status}`}
@@ -1908,7 +2012,7 @@ export default function ConversationPage() {
                 <ChatMarkdown
                   content={message.content}
                   emptyFallback={
-                    message.status === "streaming" ? "Streaming..." : ""
+                    message.status === "streaming" ? copy.streaming : ""
                   }
                 />
                 <div className="chat-message-actions">
@@ -1920,7 +2024,7 @@ export default function ConversationPage() {
                     }
                     disabled={message.content.trim().length === 0}
                   >
-                    {copiedMessageId === message.id ? "Copied" : "Copy"}
+                    {copiedMessageId === message.id ? copy.copied : copy.copy}
                   </button>
                   <button
                     type="button"
@@ -1928,7 +2032,7 @@ export default function ConversationPage() {
                     onClick={() => handleQuoteMessage(message)}
                     disabled={message.content.trim().length === 0}
                   >
-                    Quote
+                    {copy.quote}
                   </button>
                   {message.role === "user" ? (
                     <button
@@ -1941,7 +2045,7 @@ export default function ConversationPage() {
                         isConversationReadOnly
                       }
                     >
-                      Retry
+                      {copy.retry}
                     </button>
                   ) : null}
                   {message.role === "assistant" &&
@@ -1957,7 +2061,7 @@ export default function ConversationPage() {
                         isConversationReadOnly
                       }
                     >
-                      Regenerate
+                      {copy.regenerate}
                     </button>
                   ) : null}
                 </div>
@@ -1976,10 +2080,10 @@ export default function ConversationPage() {
                   <div className="chat-feedback-row">
                     <span className="chat-feedback-note">
                       {activeFeedbackMessageId === message.id
-                        ? "Saving feedback..."
+                        ? copy.savingFeedback
                         : message.feedback
                           ? `Marked ${describeFeedbackRating(message.feedback.rating)}.`
-                          : "Rate this reply."}
+                          : copy.rateReply}
                     </span>
                     <div className="chat-feedback-actions">
                       <button
@@ -1991,7 +2095,7 @@ export default function ConversationPage() {
                         }
                         disabled={activeFeedbackMessageId !== null}
                       >
-                        Helpful
+                        {copy.helpful}
                       </button>
                       <button
                         type="button"
@@ -2002,7 +2106,7 @@ export default function ConversationPage() {
                         }
                         disabled={activeFeedbackMessageId !== null}
                       >
-                        Needs work
+                        {copy.needsWork}
                       </button>
                     </div>
                   </div>
@@ -2013,7 +2117,7 @@ export default function ConversationPage() {
                 message.suggestedPrompts.length > 0 ? (
                   <div className="chat-suggested-prompts">
                     <span className="chat-suggested-prompts-label">
-                      Try a follow-up
+                      {copy.followUp}
                     </span>
                     <div className="chat-suggested-prompt-list">
                       {message.suggestedPrompts.map((prompt) => (
@@ -2043,7 +2147,7 @@ export default function ConversationPage() {
                 {message.artifacts && message.artifacts.length > 0 ? (
                   <div className="chat-artifact-section">
                     <span className="chat-suggested-prompts-label">
-                      Artifacts
+                      {copy.artifacts}
                     </span>
                     <WorkspaceArtifactLinkList
                       artifacts={message.artifacts}
@@ -2058,20 +2162,20 @@ export default function ConversationPage() {
 
         <form className="chat-composer" onSubmit={handleSubmit}>
           <label className="field" htmlFor="chat-message">
-            Message
+            {copy.message}
           </label>
           <textarea
             id="chat-message"
             ref={composerInputRef}
             className="chat-composer-input"
             rows={4}
-            placeholder={`Ask ${conversation.app.name} to work on something concrete...`}
+            placeholder={copy.askPlaceholder(localizedApp.name)}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             disabled={isStreaming || isConversationReadOnly}
           />
           <label className="field" htmlFor="chat-attachment">
-            Attachments
+            {copy.attachments}
           </label>
           <input
             id="chat-attachment"
@@ -2083,10 +2187,7 @@ export default function ConversationPage() {
               isStreaming || isUploadingAttachments || isConversationReadOnly
             }
           />
-          <p className="chat-composer-hint">
-            Up to {formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} per
-            file. Supported: text, JSON, CSV, PDF, PNG, JPEG, WEBP, GIF.
-          </p>
+          <p className="chat-composer-hint">{copy.attachmentHint}</p>
           {draftAttachments.length > 0 ? (
             <div className="chat-attachment-draft-list">
               {draftAttachments.map((attachment) => (
@@ -2098,7 +2199,7 @@ export default function ConversationPage() {
                     onClick={() => handleAttachmentRemove(attachment.id)}
                     disabled={isStreaming || isConversationReadOnly}
                   >
-                    Remove
+                    {copy.remove}
                   </button>
                 </div>
               ))}
@@ -2116,10 +2217,10 @@ export default function ConversationPage() {
               }
             >
               {isUploadingAttachments
-                ? "Uploading..."
+                ? copy.uploading
                 : isStreaming
-                  ? "Streaming..."
-                  : "Send message"}
+                  ? copy.streaming
+                  : copy.send}
             </button>
             {isStreaming ? (
               <button
@@ -2129,10 +2230,10 @@ export default function ConversationPage() {
                 disabled={isStopping || isAwaitingRunMetadata}
               >
                 {isStopping
-                  ? "Stopping..."
+                  ? copy.stopping
                   : isAwaitingRunMetadata
-                    ? "Starting..."
-                    : "Stop response"}
+                    ? copy.starting
+                    : copy.stopResponse}
               </button>
             ) : null}
           </div>
@@ -2143,11 +2244,7 @@ export default function ConversationPage() {
         <div className="chat-panel-header">
           <div>
             <h2>Run history</h2>
-            <p>
-              Queryable run records are ordered newest first. Select one to
-              inspect the stored request snapshot, assistant output and usage
-              counters.
-            </p>
+            <p>{copy.runHistoryLead}</p>
           </div>
         </div>
 
@@ -2155,11 +2252,8 @@ export default function ConversationPage() {
           <div className="run-history-list">
             {runs.length === 0 ? (
               <div className="chat-empty-state">
-                <strong>No runs recorded yet.</strong>
-                <p>
-                  The first completion will create the initial replayable run
-                  record.
-                </p>
+                <strong>{copy.noRuns}</strong>
+                <p>{copy.noRunsLead}</p>
               </div>
             ) : (
               runs.map((run) => (
@@ -2470,11 +2564,8 @@ export default function ConversationPage() {
               </>
             ) : (
               <div className="chat-empty-state">
-                <strong>Select a run.</strong>
-                <p>
-                  The latest run will be loaded automatically after the first
-                  completion.
-                </p>
+                <strong>{copy.selectRun}</strong>
+                <p>{copy.selectRunLead}</p>
               </div>
             )}
           </div>
@@ -2483,10 +2574,10 @@ export default function ConversationPage() {
 
       <div className="actions">
         <Link className="secondary" href="/chat">
-          Chat history
+          {copy.chatHistory}
         </Link>
         <Link className="secondary" href="/apps">
-          Back to Apps workspace
+          {copy.backToApps}
         </Link>
       </div>
     </div>

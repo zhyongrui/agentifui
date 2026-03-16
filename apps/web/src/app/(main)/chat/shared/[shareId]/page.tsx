@@ -5,17 +5,20 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ChatMarkdown } from "../../../../../components/chat-markdown";
+import { useI18n } from "../../../../../components/i18n-provider";
 import { MainSectionNav } from "../../../../../components/main-section-nav";
 import { WorkspaceSafetySignalList } from "../../../../../components/workspace-safety";
 import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-artifacts";
 import { WorkspaceCitationList } from "../../../../../components/workspace-sources";
 import { fetchWorkspaceSharedConversation } from "../../../../../lib/apps-client";
 import { clearAuthSession } from "../../../../../lib/auth-session";
+import { localizeWorkspaceApp } from "../../../../../lib/workspace-localization";
 import { useProtectedSession } from "../../../../../lib/use-protected-session";
 
 export default function SharedConversationPage() {
   const params = useParams<{ shareId: string }>();
   const router = useRouter();
+  const { locale } = useI18n();
   const { session, isLoading } = useProtectedSession("/chat/shared");
   const [payload, setPayload] = useState<Awaited<
     ReturnType<typeof fetchWorkspaceSharedConversation>
@@ -23,11 +26,50 @@ export default function SharedConversationPage() {
   const [error, setError] = useState<string | null>(null);
   const shareId =
     typeof params?.shareId === "string" ? params.shareId.trim() : "";
+  const copy =
+    locale === "zh-CN"
+      ? {
+          missingShareId: "缺少共享标识。",
+          loadFailed: "共享会话加载失败，请稍后重试。",
+          checking: "正在检查登录状态...",
+          loading: "正在加载共享会话...",
+          back: "返回应用工作台",
+          lead:
+            "这是一个只读共享工作台会话。你可以查看转录、附件和持久化产物，但不能在这里发送新消息。",
+          shareLabel: "共享",
+          groupLabel: "群组",
+          sharedConversation: "共享会话",
+          sharedLead: (groupName: string) => `这段转录当前以只读方式共享给 ${groupName}。`,
+          workspaceUser: "工作台用户",
+          suggested: "建议的下一步提问",
+          safety: "共享安全提示",
+          citations: "共享引用",
+          artifacts: "共享产物",
+        }
+      : {
+          missingShareId: "Share id is missing.",
+          loadFailed: "The shared conversation could not be loaded. Please retry.",
+          checking: "Checking your session...",
+          loading: "Loading shared conversation...",
+          back: "Back to Apps workspace",
+          lead:
+            "This is a read-only shared workspace conversation. You can inspect the transcript, attachments, and persisted artifacts, but you cannot send new messages from this surface.",
+          shareLabel: "Share",
+          groupLabel: "Group",
+          sharedConversation: "Shared conversation",
+          sharedLead: (groupName: string) =>
+            `This transcript is currently shared read-only with ${groupName}.`,
+          workspaceUser: "Workspace user",
+          suggested: "Suggested next prompts",
+          safety: "Shared safety signals",
+          citations: "Shared citations",
+          artifacts: "Shared artifacts",
+        };
 
   useEffect(() => {
     if (!session || !shareId) {
       setPayload(null);
-      setError(shareId ? null : "Share id is missing.");
+      setError(shareId ? null : copy.missingShareId);
       return;
     }
 
@@ -60,9 +102,7 @@ export default function SharedConversationPage() {
         setPayload(result);
       } catch {
         if (!cancelled) {
-          setError(
-            "The shared conversation could not be loaded. Please retry.",
-          );
+          setError(copy.loadFailed);
         }
       }
     })();
@@ -73,7 +113,7 @@ export default function SharedConversationPage() {
   }, [router, session, shareId]);
 
   if (isLoading) {
-    return <p className="lead">Checking your session...</p>;
+    return <p className="lead">{copy.checking}</p>;
   }
 
   if (error) {
@@ -83,7 +123,7 @@ export default function SharedConversationPage() {
         <div className="notice error">{error}</div>
         <div className="actions">
           <Link className="secondary" href="/apps">
-            Back to Apps workspace
+            {copy.back}
           </Link>
         </div>
       </div>
@@ -91,10 +131,11 @@ export default function SharedConversationPage() {
   }
 
   if (!payload || !payload.ok) {
-    return <p className="lead">Loading shared conversation...</p>;
+    return <p className="lead">{copy.loading}</p>;
   }
 
   const { conversation, share } = payload.data;
+  const localizedApp = localizeWorkspaceApp(conversation.app, locale);
 
   return (
     <div className="chat-surface stack">
@@ -104,15 +145,11 @@ export default function SharedConversationPage() {
         <div>
           <span className="eyebrow">R12 Sharing</span>
           <h1>{conversation.title}</h1>
-          <p className="lead">
-            This is a read-only shared workspace conversation. You can inspect
-            the transcript, attachments, and persisted artifacts, but you
-            cannot send new messages from this surface.
-          </p>
+          <p className="lead">{copy.lead}</p>
         </div>
         <div className="workspace-badges">
-          <span className="workspace-badge">Share {share.id}</span>
-          <span className="workspace-badge">Group {share.group.name}</span>
+          <span className="workspace-badge">{copy.shareLabel} {share.id}</span>
+          <span className="workspace-badge">{copy.groupLabel} {share.group.name}</span>
           <span className="workspace-badge">{share.status}</span>
         </div>
       </header>
@@ -120,11 +157,8 @@ export default function SharedConversationPage() {
       <section className="chat-panel">
         <div className="chat-panel-header">
           <div>
-            <h2>Shared conversation</h2>
-            <p>
-              This transcript is currently shared read-only with{" "}
-              {share.group.name}.
-            </p>
+            <h2>{copy.sharedConversation}</h2>
+            <p>{copy.sharedLead(share.group.name)}</p>
           </div>
         </div>
 
@@ -134,8 +168,8 @@ export default function SharedConversationPage() {
               <div className="chat-bubble-meta">
                 <span className="chat-bubble-label">
                   {message.role === "user"
-                    ? "Workspace user"
-                    : conversation.app.name}
+                    ? copy.workspaceUser
+                    : localizedApp.name}
                 </span>
                 <span className={`chat-bubble-status status-${message.status}`}>
                   {message.status}
@@ -148,7 +182,7 @@ export default function SharedConversationPage() {
               message.suggestedPrompts.length > 0 ? (
                 <div className="chat-suggested-prompts">
                   <span className="chat-suggested-prompts-label">
-                    Suggested next prompts
+                    {copy.suggested}
                   </span>
                   <div className="chat-suggested-prompt-list">
                     {message.suggestedPrompts.map((prompt) => (
@@ -165,14 +199,14 @@ export default function SharedConversationPage() {
               {message.safetySignals && message.safetySignals.length > 0 ? (
                 <WorkspaceSafetySignalList
                   signals={message.safetySignals}
-                  title="Shared safety signals"
+                  title={copy.safety}
                   publicView
                 />
               ) : null}
               {message.citations && message.citations.length > 0 ? (
                 <WorkspaceCitationList
                   citations={message.citations}
-                  title="Shared citations"
+                  title={copy.citations}
                 />
               ) : null}
               {message.attachments && message.attachments.length > 0 ? (
@@ -188,7 +222,7 @@ export default function SharedConversationPage() {
               {message.artifacts && message.artifacts.length > 0 ? (
                 <div className="chat-artifact-section">
                   <span className="chat-suggested-prompts-label">
-                    Shared artifacts
+                    {copy.artifacts}
                   </span>
                   <WorkspaceArtifactLinkList
                     artifacts={message.artifacts}
@@ -204,7 +238,7 @@ export default function SharedConversationPage() {
 
       <div className="actions">
         <Link className="secondary" href="/apps">
-          Back to Apps workspace
+          {copy.back}
         </Link>
       </div>
     </div>

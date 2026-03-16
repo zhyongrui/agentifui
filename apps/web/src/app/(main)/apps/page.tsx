@@ -24,6 +24,12 @@ import {
   launchWorkspaceApp,
   updateWorkspacePreferences,
 } from '../../../lib/apps-client';
+import {
+  localizeAppKind,
+  localizeAppStatus,
+  localizeAppTag,
+  localizeWorkspaceCatalogApps,
+} from '../../../lib/workspace-localization';
 import { useI18n } from '../../../components/i18n-provider';
 import { clearAuthSession } from '../../../lib/auth-session';
 import { useProtectedSession } from '../../../lib/use-protected-session';
@@ -134,6 +140,7 @@ type WorkspaceSectionProps = {
   onPrimaryAction: (app: WorkspaceApp, guard: AppLaunchGuard) => void;
   emptyMessage: string;
   copy: ReturnType<typeof useI18n>['messages']['apps'];
+  locale: ReturnType<typeof useI18n>['locale'];
 };
 
 function WorkspaceSection({
@@ -150,6 +157,7 @@ function WorkspaceSection({
   onPrimaryAction,
   emptyMessage,
   copy,
+  locale,
 }: WorkspaceSectionProps) {
   return (
     <section className="workspace-section">
@@ -181,20 +189,22 @@ function WorkspaceSection({
                   <div className="app-card-copy">
                     <div className="app-title-row">
                       <h3>{app.name}</h3>
-                      <span className={`status-chip status-${app.status}`}>{app.status}</span>
+                      <span className={`status-chip status-${app.status}`}>
+                        {localizeAppStatus(app.status, locale)}
+                      </span>
                     </div>
                     <p>{app.summary}</p>
                   </div>
                 </div>
 
                 <div className="tag-row">
-                  <span className="tag">{app.kind}</span>
+                  <span className="tag">{localizeAppKind(app.kind, locale)}</span>
                   <span className="tag">
                     {copy.searchTagCost} {app.launchCost}
                   </span>
                   {app.tags.map(tag => (
                     <span className="tag tag-muted" key={tag}>
-                      {tag}
+                      {localizeAppTag(tag, locale)}
                     </span>
                   ))}
                 </div>
@@ -235,7 +245,7 @@ function WorkspaceSection({
 
 export default function AppsPage() {
   const router = useRouter();
-  const { messages, formatDateTime } = useI18n();
+  const { locale, messages, formatDateTime } = useI18n();
   const appsCopy = messages.apps;
   const { session, isLoading } = useProtectedSession('/apps');
   const [workspace, setWorkspace] = useState<WorkspaceCatalog | null>(null);
@@ -351,6 +361,7 @@ export default function AppsPage() {
 
   const currentSession = session;
   const workspaceState = workspace;
+  const localizedApps = localizeWorkspaceCatalogApps(workspaceState.apps, locale);
   const currentActiveGroup = activeGroup;
   const quotaUsages =
     workspaceState.quotaUsagesByGroupId[currentActiveGroup.id] ??
@@ -358,13 +369,13 @@ export default function AppsPage() {
     [];
   const quotaAlerts = listQuotaAlerts(quotaUsages);
   const sections = buildWorkspaceSections({
-    apps: workspaceState.apps,
+    apps: localizedApps,
     memberGroupIds: workspaceState.memberGroupIds,
     favoriteIds,
     recentIds,
     search: deferredSearch,
   });
-  const hasAdminPreview = workspaceState.apps.some(app => app.id === 'app_tenant_control');
+  const hasAdminPreview = localizedApps.some(app => app.id === 'app_tenant_control');
 
   function applyWorkspacePreferences(nextPreferences: {
     favoriteAppIds: string[];
@@ -608,6 +619,7 @@ export default function AppsPage() {
         }}
         emptyMessage={appsCopy.recentEmpty}
         copy={appsCopy}
+        locale={locale}
       />
 
       <WorkspaceSection
@@ -628,6 +640,7 @@ export default function AppsPage() {
         }}
         emptyMessage={appsCopy.favoritesEmpty}
         copy={appsCopy}
+        locale={locale}
       />
 
       <WorkspaceSection
@@ -648,6 +661,7 @@ export default function AppsPage() {
         }}
         emptyMessage={appsCopy.allAppsEmpty}
         copy={appsCopy}
+        locale={locale}
       />
     </div>
   );

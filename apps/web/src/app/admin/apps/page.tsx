@@ -23,6 +23,11 @@ import {
   fetchGatewayHealth,
   type GatewayRuntimeHealthSnapshot,
 } from '../../../lib/gateway-health-client';
+import {
+  localizeAdminApp,
+  localizeAppKind,
+  localizeAppStatus,
+} from '../../../lib/workspace-localization';
 import { useAdminPageData } from '../../../lib/use-admin-page';
 
 function readDraft(
@@ -64,7 +69,7 @@ function formatToolAuth(tool: WorkspaceAppToolSummary) {
 }
 
 export default function AdminAppsPage() {
-  const { messages, formatDateTime } = useI18n();
+  const { locale, messages, formatDateTime } = useI18n();
   const appsCopy = messages.adminApps;
   const { data, error, isLoading, reload, session } = useAdminPageData(fetchAdminApps);
   const [drafts, setDrafts] = useState<Record<string, AdminAppGrantCreateRequest>>({});
@@ -164,7 +169,13 @@ export default function AdminAppsPage() {
       },
     }));
     setPendingActionId(null);
-    setNotice(appsCopy.overrideCreated(result.data.grant.user.email, result.data.grant.effect, result.data.app.name));
+    setNotice(
+      appsCopy.overrideCreated(
+        result.data.grant.user.email,
+        result.data.grant.effect,
+        localizeAdminApp(result.data.app, locale).name
+      )
+    );
     reload();
   }
 
@@ -194,7 +205,7 @@ export default function AdminAppsPage() {
     }
 
     setPendingActionId(null);
-    setNotice(appsCopy.overrideRevoked(result.data.revokedGrantId, result.data.app.name));
+    setNotice(appsCopy.overrideRevoked(result.data.revokedGrantId, localizeAdminApp(result.data.app, locale).name));
     reload();
   }
 
@@ -228,7 +239,12 @@ export default function AdminAppsPage() {
     }
 
     setPendingActionId(null);
-    setNotice(appsCopy.toolRegistrySaved(result.data.app.name, result.data.enabledToolNames.length));
+    setNotice(
+      appsCopy.toolRegistrySaved(
+        localizeAdminApp(result.data.app, locale).name,
+        result.data.enabledToolNames.length
+      )
+    );
     reload();
   }
 
@@ -324,6 +340,7 @@ export default function AdminAppsPage() {
 
           <div className="app-grid">
             {data.apps.map(app => {
+              const localizedApp = localizeAdminApp(app, locale);
               const draft = readDraft(drafts, app.id);
               const enabledToolDraft = readToolDraft(toolDrafts, app);
 
@@ -333,15 +350,17 @@ export default function AdminAppsPage() {
                     <div className="app-avatar">{app.shortCode}</div>
                     <div className="app-card-copy">
                       <div className="app-title-row">
-                        <h2>{app.name}</h2>
-                        <span className={`status-chip status-${app.status}`}>{app.status}</span>
+                        <h2>{localizedApp.name}</h2>
+                        <span className={`status-chip status-${app.status}`}>
+                          {localizeAppStatus(app.status, locale)}
+                        </span>
                       </div>
-                      <p>{app.summary}</p>
+                      <p>{localizedApp.summary}</p>
                     </div>
                   </div>
 
                   <div className="tag-row">
-                    <span className="tag">{app.kind}</span>
+                    <span className="tag">{localizeAppKind(app.kind, locale)}</span>
                     <span className="tag">
                       {appsCopy.costTag} {app.launchCost}
                     </span>
@@ -420,7 +439,7 @@ export default function AdminAppsPage() {
                                 </span>
                               </div>
                               <input
-                                aria-label={`${app.name} tool ${tool.name}`}
+                                aria-label={`${localizedApp.name} tool ${tool.name}`}
                                 checked={checked}
                                 onChange={() =>
                                   setToolDrafts(currentDrafts => ({
@@ -462,7 +481,7 @@ export default function AdminAppsPage() {
                       <label className="field">
                         {appsCopy.email}
                         <input
-                          aria-label={`${app.name} grant email`}
+                          aria-label={`${localizedApp.name} grant email`}
                           autoComplete="off"
                           onChange={(event: ChangeEvent<HTMLInputElement>) =>
                             updateDraft(app.id, 'subjectUserEmail', event.target.value)
@@ -475,7 +494,7 @@ export default function AdminAppsPage() {
                       <label className="field">
                         {appsCopy.effect}
                         <select
-                          aria-label={`${app.name} grant effect`}
+                          aria-label={`${localizedApp.name} grant effect`}
                           onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                             updateDraft(app.id, 'effect', event.target.value as AdminAppGrantCreateRequest['effect'])
                           }
@@ -489,7 +508,7 @@ export default function AdminAppsPage() {
                       <label className="field">
                         {appsCopy.reason}
                         <input
-                          aria-label={`${app.name} grant reason`}
+                          aria-label={`${localizedApp.name} grant reason`}
                           onChange={(event: ChangeEvent<HTMLInputElement>) =>
                             updateDraft(app.id, 'reason', event.target.value)
                           }
