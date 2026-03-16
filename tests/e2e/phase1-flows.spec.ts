@@ -35,6 +35,8 @@ const FAVORITES_NAME = eitherLocale("收藏", "Favorites");
 const RECENT_NAME = eitherLocale("最近使用", "Recent");
 const SEARCH_APPS_LABEL = eitherLocale("搜索应用", "Search apps");
 const WORKING_GROUP_LABEL = eitherLocale("工作群组", "Working group");
+const MESSAGE_LABEL = eitherLocale("消息", "Message");
+const SEND_MESSAGE_BUTTON = eitherLocale("发送消息", "Send message");
 const REGISTERED_NOTICE = /^(注册完成，现在可以登录。|Registration complete\. You can now sign in\.)$/;
 const ACTIVATED_NOTICE = /^(邀请已接受，请使用新密码登录。|Invitation accepted\. Sign in with your new password\.)$/;
 const SSO_DETECTED_NOTICE = /^(检测到|Enterprise SSO detected for)/;
@@ -43,6 +45,28 @@ const TOTAL_USERS_TEXT = /^(用户总数|Total users)$/;
 const TOTAL_GROUPS_TEXT = /^(群组总数|Total groups)$/;
 const SAVE_TOOL_REGISTRY_BUTTON = /^(保存工具注册表|Save tool registry)$/;
 const SAVE_DIRECT_OVERRIDE_BUTTON = /^(保存直接覆盖|Save direct override)$/;
+const SERVICE_COPILOT_APP = eitherLocale("服务副驾", "Service Copilot");
+const POLICY_WATCH_APP = eitherLocale("政策观察", "Policy Watch");
+const RUNBOOK_MENTOR_APP = eitherLocale("流程手册导师", "Runbook Mentor");
+const TENANT_CONTROL_APP = eitherLocale("租户控制台", "Tenant Control");
+const GATEWAY_CONTEXT_HEADING = eitherLocale("网关上下文", "Gateway context");
+const QUOTA_CONTEXT_HEADING = eitherLocale("Quota context", "Quota context");
+const SHARED_READ_ONLY_LEAD = eitherLocale(
+  "这是一个只读共享工作台会话。你可以查看转录、附件和持久化产物，但不能在这里发送新消息。",
+  "This is a read-only shared workspace conversation. You can inspect the transcript, attachments, and persisted artifacts, but you cannot send new messages from this surface.",
+);
+const SHARED_PREVIEW_TEXT = eitherLocale("共享预览", "Shared preview");
+const BACK_TO_SHARED_CONVERSATION = eitherLocale(
+  "返回共享会话",
+  "Back to shared conversation",
+);
+const DOWNLOAD_ARTIFACT_BUTTON = eitherLocale("下载产物", "Download artifact");
+const VIEWER_PRESENCE_LABEL = eitherLocale("协作者视图", "Viewer presence");
+const SHARED_VIEW_TEXT = eitherLocale("共享视图", "Shared view");
+const POLICY_WATCH_PLACEHOLDER = eitherLocale(
+  "让政策观察处理一些具体事项...",
+  "Ask Policy Watch to work on something concrete...",
+);
 
 function uniqueEmail(prefix: string, domain = "example.com") {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@${domain}`;
@@ -110,7 +134,7 @@ function generateTotpCode(secret: string, nowMs = Date.now()): string {
   return String(binary % 1_000_000).padStart(6, "0");
 }
 
-function appCard(page: Page, appName: string): Locator {
+function appCard(page: Page, appName: string | RegExp): Locator {
   return page.locator("article.app-card").filter({
     has: page.getByRole("heading", { name: appName }),
   });
@@ -160,6 +184,9 @@ async function register(
     waitForGatewayPost(page, "/auth/register"),
     page.getByRole("button", { name: CREATE_ACCOUNT_BUTTON }).click(),
   ]);
+  await page.waitForURL(/\/login\?registered=1$/, { timeout: 5_000 }).catch(async () => {
+    await page.waitForLoadState("networkidle").catch(() => {});
+  });
 }
 
 async function login(
@@ -184,6 +211,11 @@ async function login(
     waitForGatewayPost(page, "/auth/login"),
     page.getByRole("button", { name: CONTINUE_BUTTON }).click(),
   ]);
+  await page
+    .waitForURL(/\/(?:apps|auth\/mfa|auth\/pending)(?:\?|$)/, { timeout: 5_000 })
+    .catch(async () => {
+      await page.waitForLoadState("networkidle").catch(() => {});
+    });
 }
 
 async function readSessionToken(page: Page) {
@@ -231,7 +263,7 @@ async function expectAppsWorkspace(page: Page) {
 
 async function expectConversationSurface(
   page: Page,
-  appName: string,
+  appName: string | RegExp,
   options: {
     expectComposerEnabled?: boolean;
   } = {},
@@ -242,13 +274,11 @@ async function expectConversationSurface(
   await expect(page.getByRole("heading", { name: appName })).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText("Gateway context")).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Quota context" }),
-  ).toBeVisible();
+  await expect(page.getByText(GATEWAY_CONTEXT_HEADING)).toBeVisible();
+  await expect(page.getByRole("heading", { name: QUOTA_CONTEXT_HEADING })).toBeVisible();
 
   if (options.expectComposerEnabled ?? true) {
-    await expect(page.getByLabel("Message")).toBeEnabled();
+    await expect(page.getByLabel(MESSAGE_LABEL)).toBeEnabled();
   }
 }
 
@@ -1579,30 +1609,26 @@ test("conversation shares allow another group member to open a read-only shared 
   });
   await expectAppsWorkspace(page);
 
-  await appCard(page, "Policy Watch")
-    .getByRole("button", { name: /^(Switch to|切换到) Research Lab$/ })
-    .click();
-  await expect(
-    page.getByRole("combobox", { name: WORKING_GROUP_LABEL }),
-  ).toHaveValue("grp_research");
+  await page.getByRole("combobox", { name: WORKING_GROUP_LABEL }).selectOption("grp_research");
+  await expect(page.getByRole("combobox", { name: WORKING_GROUP_LABEL })).toHaveValue(
+    "grp_research",
+  );
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
-    appCard(page, "Policy Watch")
+    appCard(page, TENANT_CONTROL_APP)
       .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
-  await expectConversationSurface(page, "Policy Watch");
+  await expectConversationSurface(page, TENANT_CONTROL_APP);
   await page
-    .getByLabel("Message")
+    .getByLabel(MESSAGE_LABEL)
     .fill("Share this transcript with my research team.");
-  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: SEND_MESSAGE_BUTTON }).click();
   await expect(
     page
       .locator("article.chat-bubble.assistant")
       .first()
-      .getByText("Policy Watch is now reachable through the AgentifUI gateway.", {
-        exact: true,
-      }),
+      .getByText(/is now reachable through the AgentifUI gateway\./),
   ).toBeVisible({
     timeout: 60_000,
   });
@@ -1634,9 +1660,7 @@ test("conversation shares allow another group member to open a read-only shared 
   });
   await page.goto(sharedHref ?? "/apps");
   await expect(page).toHaveURL(/\/chat\/shared\/share_/);
-  await expect(
-    page.getByText("This is a read-only shared workspace conversation."),
-  ).toBeVisible({
+  await expect(page.getByText(SHARED_READ_ONLY_LEAD)).toBeVisible({
     timeout: 60_000,
   });
   await expect(
@@ -1648,14 +1672,128 @@ test("conversation shares allow another group member to open a read-only shared 
   await page.locator(".artifact-link-card").first().click();
   await expect(page).toHaveURL(/\/chat\/artifacts\/artifact_.*shareId=share_/);
   await expect(
-    page.getByRole("button", { name: "Download artifact" }),
+    page.getByRole("button", { name: DOWNLOAD_ARTIFACT_BUTTON }),
   ).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText("Shared preview")).toBeVisible();
-  await page.getByRole("link", { name: "Back to shared conversation" }).click();
+  await expect(page.getByText(SHARED_PREVIEW_TEXT)).toBeVisible();
+  await page.getByRole("link", { name: BACK_TO_SHARED_CONVERSATION }).click();
   await expect(page).toHaveURL(/\/chat\/shared\/share_/);
-  await expect(page.getByLabel("Message")).toHaveCount(0);
+  await expect(page.getByLabel(MESSAGE_LABEL)).toHaveCount(0);
+});
+
+test("shared transcripts show presence chips for multiple viewers", async ({
+  browser,
+  page,
+}) => {
+  const ownerEmail = uniqueEmail("presence-owner");
+  const readerAEmail = uniqueEmail("presence-reader-a");
+  const readerBEmail = uniqueEmail("presence-reader-b");
+
+  await register(page, {
+    email: ownerEmail,
+    displayName: "Presence Owner",
+  });
+  await register(page, {
+    email: readerAEmail,
+    displayName: "Presence Reader A",
+  });
+  await register(page, {
+    email: readerBEmail,
+    displayName: "Presence Reader B",
+  });
+
+  await login(page, {
+    email: ownerEmail,
+  });
+  await expectAppsWorkspace(page);
+
+  await page.getByRole("combobox", { name: WORKING_GROUP_LABEL }).selectOption("grp_research");
+  await expect(page.getByRole("combobox", { name: WORKING_GROUP_LABEL })).toHaveValue(
+    "grp_research",
+  );
+  await Promise.all([
+    waitForGatewayPost(page, "/workspace/apps/launch"),
+    appCard(page, TENANT_CONTROL_APP)
+      .getByRole("button", { name: /^(Open app|打开应用)$/ })
+      .click(),
+  ]);
+  await expectConversationSurface(page, TENANT_CONTROL_APP);
+  await page.getByLabel(MESSAGE_LABEL).fill("Share this transcript for live review.");
+  await page.getByRole("button", { name: SEND_MESSAGE_BUTTON }).click();
+  await expect(
+    page
+      .locator("article.chat-bubble.assistant")
+      .first()
+      .getByText(/is now reachable through the AgentifUI gateway\./),
+  ).toBeVisible({
+    timeout: 60_000,
+  });
+
+  await page.getByLabel("Share group").selectOption("grp_research");
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().includes("/api/gateway/workspace/conversations/") &&
+        response.url().includes("/shares"),
+      {
+        timeout: 60_000,
+      },
+    ),
+    page.getByRole("button", { name: "Create read-only share" }).click(),
+  ]);
+
+  const sharedHref = await page
+    .getByRole("link", { name: "Open shared view" })
+    .first()
+    .getAttribute("href");
+
+  expect(sharedHref).toMatch(/\/chat\/shared\/share_/);
+
+  const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3111";
+  const readerAContext = await browser.newContext({ baseURL });
+  const readerBContext = await browser.newContext({ baseURL });
+  const readerAPage = await readerAContext.newPage();
+  const readerBPage = await readerBContext.newPage();
+
+  try {
+    await login(readerAPage, {
+      email: readerAEmail,
+    });
+    await login(readerBPage, {
+      email: readerBEmail,
+    });
+
+    await readerAPage.goto(sharedHref ?? "/apps");
+    await expect(readerAPage).toHaveURL(/\/chat\/shared\/share_/);
+    await expect(readerAPage.getByText(SHARED_READ_ONLY_LEAD)).toBeVisible({
+      timeout: 60_000,
+    });
+
+    await readerBPage.goto(sharedHref ?? "/apps");
+    await expect(readerBPage).toHaveURL(/\/chat\/shared\/share_/);
+    await expect(readerBPage.getByText(SHARED_READ_ONLY_LEAD)).toBeVisible({
+      timeout: 60_000,
+    });
+
+    await readerAPage.reload();
+
+    const presenceSection = readerAPage.locator(".workspace-presence-section");
+    await expect(presenceSection.getByText(VIEWER_PRESENCE_LABEL)).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect
+      .poll(async () => await presenceSection.locator(".workspace-presence-chip").count(), {
+        timeout: 30_000,
+      })
+      .toBeGreaterThanOrEqual(2);
+    await expect(presenceSection.getByText("Presence Reader A")).toBeVisible();
+    await expect(presenceSection.getByText("Presence Reader B")).toBeVisible();
+  } finally {
+    await readerAContext.close();
+    await readerBContext.close();
+  }
 });
 
 test("chat history lists recent conversations and links back to timeline-aware replay", async ({

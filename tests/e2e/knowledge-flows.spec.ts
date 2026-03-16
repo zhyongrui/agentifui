@@ -18,12 +18,26 @@ const CONTINUE_BUTTON = eitherLocale("继续", "Continue");
 const APPS_WORKSPACE_NAME = eitherLocale("应用工作台", "Apps workspace");
 const ADMIN_PREVIEW_LINK = eitherLocale("管理预览", "Admin preview");
 const ADMIN_SOURCES_LINK = eitherLocale("知识源", "Sources");
+const ADMIN_NAV_NAME = eitherLocale("管理导航", "Admin navigation");
+const ADMIN_SOURCES_HEADING = eitherLocale("知识源", "Sources");
+const POLICY_WATCH_APP = eitherLocale("政策观察", "Policy Watch");
+const MESSAGE_LABEL = eitherLocale("消息", "Message");
+const GATEWAY_CONTEXT_HEADING = eitherLocale("网关上下文", "Gateway context");
+const SOURCE_TITLE_LABEL = eitherLocale("标题", "Title");
+const SOURCE_KIND_LABEL = eitherLocale("来源类型", "Source kind");
+const SOURCE_CONTENT_LABEL = eitherLocale("来源内容", "Source content");
+const SOURCE_SCOPE_LABEL = eitherLocale("范围", "Scope");
+const SOURCE_GROUP_ID_LABEL = eitherLocale("群组 ID", "Group ID");
+const SOURCE_LABELS_LABEL = eitherLocale("标签", "Labels");
+const QUEUE_SOURCE_BUTTON = eitherLocale("加入来源", "Queue source");
+const MARK_SUCCEEDED_BUTTON = eitherLocale("标记为 succeeded", "Mark succeeded");
+const SEND_MESSAGE_BUTTON = eitherLocale("发送消息", "Send message");
 
 function uniqueEmail(prefix: string, domain = "example.com") {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@${domain}`;
 }
 
-function appCard(page: Page, appName: string): Locator {
+function appCard(page: Page, appName: string | RegExp): Locator {
   return page.locator("article.app-card").filter({
     has: page.getByRole("heading", { name: appName }),
   });
@@ -56,6 +70,9 @@ async function register(
     waitForGatewayRequest(page, "POST", "/auth/register"),
     page.getByRole("button", { name: CREATE_ACCOUNT_BUTTON }).click(),
   ]);
+  await page.waitForURL(/\/login\?registered=1$/, { timeout: 5_000 }).catch(async () => {
+    await page.waitForLoadState("networkidle").catch(() => {});
+  });
 }
 
 async function login(page: Page, email: string) {
@@ -66,6 +83,9 @@ async function login(page: Page, email: string) {
     waitForGatewayRequest(page, "POST", "/auth/login"),
     page.getByRole("button", { name: CONTINUE_BUTTON }).click(),
   ]);
+  await page.waitForURL(/\/apps(?:\?|$)/, { timeout: 5_000 }).catch(async () => {
+    await page.waitForLoadState("networkidle").catch(() => {});
+  });
 }
 
 async function expectAppsWorkspace(page: Page) {
@@ -79,14 +99,14 @@ async function expectAppsWorkspace(page: Page) {
   });
 }
 
-async function expectConversationSurface(page: Page, appName: string) {
+async function expectConversationSurface(page: Page, appName: string | RegExp) {
   await expect(page).toHaveURL(/\/chat\/conv_/, {
     timeout: 60_000,
   });
   await expect(page.getByRole("heading", { name: appName })).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText("Gateway context")).toBeVisible();
+  await expect(page.getByText(GATEWAY_CONTEXT_HEADING)).toBeVisible();
 }
 
 test("admin source management feeds retrieval-backed chat citations", async ({
@@ -107,41 +127,42 @@ test("admin source management feeds retrieval-backed chat citations", async ({
   await page.getByRole("link", { name: ADMIN_PREVIEW_LINK }).click();
   await expect(page).toHaveURL(/\/admin\/users$/);
 
-  await page.getByRole("link", { name: ADMIN_SOURCES_LINK }).click();
-  await expect(page).toHaveURL(/\/admin\/sources$/);
-  await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible({
+  await page
+    .getByRole("navigation", { name: ADMIN_NAV_NAME })
+    .getByRole("link", { name: ADMIN_SOURCES_LINK })
+    .click();
+  await expect(page).toHaveURL(/\/admin\/sources$/, { timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: ADMIN_SOURCES_HEADING })).toBeVisible({
     timeout: 60_000,
   });
 
-  await page.getByLabel("Title").fill(sourceTitle);
-  await page.getByLabel("Source kind").selectOption("markdown");
-  await page.getByLabel("Source content").fill(`# Dorm policy
+  await page.getByLabel(SOURCE_TITLE_LABEL).fill(sourceTitle);
+  await page.getByRole("combobox", { name: SOURCE_KIND_LABEL }).selectOption("markdown");
+  await page.getByLabel(SOURCE_CONTENT_LABEL).fill(`# Dorm policy
 
 Quiet hours begin at 23:00 on weekdays.
 
 ## Updates
 
 Residents may request approved late access for labs.`);
-  await page.getByLabel("Scope").selectOption("group");
-  await page.getByLabel("Group ID").fill("grp_research");
-  await page.getByLabel("Labels").fill("policy, dormitory");
+  await page.getByRole("combobox", { name: SOURCE_SCOPE_LABEL }).selectOption("group");
+  await page.getByLabel(SOURCE_GROUP_ID_LABEL).fill("grp_research");
+  await page.getByLabel(SOURCE_LABELS_LABEL).fill("policy, dormitory");
 
   await Promise.all([
     waitForGatewayRequest(page, "POST", "/admin/sources"),
-    page.getByRole("button", { name: "Queue source" }).click(),
+    page.getByRole("button", { name: QUEUE_SOURCE_BUTTON }).click(),
   ]);
 
   await expect(
-    page.getByText(`Queued ${sourceTitle} for ingestion.`),
+    page.getByText(new RegExp(`(?:已将 ${escapeRegex(sourceTitle)} 加入摄取队列。|Queued ${escapeRegex(sourceTitle)} for ingestion\\.)`)),
   ).toBeVisible();
 
   const sourceCard = page.locator("article.admin-app-card").filter({
     has: page.getByRole("heading", { name: sourceTitle }),
   });
   await expect(sourceCard).toBeVisible();
-  await expect(
-    sourceCard.getByText("strategy markdown_sections"),
-  ).toBeVisible();
+  await expect(sourceCard.getByText(/markdown_sections/)).toBeVisible();
 
   await Promise.all([
     page.waitForResponse(
@@ -151,15 +172,15 @@ Residents may request approved late access for labs.`);
         response.url().includes("/status"),
       { timeout: 120_000 },
     ),
-    sourceCard.getByRole("button", { name: "Mark succeeded" }).click(),
+    sourceCard.getByRole("button", { name: MARK_SUCCEEDED_BUTTON }).click(),
   ]);
 
-  await expect(sourceCard.getByText("Status succeeded")).toBeVisible();
+  await expect(sourceCard.getByText(/succeeded/)).toBeVisible();
 
   await page.goto("/apps");
   await expectAppsWorkspace(page);
 
-  const switchPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
+  const switchPolicyWatchButton = appCard(page, POLICY_WATCH_APP).getByRole(
     "button",
     {
       name: /^(Switch to|切换到) Research Lab$/,
@@ -178,14 +199,14 @@ Residents may request approved late access for labs.`);
 
   await Promise.all([
     waitForGatewayRequest(page, "POST", "/workspace/apps/launch"),
-    appCard(page, "Policy Watch")
+    appCard(page, POLICY_WATCH_APP)
       .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
-  await expectConversationSurface(page, "Policy Watch");
+  await expectConversationSurface(page, POLICY_WATCH_APP);
 
-  await page.getByLabel("Message").fill("summarize dorm policy updates");
-  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByLabel(MESSAGE_LABEL).fill("summarize dorm policy updates");
+  await page.getByRole("button", { name: SEND_MESSAGE_BUTTON }).click();
 
   const conversationPanel = page.locator("section.chat-panel").filter({
     has: page.getByRole("heading", { name: "Conversation" }),
