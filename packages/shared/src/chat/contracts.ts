@@ -5,6 +5,11 @@ import type {
   WorkspaceSafetySignal,
   WorkspaceSourceBlock,
 } from "../apps/contracts.js";
+import type {
+  ChatToolCall,
+  ChatToolChoice,
+  ChatToolDescriptor,
+} from "../tools/contracts.js";
 
 export type ChatCompletionRole = "system" | "user" | "assistant" | "tool";
 
@@ -22,7 +27,7 @@ export type ChatCompletionMessage = {
   content: string | ChatCompletionContentPart[];
   name?: string;
   tool_call_id?: string;
-  tool_calls?: unknown[];
+  tool_calls?: ChatToolCall[];
 };
 
 export type ChatCompletionFileReference = {
@@ -40,8 +45,8 @@ export type ChatCompletionRequest = {
   max_tokens?: number;
   temperature?: number;
   top_p?: number;
-  tools?: unknown[];
-  tool_choice?: "auto" | "none" | Record<string, unknown>;
+  tools?: ChatToolDescriptor[];
+  tool_choice?: ChatToolChoice;
   conversation_id?: string;
   inputs?: Record<string, unknown>;
   files?: ChatCompletionFileReference[];
@@ -63,7 +68,7 @@ export type ChatCompletionResponse = {
     message: {
       role: "assistant";
       content: string | null;
-      tool_calls?: unknown[];
+      tool_calls?: ChatToolCall[];
       artifacts?: WorkspaceArtifact[];
       citations?: WorkspaceCitation[];
       safety_signals?: WorkspaceSafetySignal[];
@@ -98,6 +103,7 @@ export type ChatCompletionChunk = {
     delta: {
       role?: "assistant";
       content?: string;
+      tool_calls?: ChatToolCall[];
     };
     finish_reason: ChatCompletionFinishReason | null;
   }>;

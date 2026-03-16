@@ -161,6 +161,257 @@ describe("chat routes", () => {
     }
   });
 
+  it("accepts typed tool descriptors and function tool choice payloads", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+          "x-active-group-id": "grp_research",
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          messages: [
+            {
+              role: "assistant",
+              content: "Calling the workspace search tool.",
+              tool_calls: [
+                {
+                  id: "call_workspace_search",
+                  type: "function",
+                  function: {
+                    name: "workspace.search",
+                    arguments: JSON.stringify({
+                      query: "宿舍熄灯",
+                    }),
+                  },
+                },
+              ],
+            },
+            {
+              role: "tool",
+              tool_call_id: "call_workspace_search",
+              content: '{"matches": []}',
+            },
+            {
+              role: "user",
+              content: "Summarize the latest dormitory lights-out policy.",
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "workspace.search",
+                description: "Searches indexed workspace knowledge.",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    query: {
+                      type: "string",
+                    },
+                    topK: {
+                      type: "integer",
+                      minimum: 1,
+                      maximum: 10,
+                    },
+                  },
+                  required: ["query"],
+                  additionalProperties: false,
+                },
+                strict: true,
+              },
+              auth: {
+                scope: "active_group",
+                requiresApproval: false,
+              },
+              enabled: true,
+              tags: ["search", "knowledge"],
+            },
+          ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "workspace.search",
+            },
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: expect.any(String),
+            },
+            finish_reason: "stop",
+          },
+        ],
+        metadata: {
+          app_id: "app_policy_watch",
+          run_id: expect.any(String),
+          active_group_id: "grp_research",
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects invalid tool descriptors", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          messages: [
+            {
+              role: "user",
+              content: "hello",
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "",
+                inputSchema: {
+                  type: "object",
+                },
+              },
+              auth: {
+                scope: "unsupported_scope",
+              },
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({
+        error: {
+          message:
+            "tools must be an array of valid function descriptors when provided.",
+          type: "invalid_request_error",
+          code: "invalid_messages",
+          param: "tools",
+          trace_id: expect.any(String),
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects invalid function tool selectors", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          messages: [
+            {
+              role: "user",
+              content: "hello",
+            },
+          ],
+          tool_choice: {
+            type: "function",
+            function: {
+              name: "",
+            },
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({
+        error: {
+          message:
+            "tool_choice must be 'auto', 'none', or a valid function selector when provided.",
+          type: "invalid_request_error",
+          code: "invalid_messages",
+          param: "tool_choice",
+          trace_id: expect.any(String),
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("routes runbook mentor through the structured runtime adapter", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
@@ -215,9 +466,7 @@ describe("chat routes", () => {
             index: 0,
             message: {
               role: "assistant",
-              content: expect.stringContaining(
-                "structured execution outline",
-              ),
+              content: expect.stringContaining("structured execution outline"),
             },
             finish_reason: "stop",
           },
@@ -562,7 +811,9 @@ describe("chat routes", () => {
       });
 
       expect(runResponse.statusCode).toBe(200);
-      expect((runResponse.json() as WorkspaceRunResponse).data.inputs).toMatchObject({
+      expect(
+        (runResponse.json() as WorkspaceRunResponse).data.inputs,
+      ).toMatchObject({
         retrieval: {
           query: {
             appId: "app_policy_watch",
@@ -579,7 +830,9 @@ describe("chat routes", () => {
           ]),
         },
       });
-      expect((runResponse.json() as WorkspaceRunResponse).data.sourceBlocks).toEqual(
+      expect(
+        (runResponse.json() as WorkspaceRunResponse).data.sourceBlocks,
+      ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             kind: "knowledge",
@@ -838,7 +1091,9 @@ describe("chat routes", () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect((response.json() as ChatCompletionResponse).choices[0]?.message).toMatchObject({
+      expect(
+        (response.json() as ChatCompletionResponse).choices[0]?.message,
+      ).toMatchObject({
         pending_actions: [
           expect.objectContaining({
             kind: "input_request",
@@ -1168,7 +1423,9 @@ describe("chat routes", () => {
           },
         ],
       });
-      expect((runResponse.json() as WorkspaceRunResponse).data.artifacts).toEqual([
+      expect(
+        (runResponse.json() as WorkspaceRunResponse).data.artifacts,
+      ).toEqual([
         expect.objectContaining({
           kind: "markdown",
           source: "assistant_response",

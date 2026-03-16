@@ -11,6 +11,12 @@ import type {
   WorkspaceSafetySignal,
   WorkspaceSourceBlock,
 } from "@agentifui/shared/apps";
+import type {
+  ChatToolCall,
+  ChatToolChoice,
+  ChatToolDescriptor,
+  ToolInputSchema,
+} from "@agentifui/shared";
 import type { AuthUser } from "@agentifui/shared/auth";
 import type {
   ChatCompletionChunk,
@@ -64,6 +70,22 @@ type ActiveStreamState = {
 
 const STREAM_CHUNK_DELAY_MS = 80;
 const activeStreams = new Map<string, ActiveStreamState>();
+const TOOL_JSON_SCHEMA_TYPES = new Set<string>([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "object",
+  "array",
+  "null",
+] as const);
+const TOOL_AUTH_SCOPES = new Set<string>([
+  "none",
+  "user_session",
+  "active_group",
+  "tenant",
+  "tenant_admin",
+] as const);
 
 function buildTraceId() {
   return randomUUID().replace(/-/g, "");
@@ -92,7 +114,9 @@ function buildSourceLabel(index: number) {
   return `S${index + 1}`;
 }
 
-function toArtifactSummary(artifact: WorkspaceArtifact): WorkspaceArtifactSummary {
+function toArtifactSummary(
+  artifact: WorkspaceArtifact,
+): WorkspaceArtifactSummary {
   return {
     id: artifact.id,
     title: artifact.title,
@@ -297,7 +321,9 @@ async function recordSafetySignalsAudit(input: {
     entityType: "run",
     entityId: input.runId,
     ipAddress: input.ipAddress,
-    level: hasCriticalSafetySignal(input.safetySignals) ? "critical" : "warning",
+    level: hasCriticalSafetySignal(input.safetySignals)
+      ? "critical"
+      : "warning",
     payload: {
       conversationId: input.conversation.id,
       appId: input.conversation.app.id,
@@ -307,7 +333,9 @@ async function recordSafetySignalsAudit(input: {
       runId: input.runId,
       traceId: input.traceId,
       safetySignals: input.safetySignals,
-      categories: [...new Set(input.safetySignals.map((signal) => signal.category))],
+      categories: [
+        ...new Set(input.safetySignals.map((signal) => signal.category)),
+      ],
       criticalCount: input.safetySignals.filter(
         (signal) => signal.severity === "critical",
       ).length,
@@ -451,10 +479,20 @@ function isChatMessage(value: unknown): value is ChatCompletionMessage {
   }
 
   if (typeof message.content === "string") {
-    return true;
+    return (
+      message.tool_calls === undefined ||
+      (Array.isArray(message.tool_calls) &&
+        message.tool_calls.every(isChatToolCall))
+    );
   }
 
-  return Array.isArray(message.content) && message.content.every(isContentPart);
+  return (
+    Array.isArray(message.content) &&
+    message.content.every(isContentPart) &&
+    (message.tool_calls === undefined ||
+      (Array.isArray(message.tool_calls) &&
+        message.tool_calls.every(isChatToolCall)))
+  );
 }
 
 function isChatFileReference(
@@ -472,6 +510,223 @@ function isChatFileReference(
       file.transfer_method === "remote_url") &&
     (file.file_id === undefined || typeof file.file_id === "string") &&
     (file.url === undefined || typeof file.url === "string")
+  );
+}
+
+function isToolSchemaType(value: unknown): boolean {
+  return typeof value === "string" && TOOL_JSON_SCHEMA_TYPES.has(value);
+}
+
+function isToolInputSchema(
+  value: unknown,
+  depth = 0,
+): value is ToolInputSchema {
+  if (typeof value !== "object" || value === null || depth > 8) {
+    return false;
+  }
+
+  const schema = value as Record<string, unknown>;
+
+  if (schema.type !== undefined) {
+    if (typeof schema.type === "string") {
+      if (!isToolSchemaType(schema.type)) {
+        return false;
+      }
+    } else if (Array.isArray(schema.type)) {
+      if (schema.type.length === 0 || !schema.type.every(isToolSchemaType)) {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
+
+  if (
+    schema.description !== undefined &&
+    typeof schema.description !== "string"
+  ) {
+    return false;
+  }
+
+  if (schema.format !== undefined && typeof schema.format !== "string") {
+    return false;
+  }
+
+  if (
+    schema.default !== undefined &&
+    schema.default !== null &&
+    typeof schema.default !== "string" &&
+    typeof schema.default !== "number" &&
+    typeof schema.default !== "boolean"
+  ) {
+    return false;
+  }
+
+  if (
+    schema.enum !== undefined &&
+    (!Array.isArray(schema.enum) ||
+      !schema.enum.every(
+        (item) =>
+          item === null ||
+          typeof item === "string" ||
+          typeof item === "number" ||
+          typeof item === "boolean",
+      ))
+  ) {
+    return false;
+  }
+
+  if (
+    schema.required !== undefined &&
+    (!Array.isArray(schema.required) ||
+      !schema.required.every((item) => typeof item === "string"))
+  ) {
+    return false;
+  }
+
+  if (
+    schema.additionalProperties !== undefined &&
+    typeof schema.additionalProperties !== "boolean"
+  ) {
+    return false;
+  }
+
+  if (schema.minimum !== undefined && typeof schema.minimum !== "number") {
+    return false;
+  }
+
+  if (schema.maximum !== undefined && typeof schema.maximum !== "number") {
+    return false;
+  }
+
+  if (schema.minItems !== undefined && typeof schema.minItems !== "number") {
+    return false;
+  }
+
+  if (schema.maxItems !== undefined && typeof schema.maxItems !== "number") {
+    return false;
+  }
+
+  if (schema.minLength !== undefined && typeof schema.minLength !== "number") {
+    return false;
+  }
+
+  if (schema.maxLength !== undefined && typeof schema.maxLength !== "number") {
+    return false;
+  }
+
+  if (
+    schema.items !== undefined &&
+    !isToolInputSchema(schema.items, depth + 1)
+  ) {
+    return false;
+  }
+
+  if (schema.properties !== undefined) {
+    if (
+      typeof schema.properties !== "object" ||
+      schema.properties === null ||
+      Array.isArray(schema.properties)
+    ) {
+      return false;
+    }
+
+    if (
+      !Object.values(schema.properties).every((propertySchema) =>
+        isToolInputSchema(propertySchema, depth + 1),
+      )
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isChatToolCall(value: unknown): value is ChatToolCall {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const toolCall = value as Record<string, unknown>;
+  const toolFunction = toolCall.function;
+
+  return (
+    typeof toolCall.id === "string" &&
+    toolCall.id.trim().length > 0 &&
+    toolCall.type === "function" &&
+    typeof toolFunction === "object" &&
+    toolFunction !== null &&
+    typeof (toolFunction as Record<string, unknown>).name === "string" &&
+    String((toolFunction as Record<string, unknown>).name).trim().length > 0 &&
+    typeof (toolFunction as Record<string, unknown>).arguments === "string"
+  );
+}
+
+function isChatToolDescriptor(value: unknown): value is ChatToolDescriptor {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const tool = value as Record<string, unknown>;
+  const toolFunction = tool.function;
+  const auth = tool.auth;
+
+  if (tool.type !== "function") {
+    return false;
+  }
+
+  if (typeof toolFunction !== "object" || toolFunction === null) {
+    return false;
+  }
+
+  if (typeof auth !== "object" || auth === null) {
+    return false;
+  }
+
+  const descriptor = toolFunction as Record<string, unknown>;
+  const authRequirement = auth as Record<string, unknown>;
+
+  return (
+    typeof descriptor.name === "string" &&
+    descriptor.name.trim().length > 0 &&
+    (descriptor.description === undefined ||
+      typeof descriptor.description === "string") &&
+    isToolInputSchema(descriptor.inputSchema) &&
+    (descriptor.strict === undefined ||
+      typeof descriptor.strict === "boolean") &&
+    TOOL_AUTH_SCOPES.has(authRequirement.scope as never) &&
+    (authRequirement.requiresFreshMfa === undefined ||
+      typeof authRequirement.requiresFreshMfa === "boolean") &&
+    (authRequirement.requiresApproval === undefined ||
+      typeof authRequirement.requiresApproval === "boolean") &&
+    (authRequirement.policyTag === undefined ||
+      typeof authRequirement.policyTag === "string") &&
+    (tool.enabled === undefined || typeof tool.enabled === "boolean") &&
+    (tool.tags === undefined ||
+      (Array.isArray(tool.tags) &&
+        tool.tags.every((tag) => typeof tag === "string")))
+  );
+}
+
+function isChatToolChoice(value: unknown): value is ChatToolChoice {
+  if (value === "auto" || value === "none") {
+    return true;
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const choice = value as Record<string, unknown>;
+  const toolFunction = choice.function;
+
+  return (
+    choice.type === "function" &&
+    typeof toolFunction === "object" &&
+    toolFunction !== null &&
+    typeof (toolFunction as Record<string, unknown>).name === "string" &&
+    String((toolFunction as Record<string, unknown>).name).trim().length > 0
   );
 }
 
@@ -1027,9 +1282,7 @@ function buildBlockingResponse(input: {
           role: "assistant",
           content: input.assistantText,
           artifacts: input.artifacts,
-          ...(input.citations.length > 0
-            ? { citations: input.citations }
-            : {}),
+          ...(input.citations.length > 0 ? { citations: input.citations } : {}),
           ...(input.safetySignals.length > 0
             ? { safety_signals: input.safetySignals }
             : {}),
@@ -1145,7 +1398,9 @@ async function* streamCompletionEvents(input: {
         ? input.sourceBlocks
         : fallbackSources.sourceBlocks;
     const pendingActions =
-      !wasStopped && assistantContent.trim().length > 0 ? input.pendingActions : [];
+      !wasStopped && assistantContent.trim().length > 0
+        ? input.pendingActions
+        : [];
     const updateResult =
       await input.workspaceService.updateConversationRunForUser(input.user, {
         conversationId: input.conversation.id,
@@ -1254,7 +1509,8 @@ async function* streamCompletionEvents(input: {
     activeStreams.delete(input.conversation.run.id);
 
     if (!finalized) {
-      const completionTokens = estimateRuntimeCompletionTokens(assistantContent);
+      const completionTokens =
+        estimateRuntimeCompletionTokens(assistantContent);
       const finishedAt = new Date().toISOString();
       const artifacts = buildAssistantArtifacts({
         appName: input.conversation.app.name,
@@ -1268,7 +1524,9 @@ async function* streamCompletionEvents(input: {
         latestPrompt,
       });
       const citations =
-        input.citations.length > 0 ? input.citations : fallbackSources.citations;
+        input.citations.length > 0
+          ? input.citations
+          : fallbackSources.citations;
       const sourceBlocks =
         input.sourceBlocks.length > 0
           ? input.sourceBlocks
@@ -1465,6 +1723,31 @@ export async function registerChatRoutes(
     }
 
     if (
+      body.tools !== undefined &&
+      (!Array.isArray(body.tools) || !body.tools.every(isChatToolDescriptor))
+    ) {
+      reply.code(400);
+      return buildErrorResponse(fallbackTraceId, {
+        type: "invalid_request_error",
+        code: "invalid_messages",
+        message:
+          "tools must be an array of valid function descriptors when provided.",
+        param: "tools",
+      });
+    }
+
+    if (body.tool_choice !== undefined && !isChatToolChoice(body.tool_choice)) {
+      reply.code(400);
+      return buildErrorResponse(fallbackTraceId, {
+        type: "invalid_request_error",
+        code: "invalid_messages",
+        message:
+          "tool_choice must be 'auto', 'none', or a valid function selector when provided.",
+        param: "tool_choice",
+      });
+    }
+
+    if (
       body.conversation_id !== undefined &&
       typeof body.conversation_id !== "string"
     ) {
@@ -1562,12 +1845,15 @@ export async function registerChatRoutes(
     const traceId = conversation.run.traceId || fallbackTraceId;
     const startedAt = Date.now();
     const latestPrompt = summarizeRuntimePrompt(body.messages);
-    const retrieval = await knowledgeService.buildRetrievalForUser(access.user, {
-      appId,
-      conversationId: conversation.id,
-      groupId: conversation.activeGroup.id,
-      latestPrompt,
-    });
+    const retrieval = await knowledgeService.buildRetrievalForUser(
+      access.user,
+      {
+        appId,
+        conversationId: conversation.id,
+        groupId: conversation.activeGroup.id,
+        latestPrompt,
+      },
+    );
     const runtimeInput =
       body.inputs && typeof body.inputs === "object"
         ? (body.inputs as Record<string, unknown>)
@@ -1663,7 +1949,9 @@ export async function registerChatRoutes(
         finishedAt,
       });
 
-      reply.code(runtimeResult.error.code === "runtime_unavailable" ? 503 : 500);
+      reply.code(
+        runtimeResult.error.code === "runtime_unavailable" ? 503 : 500,
+      );
       return buildErrorResponse(traceId, {
         type:
           runtimeResult.error.code === "runtime_unavailable"

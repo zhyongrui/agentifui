@@ -99,34 +99,35 @@ Default execution order after Phase 1 closeout:
 
 Execution status:
 
-| 状态      | 任务    | 说明                                                                  |
-| --------- | ------- | --------------------------------------------------------------------- |
-| completed | `P2-A1` | assistant feedback 已持久化，含 audit、route、browser 回归            |
-| completed | `P2-A2` | transcript 已补齐 copy / quote / retry / regenerate 基础动作          |
-| completed | `P2-A3` | markdown/code/math 渲染已落到 transcript、replay 和 shared transcript |
-| completed | `P2-A4` | assistant suggested prompts 已进入 contract、stream 尾块和 chat UI    |
-| completed | `P2-A5` | 会话支持 rename / pin / archive / delete，history 与 detail 已同步     |
-| completed | `P2-A6` | `/chat` 已支持按 tag / attachment / feedback / status 检索历史        |
-| completed | `P2-B1` | artifact DTO、来源和消息/run/chat 绑定已冻结                          |
-| completed | `P2-B2` | artifact 已写入独立表，并可通过 workspace route 回读                  |
-| completed | `P2-B3` | `/chat/artifacts/[artifactId]` 已上线，消息与 run 入口已接入          |
-| completed | `P2-B4` | owner/shared artifact preview + download 路由已补齐，shared transcript 已接入 |
-| completed | `P2-B5` | artifact generated / viewed / downloaded 已进入 audit                 |
-| completed | `P2-C1` | approval / input-request / response payload 合同已冻结                |
-| completed | `P2-C2` | `/workspace/conversations/:conversationId/pending-actions` 已可读     |
-| completed | `P2-C3` | `respond` 路由、状态更新和响应持久化已打通                           |
-| completed | `P2-C4` | `/chat/[conversationId]` 已显示 pending-action 卡片，提交与刷新都已验证 |
-| completed | `P2-C5` | HITL responded/cancelled/expired 已进入 audit，超时与放弃状态可持久化 |
-| completed | `P2-D1` | failed run 已带结构化 failure taxonomy，run detail 和 UI 已可读      |
-| completed | `P2-D2` | citation/source block 已接到 blocking/streaming、transcript、replay 和 shared transcript |
-| completed | `P2-D3` | safety signal 已接到 blocking/streaming、run replay、shared transcript 和 audit |
-| completed | `P2-D4` | placeholder protocol 已抽成 formal runtime adapter boundary，runtime metadata/health/browser smoke 已闭环 |
-| completed | `P2-D5` | degraded fallback、只读恢复、admin health 和 browser 验证已闭环 |
-| completed | `P2-E1` | cleanup policy、dry-run/execute job、admin preview、audit 和 runbook 已闭环 |
-| completed | `P2-E2` | perf seed/smoke、JSON artifact、预算门槛和 release gate 已闭环 |
-| completed | `P2-E3` | tenant usage analytics、per-app/quota/export、tests 和 browser QA 已闭环 |
-| completed | `P2-E4` | backup/export 脚本、restore sanity 校验、checksum 和 post-restore HTTP smoke 已闭环 |
-| active    | `P3-B`  | 下一项，开始 tool invocation 和 structured action boundary |
+| 状态      | 任务      | 说明                                                                                                      |
+| --------- | --------- | --------------------------------------------------------------------------------------------------------- |
+| completed | `P2-A1`   | assistant feedback 已持久化，含 audit、route、browser 回归                                                |
+| completed | `P2-A2`   | transcript 已补齐 copy / quote / retry / regenerate 基础动作                                              |
+| completed | `P2-A3`   | markdown/code/math 渲染已落到 transcript、replay 和 shared transcript                                     |
+| completed | `P2-A4`   | assistant suggested prompts 已进入 contract、stream 尾块和 chat UI                                        |
+| completed | `P2-A5`   | 会话支持 rename / pin / archive / delete，history 与 detail 已同步                                        |
+| completed | `P2-A6`   | `/chat` 已支持按 tag / attachment / feedback / status 检索历史                                            |
+| completed | `P2-B1`   | artifact DTO、来源和消息/run/chat 绑定已冻结                                                              |
+| completed | `P2-B2`   | artifact 已写入独立表，并可通过 workspace route 回读                                                      |
+| completed | `P2-B3`   | `/chat/artifacts/[artifactId]` 已上线，消息与 run 入口已接入                                              |
+| completed | `P2-B4`   | owner/shared artifact preview + download 路由已补齐，shared transcript 已接入                             |
+| completed | `P2-B5`   | artifact generated / viewed / downloaded 已进入 audit                                                     |
+| completed | `P2-C1`   | approval / input-request / response payload 合同已冻结                                                    |
+| completed | `P2-C2`   | `/workspace/conversations/:conversationId/pending-actions` 已可读                                         |
+| completed | `P2-C3`   | `respond` 路由、状态更新和响应持久化已打通                                                                |
+| completed | `P2-C4`   | `/chat/[conversationId]` 已显示 pending-action 卡片，提交与刷新都已验证                                   |
+| completed | `P2-C5`   | HITL responded/cancelled/expired 已进入 audit，超时与放弃状态可持久化                                     |
+| completed | `P2-D1`   | failed run 已带结构化 failure taxonomy，run detail 和 UI 已可读                                           |
+| completed | `P2-D2`   | citation/source block 已接到 blocking/streaming、transcript、replay 和 shared transcript                  |
+| completed | `P2-D3`   | safety signal 已接到 blocking/streaming、run replay、shared transcript 和 audit                           |
+| completed | `P2-D4`   | placeholder protocol 已抽成 formal runtime adapter boundary，runtime metadata/health/browser smoke 已闭环 |
+| completed | `P2-D5`   | degraded fallback、只读恢复、admin health 和 browser 验证已闭环                                           |
+| completed | `P2-E1`   | cleanup policy、dry-run/execute job、admin preview、audit 和 runbook 已闭环                               |
+| completed | `P2-E2`   | perf seed/smoke、JSON artifact、预算门槛和 release gate 已闭环                                            |
+| completed | `P2-E3`   | tenant usage analytics、per-app/quota/export、tests 和 browser QA 已闭环                                  |
+| completed | `P2-E4`   | backup/export 脚本、restore sanity 校验、checksum 和 post-restore HTTP smoke 已闭环                       |
+| completed | `P3-B-01` | shared tool descriptor contract、auth scope、input schema 和 gateway request validation 已落地            |
+| active    | `P3-B-02` | 下一项，开始 per-app / per-tenant enabled tool registry surface                                           |
 
 ## 5. First Batch Definition
 
@@ -170,7 +171,7 @@ Current batch status:
 - `P2-D3` complete
 - `P2-D4` complete
 - `P2-E3` complete
-- the active follow-on item is `P3-B-01`
+- the active follow-on item is `P3-B-02`
 
 ## 6. Detailed Execution Notes
 
@@ -707,7 +708,7 @@ Legend:
 
 ### 7.11 Future Delivery Queue: `P3-B` Tool Invocation And Structured Actions
 
-- [ ] `P3-B-01` Define a shared tool descriptor contract including auth scope and input schema
+- [x] `P3-B-01` Define a shared tool descriptor contract including auth scope and input schema
 - [ ] `P3-B-02` Build a registry surface for enabled tools per app and tenant
 - [ ] `P3-B-03` Add runtime support for tool call requests and tool result messages
 - [ ] `P3-B-04` Persist tool call attempts, results, and latency into the run boundary
