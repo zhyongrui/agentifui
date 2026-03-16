@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { ChatMarkdown } from "../../../../../components/chat-markdown";
 import { useI18n } from "../../../../../components/i18n-provider";
 import { MainSectionNav } from "../../../../../components/main-section-nav";
+import { WorkspaceCommentThread } from "../../../../../components/workspace-comments";
 import { WorkspaceSafetySignalList } from "../../../../../components/workspace-safety";
 import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-artifacts";
 import { WorkspaceCitationList } from "../../../../../components/workspace-sources";
@@ -100,6 +101,8 @@ export default function SharedConversationPage() {
           workspaceUser: "工作台用户",
           toolCalls: "工具调用",
           suggested: "建议的下一步提问",
+          comments: "共享评论",
+          noComments: "当前没有共享评论。",
           safety: "共享安全提示",
           citations: "共享引用",
           artifacts: "共享产物",
@@ -127,6 +130,8 @@ export default function SharedConversationPage() {
           workspaceUser: "Workspace user",
           toolCalls: "Tool calls",
           suggested: "Suggested next prompts",
+          comments: "Shared comments",
+          noComments: "No shared comments yet.",
           safety: "Shared safety signals",
           citations: "Shared citations",
           artifacts: "Shared artifacts",
@@ -450,6 +455,16 @@ export default function SharedConversationPage() {
                   />
                 </div>
               ) : null}
+              <WorkspaceCommentThread
+                title={copy.comments}
+                comments={message.comments ?? []}
+                locale={locale}
+                emptyText={copy.noComments}
+                textareaLabel={copy.comments}
+                submitLabel={copy.comments}
+                submittingLabel={copy.comments}
+                readOnly
+              />
             </article>
           ))}
         </div>
