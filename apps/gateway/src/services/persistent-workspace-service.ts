@@ -23,6 +23,8 @@ import {
   type WorkspaceRun,
   type WorkspaceRunRuntime,
   type WorkspaceRunSummary,
+  type WorkspaceRunToolExecution,
+  type WorkspaceRunToolExecutionResult,
   type WorkspaceSafetySignal,
   type WorkspaceRunTimelineEvent,
   type WorkspaceRunTimelineEventType,
@@ -785,6 +787,157 @@ function toWorkspaceConversationToolCalls(
   return toolCalls.length > 0 ? toolCalls : undefined;
 }
 
+function toWorkspaceRunToolExecutionResult(
+  value: unknown,
+): WorkspaceRunToolExecutionResult | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const result = value as Record<string, unknown>;
+
+  if (
+    typeof result.content !== "string" ||
+    typeof result.isError !== "boolean" ||
+    typeof result.recordedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    content: result.content,
+    isError: result.isError,
+    recordedAt: result.recordedAt,
+  };
+}
+
+function buildWorkspaceRunToolExecutionsFromLegacyOutputs(
+  outputs: Record<string, unknown>,
+  fallbackRecordedAt: string,
+): WorkspaceRunToolExecution[] {
+  const toolCalls = toWorkspaceConversationToolCalls(outputs.toolCalls) ?? [];
+  const toolResults = Array.isArray(outputs.toolResults) ? outputs.toolResults : [];
+
+  if (toolCalls.length === 0) {
+    return [];
+  }
+
+  return toolCalls.map((toolCall, index) => {
+    const matchingResult = toolResults.find((entry) => {
+      if (typeof entry !== "object" || entry === null) {
+        return false;
+      }
+
+      return (entry as Record<string, unknown>).toolCallId === toolCall.id;
+    }) as Record<string, unknown> | undefined;
+
+    const recordedAt =
+      typeof matchingResult?.recordedAt === "string"
+        ? matchingResult.recordedAt
+        : fallbackRecordedAt;
+    const content =
+      typeof matchingResult?.content === "string" ? matchingResult.content : "";
+
+    return {
+      id:
+        typeof matchingResult?.id === "string"
+          ? matchingResult.id
+          : `tool_exec_${randomUUID()}`,
+      attempt:
+        typeof matchingResult?.attempt === "number" &&
+        Number.isFinite(matchingResult.attempt) &&
+        matchingResult.attempt > 0
+          ? matchingResult.attempt
+          : index + 1,
+      status:
+        typeof matchingResult?.isError === "boolean" && matchingResult.isError
+          ? "failed"
+          : "succeeded",
+      startedAt:
+        typeof matchingResult?.startedAt === "string"
+          ? matchingResult.startedAt
+          : recordedAt,
+      finishedAt:
+        typeof matchingResult?.finishedAt === "string"
+          ? matchingResult.finishedAt
+          : recordedAt,
+      latencyMs:
+        typeof matchingResult?.latencyMs === "number"
+          ? matchingResult.latencyMs
+          : null,
+      request: toolCall,
+      result:
+        matchingResult && content.length > 0
+          ? {
+              content,
+              isError: Boolean(matchingResult.isError),
+              recordedAt,
+            }
+          : null,
+    };
+  });
+}
+
+function toWorkspaceRunToolExecutions(
+  value: unknown,
+  outputs?: Record<string, unknown>,
+  fallbackRecordedAt = new Date().toISOString(),
+): WorkspaceRunToolExecution[] {
+  if (!Array.isArray(value)) {
+    return outputs
+      ? buildWorkspaceRunToolExecutionsFromLegacyOutputs(
+          outputs,
+          fallbackRecordedAt,
+        )
+      : [];
+  }
+
+  const toolExecutions = value.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) {
+      return [];
+    }
+
+    const execution = entry as Record<string, unknown>;
+    const request = toWorkspaceConversationToolCalls([execution.request])?.[0] ?? null;
+    const result = toWorkspaceRunToolExecutionResult(execution.result);
+
+    if (
+      !request ||
+      typeof execution.id !== "string" ||
+      typeof execution.attempt !== "number" ||
+      (execution.status !== "succeeded" && execution.status !== "failed") ||
+      typeof execution.startedAt !== "string"
+    ) {
+      return [];
+    }
+
+    const status: WorkspaceRunToolExecution["status"] = execution.status;
+
+    return [
+      {
+        id: execution.id,
+        attempt: execution.attempt,
+        status,
+        startedAt: execution.startedAt,
+        finishedAt:
+          typeof execution.finishedAt === "string" ? execution.finishedAt : null,
+        latencyMs:
+          typeof execution.latencyMs === "number" ? execution.latencyMs : null,
+        request,
+        result,
+      },
+    ];
+  });
+
+  if (toolExecutions.length > 0) {
+    return toolExecutions;
+  }
+
+  return outputs
+    ? buildWorkspaceRunToolExecutionsFromLegacyOutputs(outputs, fallbackRecordedAt)
+    : [];
+}
+
 function toWorkspaceCitation(value: unknown): WorkspaceCitation | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -1449,6 +1602,11 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
     runtime: toWorkspaceRunRuntime(outputs.runtime),
     inputs: normalizeJsonRecord(row.inputs),
     outputs,
+    toolExecutions: toWorkspaceRunToolExecutions(
+      outputs.toolExecutions,
+      outputs,
+      toIso(row.finished_at) ?? toIso(row.created_at) ?? new Date().toISOString(),
+    ),
     artifacts: toWorkspaceArtifacts(outputs.artifacts),
     citations: toWorkspaceCitations(outputs.citations) ?? [],
     safetySignals:
@@ -3292,6 +3450,9 @@ async function updateConversationRunForUser(
     }
 
     if (input.outputs && Object.keys(input.outputs).length > 0) {
+      const toolExecutionCount = Array.isArray(input.outputs.toolExecutions)
+        ? input.outputs.toolExecutions.length
+        : undefined;
       await insertRunTimelineEvent(sql, {
         tenantId: user.tenantId,
         userId: user.id,
@@ -3300,6 +3461,7 @@ async function updateConversationRunForUser(
         type: "output_recorded",
         metadata: {
           keys: Object.keys(input.outputs),
+          ...(toolExecutionCount !== undefined ? { toolExecutionCount } : {}),
         },
       });
     }

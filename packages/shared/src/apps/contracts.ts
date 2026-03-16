@@ -455,6 +455,25 @@ export type WorkspaceRunRuntime = {
   invokedAt: string;
 };
 
+export type WorkspaceRunToolExecutionStatus = "succeeded" | "failed";
+
+export type WorkspaceRunToolExecutionResult = {
+  content: string;
+  isError: boolean;
+  recordedAt: string;
+};
+
+export type WorkspaceRunToolExecution = {
+  id: string;
+  attempt: number;
+  status: WorkspaceRunToolExecutionStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  latencyMs: number | null;
+  request: ChatToolCall;
+  result: WorkspaceRunToolExecutionResult | null;
+};
+
 export type WorkspaceRun = WorkspaceRunSummary & {
   conversationId: string;
   app: Pick<
@@ -467,6 +486,7 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   runtime: WorkspaceRunRuntime | null;
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
+  toolExecutions: WorkspaceRunToolExecution[];
   artifacts: WorkspaceArtifact[];
   citations: WorkspaceCitation[];
   safetySignals: WorkspaceSafetySignal[];

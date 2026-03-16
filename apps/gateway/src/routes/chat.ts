@@ -8,6 +8,7 @@ import type {
   WorkspaceConversationMessage,
   WorkspaceConversationMessageStatus,
   WorkspaceRunRuntime,
+  WorkspaceRunToolExecution,
   WorkspaceSafetySignal,
   WorkspaceSourceBlock,
 } from "@agentifui/shared/apps";
@@ -1010,6 +1011,50 @@ function buildAssistantToolCallMessageContent(toolCalls: ChatToolCall[]) {
   ].join("\n");
 }
 
+function buildToolExecutions(input: {
+  toolCalls: ChatToolCall[];
+  toolResults: Array<{
+    toolCallId: string;
+    toolName: string;
+    content: string;
+    isError?: boolean;
+  }>;
+  recordedAt: string;
+  latencyMs: number;
+}): WorkspaceRunToolExecution[] {
+  if (input.toolCalls.length === 0) {
+    return [];
+  }
+
+  const perToolLatency = Math.max(
+    1,
+    Math.round(input.latencyMs / Math.max(input.toolCalls.length, 1)),
+  );
+
+  return input.toolCalls.map((toolCall, index) => {
+    const matchingResult =
+      input.toolResults.find((toolResult) => toolResult.toolCallId === toolCall.id) ??
+      null;
+
+    return {
+      id: `tool_exec_${randomUUID()}`,
+      attempt: index + 1,
+      status: matchingResult?.isError ? "failed" : "succeeded",
+      startedAt: input.recordedAt,
+      finishedAt: input.recordedAt,
+      latencyMs: perToolLatency,
+      request: toolCall,
+      result: matchingResult
+        ? {
+            content: matchingResult.content,
+            isError: Boolean(matchingResult.isError),
+            recordedAt: input.recordedAt,
+          }
+        : null,
+    };
+  });
+}
+
 function buildAssistantText(
   conversation: WorkspaceConversation,
   messages: ChatCompletionMessage[],
@@ -1474,7 +1519,9 @@ async function* streamCompletionEvents(input: {
     toolCallId: string;
     toolName: string;
     content: string;
+    isError?: boolean;
   }>;
+  toolExecutions: WorkspaceRunToolExecution[];
   messages: ChatCompletionMessage[];
   startedAt: number;
   user: AuthUser;
@@ -1604,6 +1651,9 @@ async function* streamCompletionEvents(input: {
           ...(input.runtime ? { runtime: input.runtime } : {}),
           safetySignals: input.safetySignals,
           sourceBlocks,
+          ...(input.toolExecutions.length > 0
+            ? { toolExecutions: input.toolExecutions }
+            : {}),
           ...(input.toolCalls.length > 0 ? { toolCalls: input.toolCalls } : {}),
           ...(input.toolResults.length > 0 ? { toolResults: input.toolResults } : {}),
           usage: {
@@ -1750,6 +1800,9 @@ async function* streamCompletionEvents(input: {
             ...(input.runtime ? { runtime: input.runtime } : {}),
             safetySignals: input.safetySignals,
             sourceBlocks,
+            ...(input.toolExecutions.length > 0
+              ? { toolExecutions: input.toolExecutions }
+              : {}),
             ...(input.toolCalls.length > 0 ? { toolCalls: input.toolCalls } : {}),
             ...(input.toolResults.length > 0 ? { toolResults: input.toolResults } : {}),
             usage: {
@@ -2231,6 +2284,13 @@ export async function registerChatRoutes(
     const suggestedPrompts = runtimeResult.data.suggestedPrompts ?? [];
     const toolCalls = runtimeResult.data.toolCalls ?? [];
     const toolResults = runtimeResult.data.toolResults ?? [];
+    const toolExecutionRecordedAt = new Date().toISOString();
+    const toolExecutions = buildToolExecutions({
+      toolCalls,
+      toolResults,
+      recordedAt: toolExecutionRecordedAt,
+      latencyMs: Date.now() - startedAt,
+    });
     const runtime = runtimeResult.data.runtime;
     const resolvedModel = runtimeResult.data.model ?? model;
 
@@ -2263,6 +2323,7 @@ export async function registerChatRoutes(
             suggestedPrompts,
             toolCalls,
             toolResults,
+            toolExecutions,
             messages: body.messages,
             startedAt,
             user: access.user,
@@ -2314,6 +2375,9 @@ export async function registerChatRoutes(
           runtime,
           safetySignals,
           sourceBlocks,
+          ...(toolExecutions.length > 0
+            ? { toolExecutions }
+            : {}),
           ...(toolCalls.length > 0 ? { toolCalls } : {}),
           ...(toolResults.length > 0 ? { toolResults } : {}),
           usage: {

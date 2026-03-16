@@ -1885,6 +1885,22 @@ describe.sequential('persistent auth runtime', () => {
                 content: expect.stringContaining('workspace.search'),
               }),
             ],
+            toolExecutions: [
+              expect.objectContaining({
+                status: 'succeeded',
+                latencyMs: expect.any(Number),
+                request: expect.objectContaining({
+                  id: toolCallId,
+                  function: expect.objectContaining({
+                    name: 'workspace.search',
+                  }),
+                }),
+                result: expect.objectContaining({
+                  isError: false,
+                  content: expect.stringContaining('workspace.search'),
+                }),
+              }),
+            ],
           });
         } finally {
           await runtimeDatabase.end({ timeout: 5 });
@@ -1951,6 +1967,20 @@ describe.sequential('persistent auth runtime', () => {
               expect.objectContaining({
                 toolCallId,
                 toolName: 'workspace.search',
+              }),
+            ],
+          });
+          expect((run.json() as WorkspaceRunResponse).data).toMatchObject({
+            toolExecutions: [
+              expect.objectContaining({
+                status: 'succeeded',
+                latencyMs: expect.any(Number),
+                request: expect.objectContaining({
+                  id: toolCallId,
+                }),
+                result: expect.objectContaining({
+                  isError: false,
+                }),
               }),
             ],
           });

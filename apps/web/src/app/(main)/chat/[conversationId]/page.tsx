@@ -470,6 +470,13 @@ export default function ConversationPage() {
           needsWork: "待改进",
           followUp: "试试继续追问",
           toolCalls: "工具调用",
+          toolExecutions: "工具执行",
+          toolExecutionLead: "工具尝试、结果和耗时现在会持久化在 run 边界内。",
+          attempt: "第",
+          attemptSuffix: "次尝试",
+          latencyUnavailable: "无耗时",
+          resultStored: "结果已保存",
+          errorResult: "错误结果",
           artifacts: "产物",
           message: "消息",
           askPlaceholder: (name: string) => `让 ${name} 处理一个具体问题...`,
@@ -521,6 +528,14 @@ export default function ConversationPage() {
           needsWork: "Needs work",
           followUp: "Try a follow-up",
           toolCalls: "Tool calls",
+          toolExecutions: "Tool executions",
+          toolExecutionLead:
+            "Tool attempts, results, and latency now live on the run boundary.",
+          attempt: "Attempt ",
+          attemptSuffix: "",
+          latencyUnavailable: "latency n/a",
+          resultStored: "result stored",
+          errorResult: "error result",
           artifacts: "Artifacts",
           message: "Message",
           askPlaceholder: (name: string) => `Ask ${name} to work on something concrete...`,
@@ -2390,6 +2405,13 @@ export default function ConversationPage() {
                       persisted run outputs.
                     </p>
                   </article>
+                  {selectedRun.toolExecutions.length > 0 ? (
+                    <article className="chat-meta-card">
+                      <span>{copy.toolExecutions}</span>
+                      <strong>{selectedRun.toolExecutions.length}</strong>
+                      <p>{copy.toolExecutionLead}</p>
+                    </article>
+                  ) : null}
                   {selectedRun.safetySignals.length > 0 ? (
                     <article className="chat-meta-card">
                       <span>Safety signals</span>
@@ -2586,6 +2608,49 @@ export default function ConversationPage() {
                         sourceBlocks={selectedRun.sourceBlocks}
                         title="Replay source blocks"
                       />
+                    </article>
+                  ) : null}
+                  {selectedRun.toolExecutions.length > 0 ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">
+                          {copy.toolExecutions}
+                        </span>
+                        <span
+                          className={`chat-bubble-status status-${selectedRun.status}`}
+                        >
+                          {selectedRun.status}
+                        </span>
+                      </div>
+                      <ul className="timeline-list">
+                        {selectedRun.toolExecutions.map((execution) => (
+                          <li
+                            key={execution.id}
+                            className="timeline-item"
+                          >
+                            <strong>
+                              {execution.request.function.name} · {copy.attempt}
+                              {execution.attempt}
+                              {copy.attemptSuffix}
+                            </strong>
+                            <span>
+                              {execution.latencyMs !== null
+                                ? `${execution.latencyMs} ms`
+                                : copy.latencyUnavailable}
+                            </span>
+                            <p>
+                              {execution.status}
+                              {" · "}
+                              {execution.result?.isError
+                                ? copy.errorResult
+                                : copy.resultStored}
+                            </p>
+                            {execution.result?.content ? (
+                              <p>{execution.result.content}</p>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
                     </article>
                   ) : null}
                   <article className="chat-bubble assistant">

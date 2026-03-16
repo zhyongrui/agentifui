@@ -330,6 +330,33 @@ describe("chat routes", () => {
           }),
         ]),
       );
+
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${responseBody.metadata?.run_id}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect((runResponse.json() as WorkspaceRunResponse).data).toMatchObject({
+        toolExecutions: [
+          expect.objectContaining({
+            status: "succeeded",
+            latencyMs: expect.any(Number),
+            request: expect.objectContaining({
+              function: expect.objectContaining({
+                name: "workspace.search",
+              }),
+            }),
+            result: expect.objectContaining({
+              isError: false,
+              content: expect.stringContaining("workspace.search"),
+            }),
+          }),
+        ],
+      });
     } finally {
       await app.close();
     }

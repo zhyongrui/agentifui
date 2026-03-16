@@ -75,6 +75,7 @@ export type WorkspaceRuntimeInvocationOutput = {
     toolCallId: string;
     toolName: string;
     content: string;
+    isError?: boolean;
   }>;
 };
 
@@ -314,6 +315,7 @@ function buildPlaceholderToolExecution(
           JSON.stringify(toolOutput, null, 2),
           "```",
         ].join("\n"),
+        isError: false,
       },
     ],
   };

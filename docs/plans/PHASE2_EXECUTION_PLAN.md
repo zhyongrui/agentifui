@@ -129,7 +129,8 @@ Execution status:
 | completed | `P3-B-01` | shared tool descriptor contract、auth scope、input schema 和 gateway request validation 已落地            |
 | completed | `P3-B-02` | per-app / per-tenant enabled tool registry surface、registry persistence 和 browser/admin coverage 已闭环 |
 | completed | `P3-B-03` | runtime tool call requests、tool result transcript persistence、route/persistence coverage 已闭环         |
-| active    | `P3-B-04` | 下一项，开始把 tool call attempts / results / latency 结构化沉淀到 run boundary                           |
+| completed | `P3-B-04` | `WorkspaceRun.toolExecutions`、latency、legacy fallback 和 replay surface 已闭环                          |
+| active    | `P3-B-05` | 下一项，开始 approval-required tool execution paths，复用现有 HITL contract                                |
 
 ## 5. First Batch Definition
 
@@ -174,7 +175,8 @@ Current batch status:
 - `P2-D4` complete
 - `P2-E3` complete
 - `P3-B-03` complete
-- the active follow-on item is `P3-B-04`
+- `P3-B-04` complete
+- the active follow-on item is `P3-B-05`
 
 ## 6. Detailed Execution Notes
 
@@ -726,7 +728,7 @@ Legend:
 - [x] `P3-B-01` Define a shared tool descriptor contract including auth scope and input schema
 - [x] `P3-B-02` Build a registry surface for enabled tools per app and tenant
 - [x] `P3-B-03` Add runtime support for tool call requests and tool result messages
-- [ ] `P3-B-04` Persist tool call attempts, results, and latency into the run boundary
+- [x] `P3-B-04` Persist tool call attempts, results, and latency into the run boundary
 - [ ] `P3-B-05` Add approval-required tool execution paths that reuse HITL contracts where needed
 - [ ] `P3-B-06` Add audit coverage for tool execution and operator approval decisions
 - [ ] `P3-B-07` Add timeout, retry, and idempotency handling for tool calls

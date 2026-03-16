@@ -1,3 +1,4 @@
+import type { ChatToolCall } from '@agentifui/shared';
 import type { AuthUser } from '@agentifui/shared/auth';
 import type {
   QuotaUsage,
@@ -27,6 +28,8 @@ import type {
   WorkspaceRunRuntime,
   WorkspaceRunStatus,
   WorkspaceRunSummary,
+  WorkspaceRunToolExecution,
+  WorkspaceRunToolExecutionResult,
   WorkspaceSafetySignal,
   WorkspaceRunTimelineEvent,
   WorkspaceRunTimelineEventType,
@@ -575,6 +578,181 @@ function readPendingActionsFromOutputs(outputs: Record<string, unknown>): Worksp
   return parseWorkspaceHitlSteps(outputs.pendingActions);
 }
 
+function toWorkspaceToolCall(value: unknown): ChatToolCall | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const toolCall = value as Record<string, unknown>;
+  const toolFunction =
+    typeof toolCall.function === 'object' && toolCall.function !== null
+      ? (toolCall.function as Record<string, unknown>)
+      : null;
+
+  if (
+    typeof toolCall.id !== 'string' ||
+    toolCall.type !== 'function' ||
+    !toolFunction ||
+    typeof toolFunction.name !== 'string' ||
+    typeof toolFunction.arguments !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    id: toolCall.id,
+    type: 'function',
+    function: {
+      name: toolFunction.name,
+      arguments: toolFunction.arguments,
+    },
+  };
+}
+
+function toWorkspaceRunToolExecutionResult(
+  value: unknown,
+): WorkspaceRunToolExecutionResult | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const result = value as Record<string, unknown>;
+
+  if (
+    typeof result.content !== 'string' ||
+    typeof result.isError !== 'boolean' ||
+    typeof result.recordedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    content: result.content,
+    isError: result.isError,
+    recordedAt: result.recordedAt,
+  };
+}
+
+function buildToolExecutionsFromLegacyOutputs(
+  outputs: Record<string, unknown>,
+): WorkspaceRunToolExecution[] {
+  const toolCalls = Array.isArray(outputs.toolCalls)
+    ? outputs.toolCalls.flatMap((entry) => {
+        const toolCall = toWorkspaceToolCall(entry);
+        return toolCall ? [toolCall] : [];
+      })
+    : [];
+  const toolResults = Array.isArray(outputs.toolResults)
+    ? outputs.toolResults
+    : [];
+
+  if (toolCalls.length === 0) {
+    return [];
+  }
+
+  return toolCalls.map((toolCall, index) => {
+    const matchingResult = toolResults.find((entry) => {
+      if (typeof entry !== 'object' || entry === null) {
+        return false;
+      }
+
+      return (entry as Record<string, unknown>).toolCallId === toolCall.id;
+    }) as Record<string, unknown> | undefined;
+
+    const recordedAt =
+      typeof matchingResult?.recordedAt === 'string'
+        ? matchingResult.recordedAt
+        : new Date().toISOString();
+    const content =
+      typeof matchingResult?.content === 'string' ? matchingResult.content : '';
+
+    return {
+      id:
+        typeof matchingResult?.id === 'string'
+          ? matchingResult.id
+          : `tool_exec_${randomUUID()}`,
+      attempt:
+        typeof matchingResult?.attempt === 'number' &&
+        Number.isFinite(matchingResult.attempt) &&
+        matchingResult.attempt > 0
+          ? matchingResult.attempt
+          : index + 1,
+      status:
+        typeof matchingResult?.isError === 'boolean' && matchingResult.isError
+          ? 'failed'
+          : 'succeeded',
+      startedAt:
+        typeof matchingResult?.startedAt === 'string'
+          ? matchingResult.startedAt
+          : recordedAt,
+      finishedAt:
+        typeof matchingResult?.finishedAt === 'string'
+          ? matchingResult.finishedAt
+          : recordedAt,
+      latencyMs:
+        typeof matchingResult?.latencyMs === 'number'
+          ? matchingResult.latencyMs
+          : null,
+      request: toolCall,
+      result:
+        matchingResult && content.length > 0
+          ? {
+              content,
+              isError: Boolean(matchingResult.isError),
+              recordedAt,
+            }
+          : null,
+    } satisfies WorkspaceRunToolExecution;
+  });
+}
+
+function buildToolExecutionsFromOutputs(
+  outputs: Record<string, unknown>,
+): WorkspaceRunToolExecution[] {
+  if (!Array.isArray(outputs.toolExecutions)) {
+    return buildToolExecutionsFromLegacyOutputs(outputs);
+  }
+
+  const toolExecutions = outputs.toolExecutions.flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null) {
+      return [];
+    }
+
+    const execution = entry as Record<string, unknown>;
+    const request = toWorkspaceToolCall(execution.request);
+    const result = toWorkspaceRunToolExecutionResult(execution.result);
+
+    if (
+      !request ||
+      typeof execution.id !== 'string' ||
+      typeof execution.attempt !== 'number' ||
+      (execution.status !== 'succeeded' && execution.status !== 'failed') ||
+      typeof execution.startedAt !== 'string'
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: execution.id,
+        attempt: execution.attempt,
+        status: execution.status,
+        startedAt: execution.startedAt,
+        finishedAt:
+          typeof execution.finishedAt === 'string' ? execution.finishedAt : null,
+        latencyMs:
+          typeof execution.latencyMs === 'number' ? execution.latencyMs : null,
+        request,
+        result,
+      } satisfies WorkspaceRunToolExecution,
+    ];
+  });
+
+  return toolExecutions.length > 0
+    ? toolExecutions
+    : buildToolExecutionsFromLegacyOutputs(outputs);
+}
+
 function toWorkspaceCitation(value: unknown): WorkspaceCitation | null {
   if (typeof value !== 'object' || value === null) {
     return null;
@@ -1063,6 +1241,7 @@ function createRunRecord(input: {
     runtime: null,
     inputs: {},
     outputs: {},
+    toolExecutions: [],
     artifacts: [],
     citations: [],
     safetySignals: [],
@@ -2263,12 +2442,14 @@ export function createWorkspaceService(options: {
           ...input.outputs,
         };
         run.runtime = buildRuntimeFromOutputs(run.outputs);
+        run.toolExecutions = buildToolExecutionsFromOutputs(run.outputs);
         run.artifacts = buildArtifactsFromOutputs(run.outputs);
         run.citations = buildCitationsFromOutputs(run.outputs);
         run.safetySignals = buildSafetySignalsFromOutputs(run.outputs);
         run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
         appendTimelineEvent(run, 'output_recorded', {
           keys: Object.keys(input.outputs),
+          toolExecutionCount: run.toolExecutions.length,
         });
       }
 
@@ -2318,6 +2499,7 @@ export function createWorkspaceService(options: {
       run.safetySignals = buildSafetySignalsFromOutputs(run.outputs);
       run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
       run.runtime = buildRuntimeFromOutputs(run.outputs);
+      run.toolExecutions = buildToolExecutionsFromOutputs(run.outputs);
       syncRunArtifacts(run, user.id);
       run.usage = buildUsageFromOutputs(run);
 
