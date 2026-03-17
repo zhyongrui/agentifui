@@ -218,7 +218,37 @@ Execution status:
 | completed | `P4-B-04` | connector sync-job tables and states 已补齐                                                            |
 | completed | `P4-B-05` | per-document sync provenance 已接入                                                                    |
 | completed | `P4-B-06` | incremental re-sync by timestamp/cursor checkpoint 已接入                                              |
-| active    | `P4-B-07` | 下一项，补 connector health surface 和 failure summary                                                 |
+| completed | `P4-B-07` | connector health surface 和 failure summary 已接入 admin/connectors                                   |
+| completed | `P4-B-08` | stale / revoked / paused connector 的用户态 source status 已接入 `/apps`                              |
+| completed | `P4-B-09` | connector rotate / revoke / pause / delete / queue-sync 审计已补齐                                    |
+| completed | `P4-B-10` | sync resume、revoked auth、duplicate documents、partial failure recovery 测试已补齐                   |
+| completed | `P4-B-11` | connector setup / first sync / stale-source warning 浏览器覆盖已补齐                                  |
+| completed | `P4-B-12` | connector mock / credential handling 本地开发指南已补齐                                               |
+| completed | `P4-C-01` | runtime-generated plan step 合同已冻结                                                                  |
+| completed | `P4-C-02` | branchable run state 已接入 conversation/run boundary                                                  |
+| completed | `P4-C-03` | plan progress state 已支持 pending / in-progress / blocked / completed / paused                       |
+| completed | `P4-C-04` | internal-only redacted workflow memory 已持久化                                                        |
+| completed | `P4-C-05` | step-level artifacts 和 citations 已接入 plan step                                                     |
+| completed | `P4-C-06` | resumable workflow state 已跨 session 持久化                                                           |
+| completed | `P4-C-07` | operator step controls 已支持 pause / resume / skip / restart                                         |
+| completed | `P4-C-08` | replay 已显示 branch lineage、parent-child runs 和 resumed workflow state                              |
+| completed | `P4-C-09` | branch / step override / workflow resumption 审计已补齐                                                |
+| completed | `P4-C-10` | branch correctness / plan mutation safety / restart persistence 测试已补齐                            |
+| completed | `P4-C-11` | branch navigation / workflow step control 浏览器覆盖已补齐                                             |
+| completed | `P4-C-12` | plan-state retention / hidden internal fields 文档已补齐                                               |
+| completed | `P4-D-01` | stored workflow definition format 已定义                                                               |
+| completed | `P4-D-02` | workflow versioning 已支持 draft / published / archived / rolled_back                                 |
+| completed | `P4-D-03` | prompt / retrieval / tool / approval / transform / export node types 已补齐                           |
+| completed | `P4-D-04` | workflow schema validation 已在 publish / dry-run 前执行                                               |
+| completed | `P4-D-05` | workflow dry-run validation mode 已接入                                                                |
+| completed | `P4-D-06` | workflow permissions 已支持 author / reviewer / publisher / runner                                    |
+| completed | `P4-D-07` | workflow import/export 已支持跨环境迁移                                                                |
+| completed | `P4-D-08` | workflow migration between versions 测试已补齐                                                         |
+| completed | `P4-D-09` | admin workflow authoring UX 已接入 node editing / validation / publish                                |
+| completed | `P4-D-10` | run replay 已显示 workflow version provenance                                                          |
+| completed | `P4-D-11` | workflow publish / rollback / permission change 审计已补齐                                             |
+| completed | `P4-D-12` | workflow authoring / rollout conventions 文档已补齐                                                    |
+| active    | `P4-E-01` | 下一项，补 billable usage records 和 billing boundary                                                  |
 
 ## 5. First Batch Definition
 
@@ -268,7 +298,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P4-B-07`
+- the active follow-on item is `P4-E-01`
 
 ## 6. Detailed Execution Notes
 
@@ -933,42 +963,42 @@ Legend:
 - [x] `P4-B-04` Add sync-job tables for queued, running, succeeded, partially failed, and cancelled states
 - [x] `P4-B-05` Add per-document sync provenance linking runs, artifacts, and retrieval hits back to source records
 - [x] `P4-B-06` Add incremental re-sync support based on updated timestamp or cursor checkpoints
-- [ ] `P4-B-07` Add connector health surfaces and failure summaries to admin views
-- [ ] `P4-B-08` Add user-facing source status surfaces for stale, revoked, or paused connectors
-- [ ] `P4-B-09` Add audit coverage for connector create, rotate, revoke, pause, and delete actions
-- [ ] `P4-B-10` Add tests for sync resume, revoked auth, duplicate documents, and partial failure recovery
-- [ ] `P4-B-11` Add browser coverage for connector setup, first sync, and stale-source warnings
-- [ ] `P4-B-12` Document local dev setup for connector mocks and safe credential handling
+- [x] `P4-B-07` Add connector health surfaces and failure summaries to admin views
+- [x] `P4-B-08` Add user-facing source status surfaces for stale, revoked, or paused connectors
+- [x] `P4-B-09` Add audit coverage for connector create, rotate, revoke, pause, and delete actions
+- [x] `P4-B-10` Add tests for sync resume, revoked auth, duplicate documents, and partial failure recovery
+- [x] `P4-B-11` Add browser coverage for connector setup, first sync, and stale-source warnings
+- [x] `P4-B-12` Document local dev setup for connector mocks and safe credential handling
 
 ### 7.20 Future Platform Queue: `P4-C` Agent Planning, Branching, And Workflow Memory
 
-- [ ] `P4-C-01` Define a plan-step contract for runtime-generated task plans inside a run
-- [ ] `P4-C-02` Add branchable run state so an operator can fork a conversation from an earlier run
-- [ ] `P4-C-03` Add plan progress tracking with pending, in-progress, blocked, and completed states
-- [ ] `P4-C-04` Persist intermediate agent thoughts or summaries in a redacted/internal-only channel
-- [ ] `P4-C-05` Add step-level artifacts and citations so each plan step can emit its own outputs
-- [ ] `P4-C-06` Add resumable workflow state for long-running tasks spanning multiple sessions
-- [ ] `P4-C-07` Add operator controls to pause, resume, skip, or restart individual plan steps
-- [ ] `P4-C-08` Add run replay views for branch lineage, parent-child runs, and resumed workflow state
-- [ ] `P4-C-09` Add audit coverage for branch creation, step override, and workflow resumption
-- [ ] `P4-C-10` Add tests for branch correctness, plan mutation safety, and resumed execution after restart
-- [ ] `P4-C-11` Add browser coverage for branch navigation and workflow step control surfaces
-- [ ] `P4-C-12` Document plan-state retention rules and which internal fields stay hidden from shared views
+- [x] `P4-C-01` Define a plan-step contract for runtime-generated task plans inside a run
+- [x] `P4-C-02` Add branchable run state so an operator can fork a conversation from an earlier run
+- [x] `P4-C-03` Add plan progress tracking with pending, in-progress, blocked, and completed states
+- [x] `P4-C-04` Persist intermediate agent thoughts or summaries in a redacted/internal-only channel
+- [x] `P4-C-05` Add step-level artifacts and citations so each plan step can emit its own outputs
+- [x] `P4-C-06` Add resumable workflow state for long-running tasks spanning multiple sessions
+- [x] `P4-C-07` Add operator controls to pause, resume, skip, or restart individual plan steps
+- [x] `P4-C-08` Add run replay views for branch lineage, parent-child runs, and resumed workflow state
+- [x] `P4-C-09` Add audit coverage for branch creation, step override, and workflow resumption
+- [x] `P4-C-10` Add tests for branch correctness, plan mutation safety, and resumed execution after restart
+- [x] `P4-C-11` Add browser coverage for branch navigation and workflow step control surfaces
+- [x] `P4-C-12` Document plan-state retention rules and which internal fields stay hidden from shared views
 
 ### 7.21 Future Platform Queue: `P4-D` Workflow Builder And Operator Authoring
 
-- [ ] `P4-D-01` Define a stored workflow definition format with nodes, edges, variables, and approvals
-- [ ] `P4-D-02` Add workflow versioning with draft, published, archived, and rolled-back states
-- [ ] `P4-D-03` Add node types for prompt, retrieval, tool call, approval, transform, and export
-- [ ] `P4-D-04` Add schema validation for workflow definitions before publish
-- [ ] `P4-D-05` Add dry-run validation mode that executes a workflow against fixtures without persisting a real run
-- [ ] `P4-D-06` Add workflow-level permissions for author, reviewer, publisher, and runner roles
-- [ ] `P4-D-07` Add import/export for workflow definitions across environments
-- [ ] `P4-D-08` Add tests for workflow migration between definition versions
-- [ ] `P4-D-09` Add browser authoring UX for node editing, edge linking, validation, and publish
-- [ ] `P4-D-10` Add replay support showing which workflow version generated a given run
-- [ ] `P4-D-11` Add audit coverage for workflow publish, rollback, and permission changes
-- [ ] `P4-D-12` Document workflow-authoring conventions and safe rollout steps
+- [x] `P4-D-01` Define a stored workflow definition format with nodes, edges, variables, and approvals
+- [x] `P4-D-02` Add workflow versioning with draft, published, archived, and rolled-back states
+- [x] `P4-D-03` Add node types for prompt, retrieval, tool call, approval, transform, and export
+- [x] `P4-D-04` Add schema validation for workflow definitions before publish
+- [x] `P4-D-05` Add dry-run validation mode that executes a workflow against fixtures without persisting a real run
+- [x] `P4-D-06` Add workflow-level permissions for author, reviewer, publisher, and runner roles
+- [x] `P4-D-07` Add import/export for workflow definitions across environments
+- [x] `P4-D-08` Add tests for workflow migration between definition versions
+- [x] `P4-D-09` Add browser authoring UX for node editing, edge linking, validation, and publish
+- [x] `P4-D-10` Add replay support showing which workflow version generated a given run
+- [x] `P4-D-11` Add audit coverage for workflow publish, rollback, and permission changes
+- [x] `P4-D-12` Document workflow-authoring conventions and safe rollout steps
 
 ### 7.22 Future Platform Queue: `P4-E` Cost Control, Billing, And Commercial Boundaries
 
