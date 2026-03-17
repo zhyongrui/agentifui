@@ -114,12 +114,74 @@ function normalizeJsonRecord(
   }
 }
 
+export function applyTenantGovernanceToWorkspaceCleanupPolicy(
+  policy: WorkspaceCleanupPolicy,
+  metadata: Record<string, unknown> | string | null,
+): WorkspaceCleanupPolicy {
+  const normalizedMetadata = normalizeJsonRecord(metadata);
+  const governance =
+    typeof normalizedMetadata.governance === "object" && normalizedMetadata.governance !== null
+      ? (normalizedMetadata.governance as Record<string, unknown>)
+      : {};
+  const legalHoldEnabled = governance.legalHoldEnabled === true;
+  const retentionOverrideDays =
+    typeof governance.retentionOverrideDays === "number"
+      ? governance.retentionOverrideDays
+      : null;
+
+  if (legalHoldEnabled) {
+    return {
+      archivedConversationRetentionDays: 365000,
+      shareExpiryDays: 365000,
+      timelineRetentionDays: 365000,
+      staleKnowledgeSourceRetentionDays: 365000,
+    };
+  }
+
+  if (retentionOverrideDays === null || retentionOverrideDays <= 0) {
+    return policy;
+  }
+
+  return {
+    archivedConversationRetentionDays: Math.max(
+      policy.archivedConversationRetentionDays,
+      retentionOverrideDays,
+    ),
+    shareExpiryDays: Math.max(policy.shareExpiryDays, retentionOverrideDays),
+    timelineRetentionDays: Math.max(policy.timelineRetentionDays, retentionOverrideDays),
+    staleKnowledgeSourceRetentionDays: Math.max(
+      policy.staleKnowledgeSourceRetentionDays,
+      retentionOverrideDays,
+    ),
+  };
+}
+
+export async function resolveWorkspaceCleanupPolicy(
+  database: DatabaseClient,
+  tenantId: string,
+): Promise<WorkspaceCleanupPolicy> {
+  const [tenantRow] = await database<{ metadata: Record<string, unknown> | string | null }[]>`
+    select metadata
+    from tenants
+    where id = ${tenantId}
+    limit 1
+  `;
+
+  return applyTenantGovernanceToWorkspaceCleanupPolicy(
+    buildWorkspaceCleanupPolicy(),
+    tenantRow?.metadata ?? null,
+  );
+}
+
 export async function previewWorkspaceCleanup(
   database: DatabaseClient,
   tenantId: string,
   now = new Date(),
 ): Promise<WorkspaceCleanupPreview> {
-  const cutoffs = buildWorkspaceCleanupCutoffs(now);
+  const cutoffs = buildWorkspaceCleanupCutoffs(
+    now,
+    await resolveWorkspaceCleanupPolicy(database, tenantId),
+  );
 
   const [
     archivedConversationRow,

@@ -21,6 +21,7 @@ import { useProtectedSession } from '../../../lib/use-protected-session';
 type AuditFilterFormState = {
   scope: 'tenant' | 'platform';
   tenantId: string;
+  datePreset: '' | '24h' | '7d' | '30d' | '90d';
   action: string;
   level: '' | 'critical' | 'info' | 'warning';
   actorUserId: string;
@@ -35,6 +36,7 @@ type AuditFilterFormState = {
 const EMPTY_FILTERS: AuditFilterFormState = {
   scope: 'tenant',
   tenantId: '',
+  datePreset: '',
   action: '',
   level: '',
   actorUserId: '',
@@ -53,6 +55,7 @@ function normalizeFilters(filters: AuditFilterFormState): AdminAuditFilters {
     scope: filters.scope,
     tenantId: filters.tenantId.trim() || null,
     action: filters.action.trim() || null,
+    datePreset: filters.datePreset || null,
     level: filters.level || null,
     actorUserId: filters.actorUserId.trim() || null,
     entityType: filters.entityType || null,
@@ -85,6 +88,7 @@ function buildFilterTags(filters: AdminAuditFilters, tenantNameById: Map<string,
       ? `Tenant: ${tenantNameById.get(filters.tenantId) ?? filters.tenantId}`
       : null,
     filters.action ? `Action: ${filters.action}` : null,
+    filters.datePreset ? `Window: ${filters.datePreset}` : null,
     filters.level ? `Level: ${filters.level}` : null,
     filters.actorUserId ? `Actor: ${filters.actorUserId}` : null,
     filters.entityType ? `Entity: ${filters.entityType}` : null,
@@ -155,6 +159,8 @@ export default function AdminAuditPage() {
           payload: '载荷',
           limit: '条数限制',
           actions: '操作',
+          datePreset: '时间窗口',
+          allDatePresets: '自定义 / 全部',
           apply: '应用筛选',
           clear: '清空',
           exportingJson: '导出 JSON 中...',
@@ -219,6 +225,8 @@ export default function AdminAuditPage() {
           payload: 'Payload',
           limit: 'Limit',
           actions: 'Actions',
+          datePreset: 'Date window',
+          allDatePresets: 'Custom / all',
           apply: 'Apply filters',
           clear: 'Clear',
           exportingJson: 'Exporting JSON...',
@@ -507,6 +515,27 @@ export default function AdminAuditPage() {
                 </label>
               </>
             ) : null}
+            <label className="field">
+              <span>{copy.datePreset}</span>
+              <select
+                aria-label="Audit date preset filter"
+                value={draftFilters.datePreset}
+                onChange={event => {
+                  const datePreset = event.target.value as AuditFilterFormState['datePreset'];
+
+                  setDraftFilters(currentValue => ({
+                    ...currentValue,
+                    datePreset,
+                  }));
+                }}
+              >
+                <option value="">{copy.allDatePresets}</option>
+                <option value="24h">24h</option>
+                <option value="7d">7d</option>
+                <option value="30d">30d</option>
+                <option value="90d">90d</option>
+              </select>
+            </label>
             <label className="field">
               <span>{copy.action}</span>
               <input

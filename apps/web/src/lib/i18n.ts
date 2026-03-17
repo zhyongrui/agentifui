@@ -20,6 +20,7 @@ type Messages = {
   };
   adminNav: {
     ariaLabel: string;
+    identity: string;
     users: string;
     groups: string;
     apps: string;
@@ -251,6 +252,7 @@ const messages: Record<AppLocale, Messages> = {
     adminNav: {
       ariaLabel: '管理导航',
       eyebrow: '管理后台',
+      identity: '身份与治理',
       users: '用户',
       groups: '群组',
       apps: '应用',
@@ -481,6 +483,7 @@ const messages: Record<AppLocale, Messages> = {
     adminNav: {
       ariaLabel: 'Admin sections',
       eyebrow: 'Admin',
+      identity: 'Identity',
       users: 'Users',
       groups: 'Groups',
       apps: 'Apps',

@@ -26,6 +26,7 @@ import { validatePassword } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
 
 import type { GatewayEnv } from '../config/env.js';
+import type { AdminService } from '../services/admin-service.js';
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 
@@ -126,7 +127,8 @@ export async function registerAuthRoutes(
   app: FastifyInstance,
   env: GatewayEnv,
   authService: AuthService,
-  auditService: AuditService
+  auditService: AuditService,
+  adminService: AdminService
 ) {
   app.post('/auth/sso/discovery', async (request, reply) => {
     const body = (request.body ?? {}) as Partial<SsoDiscoveryRequest>;
@@ -141,7 +143,8 @@ export async function registerAuthRoutes(
     }
 
     const domain = getEmailDomain(email);
-    const providerId = env.ssoDomainMap[domain] ?? null;
+    const resolvedClaim = await adminService.resolveSsoProviderForEmail(email);
+    const providerId = env.ssoDomainMap[domain] ?? resolvedClaim?.providerId ?? null;
 
     const response: SsoDiscoveryResponse = {
       ok: true,
@@ -167,9 +170,11 @@ export async function registerAuthRoutes(
     }
 
     const domain = getEmailDomain(body.email);
-    const configuredProviderId = env.ssoDomainMap[domain];
+    const configuredProviderId = env.ssoDomainMap[domain] ?? null;
+    const resolvedClaim = await adminService.resolveSsoProviderForEmail(body.email);
+    const resolvedProviderId = configuredProviderId ?? resolvedClaim?.providerId ?? null;
 
-    if (!configuredProviderId || configuredProviderId !== body.providerId) {
+    if (!resolvedProviderId || resolvedProviderId !== body.providerId) {
       reply.code(404);
       return buildErrorResponse(
         'AUTH_SSO_NOT_CONFIGURED',
@@ -181,6 +186,8 @@ export async function registerAuthRoutes(
       email: body.email,
       providerId: body.providerId,
       displayName: body.displayName,
+      tenantId: resolvedClaim?.tenantId,
+      jitUserStatus: resolvedClaim?.jitUserStatus,
     });
 
     if (!result.ok) {
@@ -200,6 +207,36 @@ export async function registerAuthRoutes(
           email: result.data.user.email,
           authMethod: 'sso',
           providerId: result.data.providerId,
+        },
+      });
+    }
+
+    if (
+      result.data.createdViaJit &&
+      result.data.user.status === 'pending' &&
+      resolvedClaim?.tenantId
+    ) {
+      await adminService.capturePendingAccessRequest({
+        tenantId: resolvedClaim.tenantId,
+        userId: result.data.user.id,
+        email: result.data.user.email,
+        displayName: result.data.user.displayName,
+        source: 'sso_jit',
+        domainClaimId: resolvedClaim.claimId,
+        reason: 'Enterprise SSO sign-in is awaiting tenant approval.',
+      });
+
+      await auditService.recordEvent({
+        tenantId: resolvedClaim.tenantId,
+        actorUserId: result.data.user.id,
+        action: 'auth.access_request.created',
+        entityType: 'access_request',
+        entityId: result.data.user.id,
+        ipAddress: request.ip,
+        payload: {
+          email: result.data.user.email,
+          source: 'sso_jit',
+          domainClaimId: resolvedClaim.claimId,
         },
       });
     }

@@ -14,6 +14,7 @@ import { registerBasePlugins } from './plugins/base.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAdminRoutes } from './routes/admin.js';
+import { registerAdminIdentityRoutes } from './routes/admin-identity.js';
 import { registerAdminSourceRoutes } from './routes/admin-sources.js';
 import { registerRootRoutes } from './routes/root.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
@@ -220,7 +221,7 @@ export async function buildApp(
   });
 
   await registerRootRoutes(app, env, observabilityService, runtimeService);
-  await registerAuthRoutes(app, env, authService, auditService);
+  await registerAuthRoutes(app, env, authService, auditService, adminService);
   await registerAdminRoutes(
     app,
     authService,
@@ -228,6 +229,7 @@ export async function buildApp(
     auditService,
     toolRegistryService,
   );
+  await registerAdminIdentityRoutes(app, authService, adminService, auditService);
   await registerAdminSourceRoutes(app, authService, adminService, knowledgeService, auditService);
   await registerWorkspaceRoutes(
     app,
@@ -235,6 +237,7 @@ export async function buildApp(
     workspaceService,
     auditService,
     runtimeService,
+    adminService,
   );
   await registerChatRoutes(
     app,

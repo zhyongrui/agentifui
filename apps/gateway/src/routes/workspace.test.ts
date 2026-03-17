@@ -25,6 +25,7 @@ import type { ChatCompletionResponse } from "@agentifui/shared/chat";
 
 import { buildApp } from "../app.js";
 import { createAuditService } from "../services/audit-service.js";
+import { createAdminService } from "../services/admin-service.js";
 import { createAuthService } from "../services/auth-service.js";
 import {
   createWorkspaceRuntimeService,
@@ -1941,6 +1942,208 @@ describe("workspace routes", () => {
     }
   });
 
+  it("blocks share creation that exceeds the tenant sharing policy", async () => {
+    const authService = createTestAuthService();
+    const adminService = createAdminService();
+    const originalGetIdentityOverviewForUser = adminService.getIdentityOverviewForUser;
+    adminService.getIdentityOverviewForUser = async (user, input) => {
+      const overview = await originalGetIdentityOverviewForUser(user, input);
+
+      return {
+        ...overview,
+        governance: overview.governance
+          ? {
+              ...overview.governance,
+              policyPack: {
+                ...overview.governance.policyPack,
+                sharingMode: "commenter",
+              },
+            }
+          : overview.governance,
+      };
+    };
+    const { app } = await createTestApp(authService, {}, { adminService });
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+
+    const ownerLogin = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(ownerLogin.ok).toBe(true);
+
+    if (!ownerLogin.ok) {
+      throw new Error("expected owner login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+      const conversationId = (launch.json() as WorkspaceAppLaunchResponse).data.conversationId;
+
+      const createShare = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          groupId: "grp_research",
+          access: "editor",
+        },
+      });
+
+      expect(createShare.statusCode).toBe(403);
+      expect(createShare.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_FORBIDDEN",
+          details: {
+            requestedAccess: "editor",
+            allowedAccess: "commenter",
+          },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("blocks shared artifact downloads when the tenant artifact policy is owner only", async () => {
+    const authService = createTestAuthService();
+    const adminService = createAdminService();
+    const originalGetIdentityOverviewForUser = adminService.getIdentityOverviewForUser;
+    adminService.getIdentityOverviewForUser = async (user, input) => {
+      const overview = await originalGetIdentityOverviewForUser(user, input);
+
+      return {
+        ...overview,
+        governance: overview.governance
+          ? {
+              ...overview.governance,
+              policyPack: {
+                ...overview.governance.policyPack,
+                artifactDownloadMode: "owner_only",
+              },
+            }
+          : overview.governance,
+      };
+    };
+    const { app } = await createTestApp(authService, {}, { adminService });
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+    authService.register({
+      email: "reader@example.com",
+      password: "Secure123",
+      displayName: "Reader",
+    });
+
+    const ownerLogin = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+    const readerLogin = authService.login({
+      email: "reader@example.com",
+      password: "Secure123",
+    });
+
+    expect(ownerLogin.ok).toBe(true);
+    expect(readerLogin.ok).toBe(true);
+
+    if (!ownerLogin.ok || !readerLogin.ok) {
+      throw new Error("expected both logins to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+      const conversationId = (launch.json() as WorkspaceAppLaunchResponse).data.conversationId;
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Create a shared artifact for my research group.",
+            },
+          ],
+        },
+      });
+      const artifactId = (completion.json() as ChatCompletionResponse).choices[0]?.message.artifacts?.[0]?.id;
+
+      if (!artifactId) {
+        throw new Error("expected completion payload to include an artifact id");
+      }
+
+      const createShare = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          groupId: "grp_research",
+        },
+      });
+      const shareId = (createShare.json() as WorkspaceConversationShareResponse).data.id;
+
+      const sharedArtifactDownload = await app.inject({
+        method: "GET",
+        url: `/workspace/shares/${shareId}/artifacts/${artifactId}/download`,
+        headers: {
+          authorization: `Bearer ${readerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(sharedArtifactDownload.statusCode).toBe(403);
+      expect(sharedArtifactDownload.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_FORBIDDEN",
+          details: {
+            artifactDownloadMode: "owner_only",
+          },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("enforces shared commenter and editor access modes", async () => {
     const authService = createTestAuthService();
     const auditService = createAuditService();
@@ -2910,7 +3113,7 @@ describe("workspace routes", () => {
     } finally {
       await app.close();
     }
-  });
+  }, 10_000);
 
   it("returns persisted artifacts through the workspace artifact route", async () => {
     const authService = createTestAuthService();

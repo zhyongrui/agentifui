@@ -6,6 +6,7 @@ import {
   invitationStatusEnum,
   mfaTypeEnum,
   tenants,
+  userStatusEnum,
   users,
 } from './core.js';
 
@@ -13,6 +14,23 @@ export const authSessionStatusEnum = pgEnum('auth_session_status', ['active', 'r
 export const authChallengeKindEnum = pgEnum('auth_challenge_kind', [
   'mfa_setup',
   'mfa_login',
+]);
+export const ssoDomainClaimStatusEnum = pgEnum('sso_domain_claim_status', [
+  'pending',
+  'approved',
+  'rejected',
+]);
+export const accessRequestStatusEnum = pgEnum('access_request_status', [
+  'pending',
+  'approved',
+  'rejected',
+  'transferred',
+]);
+export const accessRequestSourceEnum = pgEnum('access_request_source', ['manual', 'sso_jit']);
+export const breakGlassSessionStatusEnum = pgEnum('break_glass_session_status', [
+  'active',
+  'expired',
+  'revoked',
 ]);
 
 export const authIdentities = pgTable(
@@ -149,6 +167,91 @@ export const authChallenges = pgTable(
     authChallengeUserIndex: index('auth_challenges_user_idx').on(table.userId),
     authChallengeTokenHashUnique: uniqueIndex('auth_challenges_token_hash_unique').on(
       table.tokenHash
+    ),
+  })
+);
+
+export const ssoDomainClaims = pgTable(
+  'sso_domain_claims',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id),
+    domain: varchar('domain', { length: 255 }).notNull(),
+    providerId: varchar('provider_id', { length: 120 }).notNull(),
+    status: ssoDomainClaimStatusEnum('status').notNull().default('pending'),
+    jitUserStatus: userStatusEnum('jit_user_status').notNull().default('pending'),
+    requestedByUserId: varchar('requested_by_user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id),
+    reviewReason: text('review_reason'),
+    reviewedByUserId: varchar('reviewed_by_user_id', { length: 120 }).references(() => users.id),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    ssoDomainClaimsTenantIndex: index('sso_domain_claims_tenant_idx').on(table.tenantId),
+    ssoDomainClaimsDomainUnique: uniqueIndex('sso_domain_claims_domain_unique').on(table.domain),
+  })
+);
+
+export const adminAccessRequests = pgTable(
+  'admin_access_requests',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id),
+    userId: varchar('user_id', { length: 120 }).references(() => users.id),
+    email: varchar('email', { length: 255 }).notNull(),
+    displayName: varchar('display_name', { length: 120 }),
+    source: accessRequestSourceEnum('source').notNull().default('manual'),
+    status: accessRequestStatusEnum('status').notNull().default('pending'),
+    reason: text('reason'),
+    domainClaimId: varchar('domain_claim_id', { length: 120 }).references(() => ssoDomainClaims.id),
+    targetTenantId: varchar('target_tenant_id', { length: 120 }).references(() => tenants.id),
+    requestedByUserId: varchar('requested_by_user_id', { length: 120 }).references(() => users.id),
+    reviewedByUserId: varchar('reviewed_by_user_id', { length: 120 }).references(() => users.id),
+    reviewReason: text('review_reason'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    adminAccessRequestsTenantIndex: index('admin_access_requests_tenant_idx').on(table.tenantId),
+    adminAccessRequestsUserIndex: index('admin_access_requests_user_idx').on(table.userId),
+    adminAccessRequestsEmailIndex: index('admin_access_requests_email_idx').on(table.email),
+  })
+);
+
+export const adminBreakGlassSessions = pgTable(
+  'admin_break_glass_sessions',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id),
+    actorUserId: varchar('actor_user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id),
+    reason: text('reason').notNull(),
+    justification: text('justification'),
+    status: breakGlassSessionStatusEnum('status').notNull().default('active'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    reviewedByUserId: varchar('reviewed_by_user_id', { length: 120 }).references(() => users.id),
+    reviewNotes: text('review_notes'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    adminBreakGlassSessionsTenantIndex: index('admin_break_glass_sessions_tenant_idx').on(
+      table.tenantId
+    ),
+    adminBreakGlassSessionsActorIndex: index('admin_break_glass_sessions_actor_idx').on(
+      table.actorUserId
     ),
   })
 );

@@ -44,6 +44,10 @@ export function AdminSectionNav() {
 
   const sharedItems = [
     {
+      href: '/admin/identity',
+      label: messages.adminNav.identity,
+    },
+    {
       href: '/admin/users',
       label: messages.adminNav.users,
     },

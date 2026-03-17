@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createAdminBreakGlassSession,
+  createAdminDomainClaim,
   createAdminTenant,
   createAdminAppGrant,
   createAdminSource,
@@ -10,13 +12,19 @@ import {
   fetchAdminAudit,
   fetchAdminContext,
   fetchAdminGroups,
+  fetchAdminIdentity,
   fetchAdminSources,
   fetchAdminTenants,
   fetchAdminUsage,
   fetchAdminUsers,
+  resetAdminUserMfa,
+  reviewAdminAccessRequest,
+  reviewAdminDomainClaim,
   revokeAdminAppGrant,
+  updateAdminBreakGlassSession,
   updateAdminAppTools,
   updateAdminSourceStatus,
+  updateAdminTenantGovernance,
   updateAdminTenantStatus,
 } from './admin-client.js';
 
@@ -63,7 +71,9 @@ describe('admin client', () => {
 
     const [contextResult, usersResult, tenantsResult] = await Promise.all([
       fetchAdminContext('session-123'),
-      fetchAdminUsers('session-123'),
+      fetchAdminUsers('session-123', {
+        tenantId: 'tenant-a',
+      }),
       fetchAdminTenants('session-123'),
     ]);
 
@@ -74,7 +84,7 @@ describe('admin client', () => {
       },
       cache: 'no-store',
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/admin/users', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/admin/users?tenantId=tenant-a', {
       method: 'GET',
       headers: {
         authorization: 'Bearer session-123',
@@ -430,11 +440,12 @@ describe('admin client', () => {
       traceId: 'trace-123',
       runId: 'run-123',
       payloadMode: 'raw',
+      datePreset: '7d',
       limit: 25,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/gateway/admin/audit?scope=platform&tenantId=tenant-acme&action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&payloadMode=raw&limit=25',
+      '/api/gateway/admin/audit?scope=platform&tenantId=tenant-acme&action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&payloadMode=raw&datePreset=7d&limit=25',
       {
         method: 'GET',
         headers: {
@@ -442,6 +453,102 @@ describe('admin client', () => {
         },
         cache: 'no-store',
       }
+    );
+  });
+
+  it('loads and mutates admin identity controls through the same-origin gateway proxy', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-17T00:00:00.000Z',
+            capabilities: {
+              canReadAdmin: true,
+              canReadPlatformAdmin: true,
+            },
+            tenant: null,
+            domainClaims: [],
+            pendingAccessRequests: [],
+            breakGlassSessions: [],
+            governance: null,
+          },
+        }),
+      })
+      .mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {},
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await Promise.all([
+      fetchAdminIdentity('session-123', {
+        tenantId: 'tenant-dev',
+      }),
+      createAdminDomainClaim('session-123', {
+        domain: 'contoso.com',
+        providerId: 'contoso-sso',
+      }),
+      reviewAdminDomainClaim('session-123', 'claim_123', {
+        status: 'approved',
+      }),
+      reviewAdminAccessRequest('session-123', 'request_123', {
+        decision: 'approved',
+      }),
+      resetAdminUserMfa('session-123', 'user_123'),
+      createAdminBreakGlassSession('session-123', {
+        reason: 'Emergency review',
+      }),
+      updateAdminBreakGlassSession('session-123', 'bg_123', {
+        status: 'revoked',
+      }),
+      updateAdminTenantGovernance('session-123', {
+        legalHoldEnabled: true,
+      }),
+    ]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/gateway/admin/identity?tenantId=tenant-dev',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/gateway/admin/identity/domain-claims',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/gateway/admin/identity/domain-claims/claim_123/review',
+      expect.objectContaining({ method: 'PUT' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      '/api/gateway/admin/identity/access-requests/request_123/review',
+      expect.objectContaining({ method: 'PUT' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      '/api/gateway/admin/identity/users/user_123/mfa/reset',
+      expect.objectContaining({ method: 'PUT' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      '/api/gateway/admin/identity/break-glass',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      '/api/gateway/admin/identity/break-glass/bg_123',
+      expect.objectContaining({ method: 'PUT' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      '/api/gateway/admin/identity/governance',
+      expect.objectContaining({ method: 'PUT' })
     );
   });
 

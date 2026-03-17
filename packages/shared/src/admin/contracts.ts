@@ -370,6 +370,7 @@ export type AdminAuditTenantCount = {
 };
 
 export type AdminAuditScope = 'tenant' | 'platform';
+export type AdminAuditDatePreset = '24h' | '7d' | '30d' | '90d';
 
 export type AdminAuditFilters = {
   scope?: AdminAuditScope | null;
@@ -383,6 +384,7 @@ export type AdminAuditFilters = {
   conversationId?: string | null;
   occurredAfter?: string | null;
   occurredBefore?: string | null;
+  datePreset?: AdminAuditDatePreset | null;
   payloadMode?: AdminAuditPayloadMode | null;
   limit?: number | null;
 };
@@ -451,5 +453,200 @@ export type AdminAuditResponse = {
     countsByTenant: AdminAuditTenantCount[];
     highRiskEventCount: number;
     events: AdminAuditEventSummary[];
+  };
+};
+
+export type AdminIdentityDomainClaimStatus = 'pending' | 'approved' | 'rejected';
+
+export type AdminIdentityDomainClaim = {
+  id: string;
+  tenantId: string;
+  tenantName: string | null;
+  domain: string;
+  providerId: string;
+  status: AdminIdentityDomainClaimStatus;
+  jitUserStatus: Extract<AuthUserStatus, 'active' | 'pending'>;
+  requestedAt: string;
+  requestedByUserId: string;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewReason: string | null;
+};
+
+export type AdminIdentityAccessRequestSource = 'manual' | 'sso_jit';
+
+export type AdminIdentityAccessRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'transferred';
+
+export type AdminIdentityAccessRequest = {
+  id: string;
+  tenantId: string;
+  tenantName: string | null;
+  userId: string | null;
+  email: string;
+  displayName: string | null;
+  source: AdminIdentityAccessRequestSource;
+  status: AdminIdentityAccessRequestStatus;
+  requestedAt: string;
+  requestedByUserId: string | null;
+  domainClaimId: string | null;
+  reason: string | null;
+  targetTenantId: string | null;
+  targetTenantName: string | null;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewReason: string | null;
+};
+
+export type AdminBreakGlassSessionStatus = 'active' | 'expired' | 'revoked';
+
+export type AdminBreakGlassSession = {
+  id: string;
+  tenantId: string;
+  tenantName: string | null;
+  actorUserId: string;
+  actorUserEmail: string | null;
+  reason: string;
+  justification: string | null;
+  createdAt: string;
+  expiresAt: string;
+  status: AdminBreakGlassSessionStatus;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewNotes: string | null;
+};
+
+export type AdminPolicyPackRuntimeMode = 'standard' | 'strict' | 'degraded';
+export type AdminPolicyPackSharingMode = 'read_only' | 'commenter' | 'editor';
+export type AdminPolicyPackArtifactDownloadMode = 'shared_readers' | 'owner_only';
+
+export type AdminTenantGovernanceScimPlanning = {
+  enabled: boolean;
+  ownerEmail: string | null;
+  notes: string | null;
+};
+
+export type AdminTenantGovernancePolicyPack = {
+  runtimeMode: AdminPolicyPackRuntimeMode;
+  sharingMode: AdminPolicyPackSharingMode;
+  artifactDownloadMode: AdminPolicyPackArtifactDownloadMode;
+};
+
+export type AdminTenantGovernanceSettings = {
+  tenantId: string;
+  legalHoldEnabled: boolean;
+  retentionOverrideDays: number | null;
+  scimPlanning: AdminTenantGovernanceScimPlanning;
+  policyPack: AdminTenantGovernancePolicyPack;
+};
+
+export type AdminIdentityOverviewResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    capabilities: AdminViewerCapabilities;
+    tenant: AdminTenantSummary | null;
+    domainClaims: AdminIdentityDomainClaim[];
+    pendingAccessRequests: AdminIdentityAccessRequest[];
+    breakGlassSessions: AdminBreakGlassSession[];
+    governance: AdminTenantGovernanceSettings | null;
+  };
+};
+
+export type AdminDomainClaimCreateRequest = {
+  tenantId?: string | null;
+  domain: string;
+  providerId: string;
+  jitUserStatus?: Extract<AuthUserStatus, 'active' | 'pending'>;
+};
+
+export type AdminDomainClaimCreateResponse = {
+  ok: true;
+  data: {
+    claim: AdminIdentityDomainClaim;
+  };
+};
+
+export type AdminDomainClaimReviewRequest = {
+  status: Extract<AdminIdentityDomainClaimStatus, 'approved' | 'rejected'>;
+  reviewReason?: string | null;
+};
+
+export type AdminDomainClaimReviewResponse = {
+  ok: true;
+  data: {
+    claim: AdminIdentityDomainClaim;
+  };
+};
+
+export type AdminAccessRequestReviewDecision = 'approved' | 'rejected' | 'transferred';
+
+export type AdminAccessRequestReviewRequest = {
+  decision: AdminAccessRequestReviewDecision;
+  reviewReason?: string | null;
+  targetTenantId?: string | null;
+};
+
+export type AdminAccessRequestReviewResponse = {
+  ok: true;
+  data: {
+    request: AdminIdentityAccessRequest;
+  };
+};
+
+export type AdminUserMfaResetRequest = {
+  reason?: string | null;
+};
+
+export type AdminUserMfaResetResponse = {
+  ok: true;
+  data: {
+    userId: string;
+    reset: true;
+    reason: string | null;
+  };
+};
+
+export type AdminBreakGlassCreateRequest = {
+  tenantId?: string | null;
+  reason: string;
+  justification?: string | null;
+  expiresInMinutes?: number | null;
+};
+
+export type AdminBreakGlassCreateResponse = {
+  ok: true;
+  data: {
+    session: AdminBreakGlassSession;
+  };
+};
+
+export type AdminBreakGlassUpdateRequest = {
+  status: Extract<AdminBreakGlassSessionStatus, 'revoked'>;
+  reviewNotes?: string | null;
+};
+
+export type AdminBreakGlassUpdateResponse = {
+  ok: true;
+  data: {
+    session: AdminBreakGlassSession;
+  };
+};
+
+export type AdminTenantGovernanceUpdateRequest = {
+  tenantId?: string | null;
+  legalHoldEnabled?: boolean;
+  retentionOverrideDays?: number | null;
+  scimPlanning?: Partial<AdminTenantGovernanceScimPlanning>;
+  policyPack?: Partial<AdminTenantGovernancePolicyPack>;
+};
+
+export type AdminTenantGovernanceUpdateResponse = {
+  ok: true;
+  data: {
+    governance: AdminTenantGovernanceSettings;
   };
 };

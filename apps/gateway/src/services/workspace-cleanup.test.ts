@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyTenantGovernanceToWorkspaceCleanupPolicy,
   buildWorkspaceCleanupCutoffs,
   buildWorkspaceCleanupPolicy,
   countWorkspaceCleanupCandidates,
@@ -35,5 +36,36 @@ describe("workspace cleanup helpers", () => {
         staleKnowledgeSources: 4,
       }),
     ).toBe(15);
+  });
+
+  it("applies tenant retention overrides to all cleanup buckets", () => {
+    expect(
+      applyTenantGovernanceToWorkspaceCleanupPolicy(buildWorkspaceCleanupPolicy(), {
+        governance: {
+          legalHoldEnabled: false,
+          retentionOverrideDays: 90,
+        },
+      }),
+    ).toEqual({
+      archivedConversationRetentionDays: 90,
+      shareExpiryDays: 90,
+      timelineRetentionDays: 90,
+      staleKnowledgeSourceRetentionDays: 90,
+    });
+  });
+
+  it("turns cleanup into a no-op window when legal hold is enabled", () => {
+    expect(
+      applyTenantGovernanceToWorkspaceCleanupPolicy(buildWorkspaceCleanupPolicy(), {
+        governance: {
+          legalHoldEnabled: true,
+        },
+      }),
+    ).toEqual({
+      archivedConversationRetentionDays: 365000,
+      shareExpiryDays: 365000,
+      timelineRetentionDays: 365000,
+      staleKnowledgeSourceRetentionDays: 365000,
+    });
   });
 });

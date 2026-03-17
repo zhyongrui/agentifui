@@ -7,6 +7,7 @@ import type {
   AdminAppsResponse,
   AdminCleanupResponse,
   AdminContextResponse,
+  AdminAuditDatePreset,
   AdminAuditExportFormat,
   AdminAuditExportJsonBundle,
   AdminAuditExportMetadata,
@@ -141,6 +142,10 @@ function isAuditPayloadMode(value: unknown): value is AdminAuditPayloadMode {
 
 function isAuditScope(value: unknown): value is NonNullable<AdminAuditFilters['scope']> {
   return value === 'tenant' || value === 'platform';
+}
+
+function isAuditDatePreset(value: unknown): value is AdminAuditDatePreset {
+  return value === '24h' || value === '7d' || value === '30d' || value === '90d';
 }
 
 function isTenantStatus(value: unknown): value is AdminTenantStatusUpdateRequest['status'] {
@@ -355,6 +360,7 @@ function parseAuditFilters(query: Record<string, unknown>):
   const occurredBefore = readQueryString(query.occurredBefore);
   const payloadMode = readQueryString(query.payloadMode);
   const scope = readQueryString(query.scope);
+  const datePreset = readQueryString(query.datePreset);
 
   if (scope && !isAuditScope(scope)) {
     return {
@@ -396,10 +402,21 @@ function parseAuditFilters(query: Record<string, unknown>):
     };
   }
 
+  if (datePreset && !isAuditDatePreset(datePreset)) {
+    return {
+      ok: false,
+      response: buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Audit filters require datePreset to be 24h, 7d, 30d or 90d.'
+      ),
+    };
+  }
+
   const normalizedLevel = level ? (level as AuthAuditLevel) : null;
   const normalizedEntityType = entityType ? (entityType as AuthAuditEntityType) : null;
   const normalizedPayloadMode = payloadMode ? (payloadMode as AdminAuditPayloadMode) : null;
   const normalizedScope = scope ? (scope as NonNullable<AdminAuditFilters['scope']>) : null;
+  const normalizedDatePreset = datePreset ? (datePreset as AdminAuditDatePreset) : null;
 
   let parsedLimit: number | null = null;
 
@@ -473,6 +490,7 @@ function parseAuditFilters(query: Record<string, unknown>):
       conversationId: readQueryString(query.conversationId) || null,
       occurredAfter: parsedOccurredAfter?.value ?? null,
       occurredBefore: parsedOccurredBefore?.value ?? null,
+      datePreset: normalizedDatePreset,
       payloadMode: normalizedPayloadMode,
       limit: parsedLimit,
     },
@@ -895,11 +913,25 @@ export async function registerAdminRoutes(
       return session.response;
     }
 
+    const query = (request.query ?? {}) as { tenantId?: string };
+    const tenantId = readQueryString(query.tenantId) || null;
+    const canReadPlatformAdmin = await adminService.canReadPlatformAdminForUser(session.user);
+
+    if (tenantId && !canReadPlatformAdmin && tenantId !== session.user.tenantId) {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Tenant admins can only view users for their own tenant.'
+      );
+    }
+
     const response: AdminUsersResponse = {
       ok: true,
       data: {
         generatedAt: new Date().toISOString(),
-        users: await adminService.listUsersForUser(session.user),
+        users: await adminService.listUsersForUser(session.user, {
+          tenantId: tenantId ?? undefined,
+        }),
       },
     };
 

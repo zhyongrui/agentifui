@@ -113,6 +113,8 @@ type AuthService = {
     email: string;
     providerId: string;
     displayName?: string;
+    tenantId?: string;
+    jitUserStatus?: SsoJitUserStatus;
   }): Awaitable<AuthResult<SsoCallbackResponse['data']>>;
   revokeSession(sessionToken: string): Awaitable<boolean>;
   getUserBySessionToken(sessionToken: string): Awaitable<AuthUser | null>;
@@ -145,6 +147,8 @@ type InMemoryAuthService = {
     email: string;
     providerId: string;
     displayName?: string;
+    tenantId?: string;
+    jitUserStatus?: SsoJitUserStatus;
   }): AuthResult<SsoCallbackResponse['data']>;
   revokeSession(sessionToken: string): boolean;
   getUserBySessionToken(sessionToken: string): AuthUser | null;
@@ -472,6 +476,8 @@ export function createAuthService(options: AuthServiceOptions): InMemoryAuthServ
     email: string;
     providerId: string;
     displayName?: string;
+    tenantId?: string;
+    jitUserStatus?: SsoJitUserStatus;
   }): AuthResult<SsoCallbackResponse['data']> {
     const email = normalizeEmail(input.email);
     const now = new Date().toISOString();
@@ -503,11 +509,11 @@ export function createAuthService(options: AuthServiceOptions): InMemoryAuthServ
 
     const user: StoredUser = {
       id: randomUUID(),
-      tenantId: options.defaultTenantId,
+      tenantId: input.tenantId?.trim() || options.defaultTenantId,
       email,
       displayName:
         input.displayName?.trim() || email.split('@')[0] || 'AgentifUI User',
-      status: options.defaultSsoUserStatus,
+      status: input.jitUserStatus ?? options.defaultSsoUserStatus,
       createdAt: now,
       lastLoginAt: now,
       passwordHash: hashPassword(randomUUID()),

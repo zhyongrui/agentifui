@@ -907,6 +907,8 @@ export function createPersistentAuthService(
       email: string;
       providerId: string;
       displayName?: string;
+      tenantId?: string;
+      jitUserStatus?: Extract<AuthUser['status'], 'active' | 'pending'>;
     }) {
       const email = normalizeEmail(input.email);
       const existingUser = await findUserByEmail(database, email);
@@ -971,7 +973,7 @@ export function createPersistentAuthService(
       }
 
       await ensureTenant(database, {
-        tenantId: options.defaultTenantId,
+        tenantId: input.tenantId?.trim() || options.defaultTenantId,
       });
 
       const displayName =
@@ -997,10 +999,10 @@ export function createPersistentAuthService(
           )
           values (
             ${userId},
-            ${options.defaultTenantId},
+            ${input.tenantId?.trim() || options.defaultTenantId},
             ${email},
             ${displayName},
-            ${options.defaultSsoUserStatus},
+            ${input.jitUserStatus ?? options.defaultSsoUserStatus},
             ${hashPassword(randomUUID())},
             0,
             null,

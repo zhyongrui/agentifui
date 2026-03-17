@@ -44,6 +44,7 @@ import type {
 import type { AuthUser } from '@agentifui/shared/auth';
 import type { FastifyInstance } from 'fastify';
 
+import type { AdminService } from '../services/admin-service.js';
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 import type { WorkspaceRuntimeService } from '../services/workspace-runtime.js';
@@ -222,6 +223,19 @@ function isConversationStatus(value: unknown): value is WorkspaceConversationSta
 
 function isConversationShareAccess(value: unknown): value is WorkspaceConversationShareAccess {
   return value === 'read_only' || value === 'commenter' || value === 'editor';
+}
+
+const conversationShareAccessRank: Record<WorkspaceConversationShareAccess, number> = {
+  read_only: 0,
+  commenter: 1,
+  editor: 2,
+};
+
+function isShareAccessWithinPolicy(
+  requestedAccess: WorkspaceConversationShareAccess,
+  allowedAccess: WorkspaceConversationShareAccess
+) {
+  return conversationShareAccessRank[requestedAccess] <= conversationShareAccessRank[allowedAccess];
 }
 
 function isConversationListStatusFilter(
@@ -474,8 +488,17 @@ export async function registerWorkspaceRoutes(
   authService: AuthService,
   workspaceService: WorkspaceService,
   auditService: AuditService,
-  runtimeService: WorkspaceRuntimeService
+  runtimeService: WorkspaceRuntimeService,
+  adminService: AdminService
 ) {
+  async function readTenantGovernance(user: AuthUser) {
+    const overview = await adminService.getIdentityOverviewForUser(user, {
+      tenantId: user.tenantId,
+    });
+
+    return overview.governance;
+  }
+
   function readRuntimeDegradedError() {
     const snapshot = runtimeService.getHealthSnapshot();
 
@@ -1485,6 +1508,23 @@ export async function registerWorkspaceRoutes(
       );
     }
 
+    const governance = await readTenantGovernance(access.user);
+
+    if (
+      governance &&
+      !isShareAccessWithinPolicy(shareAccess, governance.policyPack.sharingMode)
+    ) {
+      reply.code(403);
+      return buildErrorResponse(
+        'WORKSPACE_FORBIDDEN',
+        'Workspace share access exceeds the tenant sharing policy.',
+        {
+          requestedAccess: shareAccess,
+          allowedAccess: governance.policyPack.sharingMode,
+        }
+      );
+    }
+
     const result = await workspaceService.createConversationShareForUser(access.user, {
       conversationId,
       groupId,
@@ -1850,6 +1890,23 @@ export async function registerWorkspaceRoutes(
       );
     }
 
+    const governance = await readTenantGovernance(access.user);
+
+    if (
+      governance &&
+      !isShareAccessWithinPolicy('editor', governance.policyPack.sharingMode)
+    ) {
+      reply.code(403);
+      return buildErrorResponse(
+        'WORKSPACE_FORBIDDEN',
+        'Shared conversation editing is disabled by the tenant sharing policy.',
+        {
+          requiredAccess: 'editor',
+          allowedAccess: governance.policyPack.sharingMode,
+        }
+      );
+    }
+
     const result = await workspaceService.updateSharedConversationForUser(access.user, {
       shareId,
       expectedUpdatedAt: nextExpectedUpdatedAt,
@@ -2002,6 +2059,23 @@ export async function registerWorkspaceRoutes(
         sharedConversation.code,
         sharedConversation.message,
         sharedConversation.details
+      );
+    }
+
+    const governance = await readTenantGovernance(access.user);
+
+    if (
+      governance &&
+      !isShareAccessWithinPolicy('commenter', governance.policyPack.sharingMode)
+    ) {
+      reply.code(403);
+      return buildErrorResponse(
+        'WORKSPACE_FORBIDDEN',
+        'Shared conversation comments are disabled by the tenant sharing policy.',
+        {
+          requiredAccess: 'commenter',
+          allowedAccess: governance.policyPack.sharingMode,
+        }
       );
     }
 
@@ -2158,6 +2232,21 @@ export async function registerWorkspaceRoutes(
         sharedConversation.code,
         sharedConversation.message,
         sharedConversation.details
+      );
+    }
+
+    const governance = await readTenantGovernance(access.user);
+
+    if (governance?.policyPack.artifactDownloadMode === 'owner_only') {
+      reply.code(403);
+      return buildErrorResponse(
+        'WORKSPACE_FORBIDDEN',
+        'Shared artifact downloads are disabled by the tenant artifact policy.',
+        {
+          artifactDownloadMode: governance.policyPack.artifactDownloadMode,
+          shareId,
+          artifactId,
+        }
       );
     }
 

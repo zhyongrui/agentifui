@@ -1,6 +1,7 @@
 import type { AuthAuditEvent, AuthUser } from '@agentifui/shared/auth';
 import type {
   AdminAppGrantCreateRequest,
+  AdminAuditDatePreset,
   AdminCleanupLastRun,
   AdminCleanupPolicy,
   AdminCleanupPreview,
@@ -19,6 +20,14 @@ import type {
   AdminTenantSummary,
   AdminErrorCode,
   AdminGroupSummary,
+  AdminIdentityAccessRequest,
+  AdminIdentityAccessRequestStatus,
+  AdminIdentityDomainClaim,
+  AdminIdentityDomainClaimStatus,
+  AdminBreakGlassSession,
+  AdminBreakGlassSessionStatus,
+  AdminTenantGovernanceSettings,
+  AdminTenantGovernanceUpdateRequest,
   AdminUserSummary,
 } from '@agentifui/shared/admin';
 import { randomUUID } from 'node:crypto';
@@ -73,6 +82,68 @@ type UpdateTenantStatusInput = {
   reason?: string | null;
 };
 
+type IdentityOverviewInput = {
+  tenantId?: string | null;
+};
+
+type CreateDomainClaimInput = {
+  tenantId?: string | null;
+  domain: string;
+  providerId: string;
+  jitUserStatus: Extract<AdminIdentityDomainClaim['jitUserStatus'], 'active' | 'pending'>;
+};
+
+type ReviewDomainClaimInput = {
+  claimId: string;
+  status: Extract<AdminIdentityDomainClaimStatus, 'approved' | 'rejected'>;
+  reviewReason?: string | null;
+};
+
+type ReviewAccessRequestInput = {
+  requestId: string;
+  decision: 'approved' | 'rejected' | 'transferred';
+  reviewReason?: string | null;
+  targetTenantId?: string | null;
+};
+
+type ResetUserMfaInput = {
+  userId: string;
+  reason?: string | null;
+};
+
+type CreateBreakGlassInput = {
+  tenantId?: string | null;
+  reason: string;
+  justification?: string | null;
+  expiresInMinutes?: number | null;
+};
+
+type UpdateBreakGlassInput = {
+  sessionId: string;
+  status: Extract<AdminBreakGlassSessionStatus, 'revoked'>;
+  reviewNotes?: string | null;
+};
+
+type UpdateTenantGovernanceInput = AdminTenantGovernanceUpdateRequest;
+
+type CapturePendingAccessRequestInput = {
+  tenantId: string;
+  tenantName?: string | null;
+  userId: string | null;
+  email: string;
+  displayName?: string | null;
+  source: AdminIdentityAccessRequest['source'];
+  domainClaimId?: string | null;
+  reason?: string | null;
+};
+
+type ResolvedSsoProvider = {
+  providerId: string;
+  tenantId: string;
+  claimId: string | null;
+  jitUserStatus: Extract<AdminIdentityDomainClaim['jitUserStatus'], 'active' | 'pending'>;
+};
+
 type AdminService = {
   canReadAdminForUser(user: AuthUser): boolean | Promise<boolean>;
   canReadPlatformAdminForUser(user: AuthUser): boolean | Promise<boolean>;
@@ -103,7 +174,12 @@ type AdminService = {
     previousStatus: AdminTenantSummary['status'];
     reason: string | null;
   }>;
-  listUsersForUser(user: AuthUser): AdminUserSummary[] | Promise<AdminUserSummary[]>;
+  listUsersForUser(
+    user: AuthUser,
+    input?: {
+      tenantId?: string;
+    }
+  ): AdminUserSummary[] | Promise<AdminUserSummary[]>;
   listGroupsForUser(user: AuthUser): AdminGroupSummary[] | Promise<AdminGroupSummary[]>;
   listAppsForUser(user: AuthUser): AdminAppSummary[] | Promise<AdminAppSummary[]>;
   getCleanupStatusForUser(
@@ -166,11 +242,77 @@ type AdminService = {
     highRiskEventCount: number;
     events: AdminAuditEventSummary[];
   };
+  getIdentityOverviewForUser(
+    user: AuthUser,
+    input?: IdentityOverviewInput
+  ): Promise<{
+    tenant: AdminTenantSummary | null;
+    domainClaims: AdminIdentityDomainClaim[];
+    pendingAccessRequests: AdminIdentityAccessRequest[];
+    breakGlassSessions: AdminBreakGlassSession[];
+    governance: AdminTenantGovernanceSettings | null;
+  }> | {
+    tenant: AdminTenantSummary | null;
+    domainClaims: AdminIdentityDomainClaim[];
+    pendingAccessRequests: AdminIdentityAccessRequest[];
+    breakGlassSessions: AdminBreakGlassSession[];
+    governance: AdminTenantGovernanceSettings | null;
+  };
+  createDomainClaimForUser(
+    user: AuthUser,
+    input: CreateDomainClaimInput
+  ): Promise<AdminMutationResult<{ claim: AdminIdentityDomainClaim }>> | AdminMutationResult<{
+    claim: AdminIdentityDomainClaim;
+  }>;
+  reviewDomainClaimForUser(
+    user: AuthUser,
+    input: ReviewDomainClaimInput
+  ): Promise<AdminMutationResult<{ claim: AdminIdentityDomainClaim }>> | AdminMutationResult<{
+    claim: AdminIdentityDomainClaim;
+  }>;
+  reviewAccessRequestForUser(
+    user: AuthUser,
+    input: ReviewAccessRequestInput
+  ): Promise<AdminMutationResult<{ request: AdminIdentityAccessRequest }>> | AdminMutationResult<{
+    request: AdminIdentityAccessRequest;
+  }>;
+  resetUserMfaForUser(
+    user: AuthUser,
+    input: ResetUserMfaInput
+  ): Promise<AdminMutationResult<{ userId: string; reset: true; reason: string | null }>> |
+    AdminMutationResult<{ userId: string; reset: true; reason: string | null }>;
+  createBreakGlassSessionForUser(
+    user: AuthUser,
+    input: CreateBreakGlassInput
+  ): Promise<AdminMutationResult<{ session: AdminBreakGlassSession }>> | AdminMutationResult<{
+    session: AdminBreakGlassSession;
+  }>;
+  updateBreakGlassSessionForUser(
+    user: AuthUser,
+    input: UpdateBreakGlassInput
+  ): Promise<AdminMutationResult<{ session: AdminBreakGlassSession }>> | AdminMutationResult<{
+    session: AdminBreakGlassSession;
+  }>;
+  updateTenantGovernanceForUser(
+    user: AuthUser,
+    input: UpdateTenantGovernanceInput
+  ): Promise<AdminMutationResult<{ governance: AdminTenantGovernanceSettings }>> |
+    AdminMutationResult<{ governance: AdminTenantGovernanceSettings }>;
+  resolveSsoProviderForEmail(
+    email: string
+  ): Promise<ResolvedSsoProvider | null> | ResolvedSsoProvider | null;
+  capturePendingAccessRequest(
+    input: CapturePendingAccessRequestInput
+  ): Promise<AdminIdentityAccessRequest> | AdminIdentityAccessRequest;
 };
 
 type InMemoryAppGrant = AdminAppUserGrant & {
   appId: string;
 };
+
+type InMemoryDomainClaim = AdminIdentityDomainClaim;
+type InMemoryAccessRequest = AdminIdentityAccessRequest;
+type InMemoryBreakGlassSession = AdminBreakGlassSession;
 
 function toGroupMemberships(email: string) {
   const groupIds = resolveDefaultMemberGroupIds(email);
@@ -292,10 +434,10 @@ function buildEmptyUsageTotals(): AdminUsageTotals {
   };
 }
 
-function buildInMemoryUsers(user: AuthUser): AdminUserSummary[] {
+function buildInMemoryUsers(user: AuthUser, tenantId = user.tenantId): AdminUserSummary[] {
   const adminRoleIds = resolveDefaultRoleIds(user.email);
 
-  return [
+  const entries: AdminUserSummary[] = [
     {
       id: user.id,
       email: user.email,
@@ -330,6 +472,14 @@ function buildInMemoryUsers(user: AuthUser): AdminUserSummary[] {
       groupMemberships: toGroupMemberships('security-audit@example.net'),
     },
   ];
+
+  return entries.map(entry => ({
+    ...entry,
+    id:
+      tenantId === user.tenantId
+        ? entry.id
+        : `${entry.id}_${tenantId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+  }));
 }
 
 function buildInMemoryTenants(user: AuthUser): AdminTenantSummary[] {
@@ -357,6 +507,70 @@ function buildInMemoryTenants(user: AuthUser): AdminTenantSummary[] {
       primaryAdmin,
     },
   ];
+}
+
+function buildDefaultGovernance(tenantId: string): AdminTenantGovernanceSettings {
+  return {
+    tenantId,
+    legalHoldEnabled: false,
+    retentionOverrideDays: null,
+    scimPlanning: {
+      enabled: false,
+      ownerEmail: null,
+      notes: null,
+    },
+    policyPack: {
+      runtimeMode: 'standard',
+      sharingMode: 'editor',
+      artifactDownloadMode: 'shared_readers',
+    },
+  };
+}
+
+function mergeGovernanceSettings(
+  currentValue: AdminTenantGovernanceSettings,
+  input: UpdateTenantGovernanceInput
+): AdminTenantGovernanceSettings {
+  return {
+    ...currentValue,
+    legalHoldEnabled: input.legalHoldEnabled ?? currentValue.legalHoldEnabled,
+    retentionOverrideDays:
+      input.retentionOverrideDays === undefined
+        ? currentValue.retentionOverrideDays
+        : input.retentionOverrideDays,
+    scimPlanning: {
+      ...currentValue.scimPlanning,
+      ...(input.scimPlanning ?? {}),
+    },
+    policyPack: {
+      ...currentValue.policyPack,
+      ...(input.policyPack ?? {}),
+    },
+  };
+}
+
+function resolveAuditPresetWindow(
+  preset: AdminAuditDatePreset | null | undefined
+): { occurredAfter: string | null; occurredBefore: string | null } {
+  if (!preset) {
+    return {
+      occurredAfter: null,
+      occurredBefore: null,
+    };
+  }
+
+  const now = Date.now();
+  const durationMsByPreset: Record<AdminAuditDatePreset, number> = {
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+    '90d': 90 * 24 * 60 * 60 * 1000,
+  };
+
+  return {
+    occurredAfter: new Date(now - durationMsByPreset[preset]).toISOString(),
+    occurredBefore: new Date(now).toISOString(),
+  };
 }
 
 function buildAppSummary(
@@ -399,6 +613,14 @@ function buildAppSummary(
 }
 
 function normalizeAuditFilters(filters: AdminAuditFilters = {}): AdminAuditFilters {
+  const presetWindow =
+    (!filters.occurredAfter || !filters.occurredBefore) && filters.datePreset
+      ? resolveAuditPresetWindow(filters.datePreset)
+      : {
+          occurredAfter: null,
+          occurredBefore: null,
+        };
+
   return {
     scope: filters.scope ?? 'tenant',
     tenantId: filters.tenantId?.trim() || null,
@@ -409,8 +631,9 @@ function normalizeAuditFilters(filters: AdminAuditFilters = {}): AdminAuditFilte
     traceId: filters.traceId?.trim() || null,
     runId: filters.runId?.trim() || null,
     conversationId: filters.conversationId?.trim() || null,
-    occurredAfter: filters.occurredAfter?.trim() || null,
-    occurredBefore: filters.occurredBefore?.trim() || null,
+    occurredAfter: filters.occurredAfter?.trim() || presetWindow.occurredAfter,
+    occurredBefore: filters.occurredBefore?.trim() || presetWindow.occurredBefore,
+    datePreset: filters.datePreset ?? null,
     payloadMode: filters.payloadMode ?? 'masked',
     limit: filters.limit ?? null,
   };
@@ -518,6 +741,30 @@ function buildAuditQueryResult(events: AdminAuditEventSummary[], filters: AdminA
 export function createAdminService(): AdminService {
   const memoryGrants: InMemoryAppGrant[] = [];
   const memoryTenants = new Map<string, AdminTenantSummary>();
+  const memoryGovernance = new Map<string, AdminTenantGovernanceSettings>();
+  const memoryDomainClaims: InMemoryDomainClaim[] = [];
+  const memoryAccessRequests: InMemoryAccessRequest[] = [];
+  const memoryBreakGlassSessions: InMemoryBreakGlassSession[] = [];
+
+  function resolveKnownTenants(user: AuthUser) {
+    const tenants = new Map(buildInMemoryTenants(user).map(tenant => [tenant.id, tenant]));
+
+    for (const tenant of memoryTenants.values()) {
+      tenants.set(tenant.id, tenant);
+    }
+
+    return [...tenants.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  function getTenantSummaryForUser(user: AuthUser, tenantId: string) {
+    return resolveKnownTenants(user).find(tenant => tenant.id === tenantId) ?? null;
+  }
+
+  function getGovernance(tenantId: string) {
+    const currentValue = memoryGovernance.get(tenantId) ?? buildDefaultGovernance(tenantId);
+    memoryGovernance.set(tenantId, currentValue);
+    return currentValue;
+  }
 
   return {
     canReadAdminForUser(user) {
@@ -527,13 +774,7 @@ export function createAdminService(): AdminService {
       return canReadPlatformAdmin(user.email);
     },
     listTenantsForUser(user) {
-      const tenants = new Map(buildInMemoryTenants(user).map(tenant => [tenant.id, tenant]));
-
-      for (const tenant of memoryTenants.values()) {
-        tenants.set(tenant.id, tenant);
-      }
-
-      return [...tenants.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      return resolveKnownTenants(user);
     },
     createTenantForUser(user, input) {
       const slug = normalizeTenantSlug(input.slug);
@@ -662,8 +903,8 @@ export function createAdminService(): AdminService {
         },
       };
     },
-    listUsersForUser(user) {
-      return buildInMemoryUsers(user);
+    listUsersForUser(user, input) {
+      return buildInMemoryUsers(user, input?.tenantId?.trim() || user.tenantId);
     },
     listGroupsForUser() {
       return WORKSPACE_GROUPS.map(group => {
@@ -952,6 +1193,318 @@ export function createAdminService(): AdminService {
           },
         },
       };
+    },
+    getIdentityOverviewForUser(user, input = {}) {
+      const targetTenantId = input.tenantId?.trim() || user.tenantId;
+      const tenant = getTenantSummaryForUser(user, targetTenantId);
+
+      return {
+        tenant,
+        domainClaims: memoryDomainClaims
+          .filter(claim => claim.tenantId === targetTenantId)
+          .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt)),
+        pendingAccessRequests: memoryAccessRequests
+          .filter(request => request.tenantId === targetTenantId)
+          .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt)),
+        breakGlassSessions: memoryBreakGlassSessions
+          .filter(session => session.tenantId === targetTenantId)
+          .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+        governance: tenant ? getGovernance(targetTenantId) : null,
+      };
+    },
+    createDomainClaimForUser(user, input) {
+      const tenantId = input.tenantId?.trim() || user.tenantId;
+      const tenant = getTenantSummaryForUser(user, tenantId);
+      const domain = input.domain.trim().toLowerCase();
+      const providerId = input.providerId.trim();
+
+      if (!tenant || !domain || !providerId) {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: 'ADMIN_INVALID_PAYLOAD',
+          message: 'Domain claims require a tenant, domain and provider id.',
+        };
+      }
+
+      if (memoryDomainClaims.some(claim => claim.domain === domain)) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: 'ADMIN_CONFLICT',
+          message: 'This domain already has a pending or active claim.',
+          details: {
+            domain,
+          },
+        };
+      }
+
+      const claim: InMemoryDomainClaim = {
+        id: `claim_${randomUUID()}`,
+        tenantId,
+        tenantName: tenant.name,
+        domain,
+        providerId,
+        status: canReadPlatformAdmin(user.email) ? 'approved' : 'pending',
+        jitUserStatus: input.jitUserStatus,
+        requestedAt: new Date().toISOString(),
+        requestedByUserId: user.id,
+        reviewedAt: canReadPlatformAdmin(user.email) ? new Date().toISOString() : null,
+        reviewedByUserId: canReadPlatformAdmin(user.email) ? user.id : null,
+        reviewReason: null,
+      };
+      memoryDomainClaims.unshift(claim);
+
+      return {
+        ok: true,
+        data: {
+          claim,
+        },
+      };
+    },
+    reviewDomainClaimForUser(user, input) {
+      const claim = memoryDomainClaims.find(candidate => candidate.id === input.claimId);
+
+      if (!claim) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The domain claim could not be found.',
+          details: {
+            claimId: input.claimId,
+          },
+        };
+      }
+
+      claim.status = input.status;
+      claim.reviewedAt = new Date().toISOString();
+      claim.reviewedByUserId = user.id;
+      claim.reviewReason = input.reviewReason?.trim() || null;
+
+      return {
+        ok: true,
+        data: {
+          claim,
+        },
+      };
+    },
+    reviewAccessRequestForUser(user, input) {
+      const request = memoryAccessRequests.find(candidate => candidate.id === input.requestId);
+
+      if (!request) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The access request could not be found.',
+          details: {
+            requestId: input.requestId,
+          },
+        };
+      }
+
+      if (input.decision === 'transferred') {
+        const targetTenantId = input.targetTenantId?.trim();
+        const targetTenant = targetTenantId ? getTenantSummaryForUser(user, targetTenantId) : null;
+
+        if (!targetTenantId || !targetTenant) {
+          return {
+            ok: false,
+            statusCode: 400,
+            code: 'ADMIN_INVALID_PAYLOAD',
+            message: 'Transferring an access request requires a valid target tenant.',
+            details: {
+              targetTenantId: input.targetTenantId ?? null,
+            },
+          };
+        }
+
+        request.status = 'transferred';
+        request.targetTenantId = targetTenant.id;
+        request.targetTenantName = targetTenant.name;
+        request.tenantId = targetTenant.id;
+        request.tenantName = targetTenant.name;
+      } else {
+        request.status = input.decision;
+      }
+
+      request.reviewReason = input.reviewReason?.trim() || null;
+      request.reviewedAt = new Date().toISOString();
+      request.reviewedByUserId = user.id;
+
+      return {
+        ok: true,
+        data: {
+          request,
+        },
+      };
+    },
+    resetUserMfaForUser(_user, input) {
+      const targetUser = buildInMemoryUsers(_user).find(candidate => candidate.id === input.userId);
+
+      if (!targetUser) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The target user could not be found.',
+          details: {
+            userId: input.userId,
+          },
+        };
+      }
+
+      return {
+        ok: true,
+        data: {
+          userId: targetUser.id,
+          reset: true,
+          reason: input.reason?.trim() || null,
+        },
+      };
+    },
+    createBreakGlassSessionForUser(user, input) {
+      const tenantId = input.tenantId?.trim() || user.tenantId;
+      const tenant = getTenantSummaryForUser(user, tenantId);
+      const reason = input.reason.trim();
+
+      if (!tenant || !reason) {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: 'ADMIN_INVALID_PAYLOAD',
+          message: 'Break-glass sessions require a valid tenant and reason.',
+        };
+      }
+
+      const session: InMemoryBreakGlassSession = {
+        id: `bg_${randomUUID()}`,
+        tenantId,
+        tenantName: tenant.name,
+        actorUserId: user.id,
+        actorUserEmail: user.email,
+        reason,
+        justification: input.justification?.trim() || null,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + Math.max(15, input.expiresInMinutes ?? 60) * 60_000).toISOString(),
+        status: 'active',
+        reviewedAt: null,
+        reviewedByUserId: null,
+        reviewNotes: null,
+      };
+      memoryBreakGlassSessions.unshift(session);
+
+      return {
+        ok: true,
+        data: {
+          session,
+        },
+      };
+    },
+    updateBreakGlassSessionForUser(user, input) {
+      const session = memoryBreakGlassSessions.find(candidate => candidate.id === input.sessionId);
+
+      if (!session) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The break-glass session could not be found.',
+          details: {
+            sessionId: input.sessionId,
+          },
+        };
+      }
+
+      session.status = input.status;
+      session.reviewedAt = new Date().toISOString();
+      session.reviewedByUserId = user.id;
+      session.reviewNotes = input.reviewNotes?.trim() || null;
+
+      return {
+        ok: true,
+        data: {
+          session,
+        },
+      };
+    },
+    updateTenantGovernanceForUser(user, input) {
+      const tenantId = input.tenantId?.trim() || user.tenantId;
+      const tenant = getTenantSummaryForUser(user, tenantId);
+
+      if (!tenant) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'ADMIN_NOT_FOUND',
+          message: 'The target tenant could not be found.',
+          details: {
+            tenantId,
+          },
+        };
+      }
+
+      const governance = mergeGovernanceSettings(getGovernance(tenantId), input);
+      memoryGovernance.set(tenantId, governance);
+
+      return {
+        ok: true,
+        data: {
+          governance,
+        },
+      };
+    },
+    resolveSsoProviderForEmail(email) {
+      const domain = email.trim().toLowerCase().split('@')[1] ?? '';
+      const claim = memoryDomainClaims.find(
+        candidate => candidate.domain === domain && candidate.status === 'approved'
+      );
+
+      if (!claim) {
+        return null;
+      }
+
+      return {
+        providerId: claim.providerId,
+        tenantId: claim.tenantId,
+        claimId: claim.id,
+        jitUserStatus: claim.jitUserStatus,
+      };
+    },
+    capturePendingAccessRequest(input) {
+      const existing = memoryAccessRequests.find(
+        request =>
+          request.tenantId === input.tenantId &&
+          request.email === input.email.toLowerCase() &&
+          request.status === 'pending'
+      );
+
+      if (existing) {
+        return existing;
+      }
+
+      const request: InMemoryAccessRequest = {
+        id: `request_${randomUUID()}`,
+        tenantId: input.tenantId,
+        tenantName: input.tenantName ?? formatTenantName(input.tenantId),
+        userId: input.userId,
+        email: input.email.trim().toLowerCase(),
+        displayName: input.displayName?.trim() || null,
+        source: input.source,
+        status: 'pending',
+        requestedAt: new Date().toISOString(),
+        requestedByUserId: null,
+        domainClaimId: input.domainClaimId ?? null,
+        reason: input.reason?.trim() || null,
+        targetTenantId: null,
+        targetTenantName: null,
+        reviewedAt: null,
+        reviewedByUserId: null,
+        reviewReason: null,
+      };
+      memoryAccessRequests.unshift(request);
+      return request;
     },
     listAuditForUser(user, filters = {}) {
       const normalizedFilters = normalizeAuditFilters(filters);

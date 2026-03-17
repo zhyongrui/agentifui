@@ -32,11 +32,15 @@ import {
   WORKSPACE_GROUPS,
 } from './workspace-catalog-fixtures.js';
 import {
-  buildWorkspaceCleanupPolicy,
   getLatestWorkspaceCleanupExecution,
   previewWorkspaceCleanup,
+  resolveWorkspaceCleanupPolicy,
 } from './workspace-cleanup.js';
 import { buildDefaultQuotaLimitRecords, calculateCompletionQuotaCost } from './workspace-quota.js';
+import {
+  createPersistentAdminIdentitySupport,
+  resolveAuditPresetWindow,
+} from './persistent-admin-identity.js';
 
 type UserRow = {
   created_at: Date | string;
@@ -634,6 +638,8 @@ async function seedTenantWorkspaceResources(database: DatabaseClient, tenantId: 
 }
 
 function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
+  const presetWindow = filters.datePreset ? resolveAuditPresetWindow(filters.datePreset) : null;
+
   return {
     scope: filters.scope ?? 'tenant',
     tenantId: filters.tenantId?.trim() || null,
@@ -644,8 +650,9 @@ function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
     traceId: filters.traceId?.trim() || null,
     runId: filters.runId?.trim() || null,
     conversationId: filters.conversationId?.trim() || null,
-    occurredAfter: filters.occurredAfter?.trim() || null,
-    occurredBefore: filters.occurredBefore?.trim() || null,
+    datePreset: filters.datePreset ?? null,
+    occurredAfter: filters.occurredAfter?.trim() || presetWindow?.occurredAfter || null,
+    occurredBefore: filters.occurredBefore?.trim() || presetWindow?.occurredBefore || null,
     payloadMode: filters.payloadMode ?? 'masked',
     limit:
       typeof filters.limit === 'number' && Number.isInteger(filters.limit) && filters.limit > 0
@@ -1450,6 +1457,8 @@ function toMutationError(
 }
 
 export function createPersistentAdminService(database: DatabaseClient): AdminService {
+  const identitySupport = createPersistentAdminIdentitySupport(database);
+
   return {
     async canReadAdminForUser(user) {
       const roleIds = await ensureDefaultRoles(database, user);
@@ -1461,6 +1470,7 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
 
       return roleIds.includes('root_admin');
     },
+    ...identitySupport,
     async listTenantsForUser() {
       return listTenantSummaries(database);
     },
@@ -1805,12 +1815,13 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
         },
       };
     },
-    async listUsersForUser(user) {
+    async listUsersForUser(user, input) {
+      const targetTenantId = input?.tenantId?.trim() || user.tenantId;
       const [users, memberships, roles, mfaRows] = await Promise.all([
         database<UserRow[]>`
           select id, email, display_name, status, created_at, last_login_at
           from users
-          where tenant_id = ${user.tenantId}
+          where tenant_id = ${targetTenantId}
           order by created_at asc, email asc
         `,
         database<GroupMembershipRow[]>`
@@ -1822,20 +1833,20 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
             g.name as group_name
           from group_members gm
           inner join groups g on g.id = gm.group_id
-          where gm.tenant_id = ${user.tenantId}
+          where gm.tenant_id = ${targetTenantId}
           order by gm.created_at asc, g.name asc
         `,
         database<UserRoleRow[]>`
           select user_id, role_id
           from rbac_user_roles
-          where tenant_id = ${user.tenantId}
+          where tenant_id = ${targetTenantId}
             and (expires_at is null or expires_at > now())
           order by created_at asc, role_id asc
         `,
         database<MfaRow[]>`
           select distinct user_id
           from mfa_factors
-          where tenant_id = ${user.tenantId}
+          where tenant_id = ${targetTenantId}
             and enabled_at is not null
             and disabled_at is null
         `,
@@ -1940,7 +1951,7 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
       return listAppSummariesForTenant(database, user.tenantId);
     },
     async getCleanupStatusForUser(user) {
-      const policy: AdminCleanupPolicy = buildWorkspaceCleanupPolicy();
+      const policy: AdminCleanupPolicy = await resolveWorkspaceCleanupPolicy(database, user.tenantId);
       const preview: AdminCleanupPreview = await previewWorkspaceCleanup(
         database,
         user.tenantId,

@@ -1,12 +1,23 @@
 import type {
+  AdminAccessRequestReviewRequest,
+  AdminAccessRequestReviewResponse,
   AdminAppGrantCreateRequest,
   AdminAppGrantCreateResponse,
   AdminAppGrantDeleteResponse,
   AdminAppToolUpdateRequest,
   AdminAppToolUpdateResponse,
+  AdminBreakGlassCreateRequest,
+  AdminBreakGlassCreateResponse,
+  AdminBreakGlassUpdateRequest,
+  AdminBreakGlassUpdateResponse,
   AdminAppsResponse,
   AdminCleanupResponse,
   AdminContextResponse,
+  AdminDomainClaimCreateRequest,
+  AdminDomainClaimCreateResponse,
+  AdminDomainClaimReviewRequest,
+  AdminDomainClaimReviewResponse,
+  AdminIdentityOverviewResponse,
   AdminAuditExportFormat,
   AdminAuditExportMetadata,
   AdminAuditFilters,
@@ -18,6 +29,10 @@ import type {
   AdminTenantStatusUpdateRequest,
   AdminTenantStatusUpdateResponse,
   AdminTenantsResponse,
+  AdminTenantGovernanceUpdateRequest,
+  AdminTenantGovernanceUpdateResponse,
+  AdminUserMfaResetRequest,
+  AdminUserMfaResetResponse,
   AdminUsageExportFormat,
   AdminUsageExportMetadata,
   AdminUsageResponse,
@@ -114,6 +129,10 @@ function buildAdminAuditQuery(filters: AdminAuditFilters = {}) {
     params.set('occurredBefore', filters.occurredBefore);
   }
 
+  if (filters.datePreset) {
+    params.set('datePreset', filters.datePreset);
+  }
+
   if (typeof filters.limit === 'number') {
     params.set('limit', String(filters.limit));
   }
@@ -134,9 +153,20 @@ function readRequiredHeader(headers: Headers, name: string) {
 }
 
 export async function fetchAdminUsers(
-  sessionToken: string
+  sessionToken: string,
+  options: {
+    tenantId?: string;
+  } = {}
 ): Promise<AdminUsersResponse | AdminErrorResponse> {
-  return fetchAdminJson<AdminUsersResponse>('/admin/users', sessionToken);
+  const searchParams = new URLSearchParams();
+
+  if (options.tenantId) {
+    searchParams.set('tenantId', options.tenantId);
+  }
+
+  const path = searchParams.size > 0 ? `/admin/users?${searchParams.toString()}` : '/admin/users';
+
+  return fetchAdminJson<AdminUsersResponse>(path, sessionToken);
 }
 
 export async function fetchAdminContext(
@@ -262,6 +292,118 @@ export async function fetchAdminAudit(
   return fetchAdminJson<AdminAuditResponse>(
     `/admin/audit${buildAdminAuditQuery(filters)}`,
     sessionToken
+  );
+}
+
+export async function fetchAdminIdentity(
+  sessionToken: string,
+  filters: {
+    tenantId?: string;
+  } = {}
+): Promise<AdminIdentityOverviewResponse | AdminErrorResponse> {
+  const params = new URLSearchParams();
+
+  if (filters.tenantId) {
+    params.set('tenantId', filters.tenantId);
+  }
+
+  return fetchAdminJson<AdminIdentityOverviewResponse>(
+    `/admin/identity${params.toString() ? `?${params.toString()}` : ''}`,
+    sessionToken
+  );
+}
+
+export async function createAdminDomainClaim(
+  sessionToken: string,
+  payload: AdminDomainClaimCreateRequest
+): Promise<AdminDomainClaimCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminDomainClaimCreateResponse>('/admin/identity/domain-claims', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function reviewAdminDomainClaim(
+  sessionToken: string,
+  claimId: string,
+  payload: AdminDomainClaimReviewRequest
+): Promise<AdminDomainClaimReviewResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminDomainClaimReviewResponse>(
+    `/admin/identity/domain-claims/${claimId}/review`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function reviewAdminAccessRequest(
+  sessionToken: string,
+  requestId: string,
+  payload: AdminAccessRequestReviewRequest
+): Promise<AdminAccessRequestReviewResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminAccessRequestReviewResponse>(
+    `/admin/identity/access-requests/${requestId}/review`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function resetAdminUserMfa(
+  sessionToken: string,
+  userId: string,
+  payload: AdminUserMfaResetRequest = {}
+): Promise<AdminUserMfaResetResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminUserMfaResetResponse>(
+    `/admin/identity/users/${userId}/mfa/reset`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function createAdminBreakGlassSession(
+  sessionToken: string,
+  payload: AdminBreakGlassCreateRequest
+): Promise<AdminBreakGlassCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminBreakGlassCreateResponse>('/admin/identity/break-glass', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function updateAdminBreakGlassSession(
+  sessionToken: string,
+  sessionId: string,
+  payload: AdminBreakGlassUpdateRequest
+): Promise<AdminBreakGlassUpdateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminBreakGlassUpdateResponse>(
+    `/admin/identity/break-glass/${sessionId}`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function updateAdminTenantGovernance(
+  sessionToken: string,
+  payload: AdminTenantGovernanceUpdateRequest
+): Promise<AdminTenantGovernanceUpdateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminTenantGovernanceUpdateResponse>(
+    '/admin/identity/governance',
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
   );
 }
 
