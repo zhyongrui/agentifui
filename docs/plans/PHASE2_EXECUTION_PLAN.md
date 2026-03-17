@@ -248,7 +248,18 @@ Execution status:
 | completed | `P4-D-10` | run replay 已显示 workflow version provenance                                                          |
 | completed | `P4-D-11` | workflow publish / rollback / permission change 审计已补齐                                             |
 | completed | `P4-D-12` | workflow authoring / rollout conventions 文档已补齐                                                    |
-| active    | `P4-E-01` | 下一项，补 billable usage records 和 billing boundary                                                  |
+| completed | `P4-E-01` | launch / completion / retrieval / storage / export billable records 已落地                            |
+| completed | `P4-E-02` | tenant billing plans / soft limit / hard stop / feature flags 已落地                                  |
+| completed | `P4-E-03` | reconciliation script 已补到 ops lane                                                                  |
+| pending   | `P4-E-04` | 下一项，补 invoice/export-ready summary breakdown（tenant/app/group/provider）                         |
+| completed | `P4-E-05` | admin billing override controls 已落地                                                                 |
+| completed | `P4-E-06` | workspace billing warning banner 已落地                                                                |
+| completed | `P4-E-07` | billing audit coverage 已补齐                                                                          |
+| pending   | `P4-E-08` | 继续补 grace / corrected-entry 更细测试                                                                |
+| completed | `P4-E-09` | billing browser coverage 已补齐                                                                        |
+| completed | `P4-E-10` | billing masking / retention rules已文档化并落到 export boundary                                        |
+| completed | `P4-E-11` | finance/ops billing export surface 已落地                                                              |
+| completed | `P4-E-12` | pricing / reconciliation / incident playbook 已文档化                                                  |
 
 ## 5. First Batch Definition
 
@@ -298,7 +309,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P4-E-01`
+- the active follow-on item is `P4-E-04`
 
 ## 6. Detailed Execution Notes
 
@@ -1002,18 +1013,18 @@ Legend:
 
 ### 7.22 Future Platform Queue: `P4-E` Cost Control, Billing, And Commercial Boundaries
 
-- [ ] `P4-E-01` Define billable usage records for launch, completion, retrieval, storage, and export actions
-- [ ] `P4-E-02` Add tenant billing plans with feature flags, quotas, soft limits, and hard-stop behavior
-- [ ] `P4-E-03` Add metering reconciliation jobs that compare provider-side usage with local run records
+- [x] `P4-E-01` Define billable usage records for launch, completion, retrieval, storage, and export actions
+- [x] `P4-E-02` Add tenant billing plans with feature flags, quotas, soft limits, and hard-stop behavior
+- [x] `P4-E-03` Add metering reconciliation jobs that compare provider-side usage with local run records
 - [ ] `P4-E-04` Add invoice/export-ready cost summaries by tenant, app, group, and provider
-- [ ] `P4-E-05` Add admin override controls for grace periods, credit grants, and temporary limit raises
-- [ ] `P4-E-06` Add end-user warning banners for approaching cost thresholds
-- [ ] `P4-E-07` Add audit coverage for billing-plan changes, overrides, and meter adjustments
+- [x] `P4-E-05` Add admin override controls for grace periods, credit grants, and temporary limit raises
+- [x] `P4-E-06` Add end-user warning banners for approaching cost thresholds
+- [x] `P4-E-07` Add audit coverage for billing-plan changes, overrides, and meter adjustments
 - [ ] `P4-E-08` Add tests for overage behavior, grace windows, and corrected billing entries
-- [ ] `P4-E-09` Add browser coverage for quota/cost warning states and admin override flows
-- [ ] `P4-E-10` Add retention and masking rules for billing payloads that contain user or run references
-- [ ] `P4-E-11` Add data export surfaces for finance/ops review without leaking raw prompts
-- [ ] `P4-E-12` Document the pricing model, reconciliation workflow, and incident playbook for bad metering
+- [x] `P4-E-09` Add browser coverage for quota/cost warning states and admin override flows
+- [x] `P4-E-10` Add retention and masking rules for billing payloads that contain user or run references
+- [x] `P4-E-11` Add data export surfaces for finance/ops review without leaking raw prompts
+- [x] `P4-E-12` Document the pricing model, reconciliation workflow, and incident playbook for bad metering
 
 ### 7.23 Future Platform Queue: `P4-F` Enterprise Security, Compliance, And Policy Packs
 
