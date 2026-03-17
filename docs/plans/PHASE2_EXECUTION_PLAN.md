@@ -198,7 +198,27 @@ Execution status:
 | completed | `P3-H-06` | restore 后 share/artifact route verification 已脚本化                                                  |
 | completed | `P3-H-07` | storage-growth reporting 已补齐                                                                        |
 | completed | `P3-H-08` | corrupted JSON / partial migration recovery checklist 已文档化                                         |
-| active    | `P3-H-09` | 下一项，补 production-like staging replay drill                                                        |
+| completed | `P3-H-09` | production-like staging replay drill 已脚本化                                                          |
+| completed | `P3-H-10` | 新会话必须复制的运行上下文 checklist 已文档化                                                          |
+| completed | `P4-A-01` | provider-agnostic runtime envelopes 已补齐                                                             |
+| completed | `P4-A-02` | provider capability discovery 已接入 health surface                                                    |
+| completed | `P4-A-03` | app / tenant / request type provider selection policy 已接入                                           |
+| completed | `P4-A-04` | degraded / unavailable provider fallback routing 已接入                                                |
+| completed | `P4-A-05` | provider metadata 已持久化到 run boundary                                                              |
+| completed | `P4-A-06` | provider/model pricing metadata 已补齐                                                                 |
+| completed | `P4-A-07` | provider-specific retry / idempotency policy 已接入                                                    |
+| completed | `P4-A-08` | provider circuit-breaker state 已接入 health/admin views                                               |
+| completed | `P4-A-09` | mixed-provider conversation route coverage 已补齐                                                      |
+| completed | `P4-A-10` | provider fallback / retry persistence coverage 已补齐                                                  |
+| completed | `P4-A-11` | provider-switched transcript browser smoke 已补齐                                                      |
+| completed | `P4-A-12` | provider onboarding / benchmark / disable runbook 已补齐                                               |
+| completed | `P4-B-01` | connector auth / cadence / checkpoint contracts 已定义                                                 |
+| completed | `P4-B-02` | connector records for web/Drive/Notion/Confluence/file-drop 已接入                                    |
+| completed | `P4-B-03` | connector credential storage abstraction 已接入                                                        |
+| completed | `P4-B-04` | connector sync-job tables and states 已补齐                                                            |
+| completed | `P4-B-05` | per-document sync provenance 已接入                                                                    |
+| completed | `P4-B-06` | incremental re-sync by timestamp/cursor checkpoint 已接入                                              |
+| active    | `P4-B-07` | 下一项，补 connector health surface 和 failure summary                                                 |
 
 ## 5. First Batch Definition
 
@@ -248,7 +268,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-H-09`
+- the active follow-on item is `P4-B-07`
 
 ## 6. Detailed Execution Notes
 
@@ -887,32 +907,32 @@ Legend:
 - [x] `P3-H-06` Add periodic verification that share links and artifact routes still resolve after backup restore
 - [x] `P3-H-07` Add storage-growth reporting for conversation history, artifacts, and audit payloads
 - [x] `P3-H-08` Add a formal recovery checklist for corrupted JSON rows or partially applied migrations
-- [ ] `P3-H-09` Add tests or scripted drills for replaying production-like data into a staging environment
-- [ ] `P3-H-10` Document what operational context must always be copied into the dev log for new sessions
+- [x] `P3-H-09` Add tests or scripted drills for replaying production-like data into a staging environment
+- [x] `P3-H-10` Document what operational context must always be copied into the dev log for new sessions
 
 ### 7.18 Future Platform Queue: `P4-A` Multi-Provider Runtime And Model Routing
 
-- [ ] `P4-A-01` Define provider-agnostic request and response envelopes for chat, tools, files, and safety
-- [ ] `P4-A-02` Add provider capability discovery so adapters can advertise supported features at startup
-- [ ] `P4-A-03` Add provider selection policy per app, tenant, and request type
-- [ ] `P4-A-04` Add weighted fallback routing when the primary provider is degraded or unavailable
-- [ ] `P4-A-05` Persist provider metadata on each run for replay, analytics, and incident review
-- [ ] `P4-A-06` Add pricing metadata per provider/model for cost analysis and quota policy work
-- [ ] `P4-A-07` Add provider-specific retry backoff and idempotency strategies
-- [ ] `P4-A-08` Add provider circuit-breaker state and expose it through health/admin views
-- [ ] `P4-A-09` Add route coverage proving the same conversation can replay runs from mixed providers
-- [ ] `P4-A-10` Add persistence coverage for provider metadata, retry state, and fallback outcomes
-- [ ] `P4-A-11` Add browser smoke coverage for provider-switched runs in the same transcript
-- [ ] `P4-A-12` Document how to onboard, benchmark, and safely disable a provider
+- [x] `P4-A-01` Define provider-agnostic request and response envelopes for chat, tools, files, and safety
+- [x] `P4-A-02` Add provider capability discovery so adapters can advertise supported features at startup
+- [x] `P4-A-03` Add provider selection policy per app, tenant, and request type
+- [x] `P4-A-04` Add weighted fallback routing when the primary provider is degraded or unavailable
+- [x] `P4-A-05` Persist provider metadata on each run for replay, analytics, and incident review
+- [x] `P4-A-06` Add pricing metadata per provider/model for cost analysis and quota policy work
+- [x] `P4-A-07` Add provider-specific retry backoff and idempotency strategies
+- [x] `P4-A-08` Add provider circuit-breaker state and expose it through health/admin views
+- [x] `P4-A-09` Add route coverage proving the same conversation can replay runs from mixed providers
+- [x] `P4-A-10` Add persistence coverage for provider metadata, retry state, and fallback outcomes
+- [x] `P4-A-11` Add browser smoke coverage for provider-switched runs in the same transcript
+- [x] `P4-A-12` Document how to onboard, benchmark, and safely disable a provider
 
 ### 7.19 Future Platform Queue: `P4-B` Connectors, Sync, And External Knowledge Sources
 
-- [ ] `P4-B-01` Define a connector contract for source auth, sync cadence, and incremental checkpoints
-- [ ] `P4-B-02` Add connector records for web, Google Drive, Notion, Confluence, and generic file-drop inputs
-- [ ] `P4-B-03` Add OAuth or token storage abstractions for connector credentials
-- [ ] `P4-B-04` Add sync-job tables for queued, running, succeeded, partially failed, and cancelled states
-- [ ] `P4-B-05` Add per-document sync provenance linking runs, artifacts, and retrieval hits back to source records
-- [ ] `P4-B-06` Add incremental re-sync support based on updated timestamp or cursor checkpoints
+- [x] `P4-B-01` Define a connector contract for source auth, sync cadence, and incremental checkpoints
+- [x] `P4-B-02` Add connector records for web, Google Drive, Notion, Confluence, and generic file-drop inputs
+- [x] `P4-B-03` Add OAuth or token storage abstractions for connector credentials
+- [x] `P4-B-04` Add sync-job tables for queued, running, succeeded, partially failed, and cancelled states
+- [x] `P4-B-05` Add per-document sync provenance linking runs, artifacts, and retrieval hits back to source records
+- [x] `P4-B-06` Add incremental re-sync support based on updated timestamp or cursor checkpoints
 - [ ] `P4-B-07` Add connector health surfaces and failure summaries to admin views
 - [ ] `P4-B-08` Add user-facing source status surfaces for stale, revoked, or paused connectors
 - [ ] `P4-B-09` Add audit coverage for connector create, rotate, revoke, pause, and delete actions
