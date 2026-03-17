@@ -38,11 +38,12 @@
     "eval:incident": "tsx scripts/evals/replay-incident.ts",
     "eval:ci": "npm run build --workspace @agentifui/shared && npm run build --workspace @agentifui/db && tsx scripts/evals/release-gate.ts --pack minimal --ci --write-output artifacts/evals/ci",
     "test:eval": "vitest run --config vitest.evals.config.ts",
-    "test:unit": "vitest run --exclude apps/gateway/src/routes/auth-persistence.test.ts --exclude apps/gateway/src/routes/knowledge-persistence.test.ts --exclude apps/gateway/src/routes/tool-registry-persistence.test.ts",
-    "test:persistence": "vitest run apps/gateway/src/routes/auth-persistence.test.ts && vitest run apps/gateway/src/routes/knowledge-persistence.test.ts && vitest run apps/gateway/src/routes/tool-registry-persistence.test.ts",
+    "test:unit": "vitest run --exclude apps/gateway/src/routes/auth-persistence.test.ts --exclude apps/gateway/src/routes/knowledge-persistence.test.ts --exclude apps/gateway/src/routes/tool-registry-persistence.test.ts --exclude apps/gateway/src/routes/runtime-provider-persistence.test.ts --exclude apps/gateway/src/routes/connector-persistence.test.ts",
+    "test:persistence": "vitest run apps/gateway/src/routes/auth-persistence.test.ts && vitest run apps/gateway/src/routes/knowledge-persistence.test.ts && vitest run apps/gateway/src/routes/tool-registry-persistence.test.ts && vitest run apps/gateway/src/routes/runtime-provider-persistence.test.ts && vitest run apps/gateway/src/routes/connector-persistence.test.ts",
     "test": "npm run test:unit && npm run test:persistence",
     "test:watch": "vitest",
-    "test:e2e": "node scripts/run-e2e.mjs"
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "eval:staging-drill": "tsx scripts/evals/replay-staging.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

@@ -239,6 +239,7 @@ async function stopServer(child) {
 }
 
 async function main() {
+  const playwrightArgs = process.argv.slice(2);
   const gatewayPort = await resolvePort(
     Number(process.env.PLAYWRIGHT_GATEWAY_PORT ?? DEFAULT_GATEWAY_PORT),
   );
@@ -285,7 +286,7 @@ async function main() {
 
     await waitForOk(`http://127.0.0.1:${webPort}/login`);
 
-    await run("npx", ["playwright", "test"], {
+    await run("npx", ["playwright", "test", ...playwrightArgs], {
       env: createPlaywrightEnv(runtimeLibDir, webPort),
     });
   } finally {
