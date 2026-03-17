@@ -1,0 +1,18 @@
+{
+  "version": "2026.03.17-p3gh",
+  "schema": 1,
+  "seedPack": "dev-tenant",
+  "browserFixtures": [
+    "phase1-flows",
+    "knowledge-flows"
+  ],
+  "persistenceSuites": [
+    "auth-persistence",
+    "knowledge-persistence",
+    "tool-registry-persistence"
+  ],
+  "notes": [
+    "Bump this when seeded groups, apps, or baseline audit/runtime fixtures change.",
+    "Keep browser and persistence fixtures aligned with plan/dev-log updates."
+  ]
+}
