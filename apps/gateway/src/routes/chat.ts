@@ -5,12 +5,16 @@ import type {
   WorkspaceConversation,
   WorkspaceConversationAttachment,
   WorkspaceHitlStep,
+  WorkspaceInternalNote,
+  WorkspacePlanState,
   WorkspaceConversationMessage,
   WorkspaceConversationMessageStatus,
+  WorkspaceRunBranch,
   WorkspaceRunRuntime,
   WorkspaceRunToolExecution,
   WorkspaceSafetySignal,
   WorkspaceSourceBlock,
+  WorkspaceWorkflowState,
 } from "@agentifui/shared/apps";
 import type {
   ChatToolCall,
@@ -1650,14 +1654,17 @@ async function* streamCompletionEvents(input: {
   attachments: WorkspaceConversationAttachment[];
   artifacts: WorkspaceArtifact[];
   auditService: AuditService;
+  branch: WorkspaceRunBranch | null;
   citations: WorkspaceCitation[];
   conversation: WorkspaceConversation;
   created: number;
   ipAddress: string;
+  internalNotes: WorkspaceInternalNote[];
   model: string;
   promptTokens: number;
   assistantText: string;
   pendingActions: WorkspaceHitlStep[];
+  plan: WorkspacePlanState | null;
   runtime: WorkspaceRunRuntime | null;
   safetySignals: WorkspaceSafetySignal[];
   sourceBlocks: WorkspaceSourceBlock[];
@@ -1673,6 +1680,7 @@ async function* streamCompletionEvents(input: {
   messages: ChatCompletionMessage[];
   startedAt: number;
   user: AuthUser;
+  workflow: WorkspaceWorkflowState | null;
   workspaceService: WorkspaceService;
 }) {
   const streamState = activeStreams.get(input.conversation.run.id);
@@ -1796,11 +1804,15 @@ async function* streamCompletionEvents(input: {
             ...(input.toolCalls.length > 0 ? { toolCalls: input.toolCalls } : {}),
           },
           artifacts,
+          branch: input.branch,
           citations,
+          internalNotes: input.internalNotes,
           pendingActions,
+          plan: input.plan,
           ...(input.runtime ? { runtime: input.runtime } : {}),
           safetySignals: input.safetySignals,
           sourceBlocks,
+          workflow: input.workflow,
           ...(input.toolExecutions.length > 0
             ? { toolExecutions: input.toolExecutions }
             : {}),
@@ -2440,6 +2452,10 @@ export async function registerChatRoutes(
     const artifacts = runtimeResult.data.artifacts ?? [];
     const citations = runtimeResult.data.citations ?? [];
     const pendingActions = runtimeResult.data.pendingActions ?? [];
+    const plan = runtimeResult.data.plan ?? null;
+    const branch = runtimeResult.data.branch ?? null;
+    const workflow = runtimeResult.data.workflow ?? null;
+    const internalNotes = runtimeResult.data.internalNotes ?? [];
     const safetySignals = runtimeResult.data.safetySignals ?? [];
     const sourceBlocks = runtimeResult.data.sourceBlocks ?? [];
     const suggestedPrompts = runtimeResult.data.suggestedPrompts ?? [];
@@ -2476,8 +2492,10 @@ export async function registerChatRoutes(
             promptTokens,
             assistantText,
             artifacts,
+            branch,
             citations,
             pendingActions,
+            plan,
             runtime,
             safetySignals,
             sourceBlocks,
@@ -2485,9 +2503,11 @@ export async function registerChatRoutes(
             toolCalls,
             toolResults,
             toolExecutions,
+            internalNotes,
             messages: body.messages,
             startedAt,
             user: access.user,
+            workflow,
             workspaceService,
           }),
         ),
@@ -2531,11 +2551,15 @@ export async function registerChatRoutes(
             ...(toolCalls.length > 0 ? { toolCalls } : {}),
           },
           artifacts,
+          branch,
           citations,
+          internalNotes,
           pendingActions,
+          plan,
           runtime,
           safetySignals,
           sourceBlocks,
+          workflow,
           ...(toolExecutions.length > 0
             ? { toolExecutions }
             : {}),

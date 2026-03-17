@@ -21,11 +21,14 @@ import {
   type WorkspaceConversationMessage,
   type WorkspaceConversationStatus,
   type WorkspaceGroup,
+  type WorkspaceInternalNote,
   type WorkspaceMessageFeedbackRating,
   type WorkspaceNotification,
+  type WorkspacePlanState,
   type WorkspacePreferences,
   type WorkspacePreferencesUpdateRequest,
   type WorkspaceRun,
+  type WorkspaceRunBranch,
   type WorkspaceRunRuntime,
   type WorkspaceRunSummary,
   type WorkspaceRunToolExecution,
@@ -36,6 +39,7 @@ import {
   type WorkspaceRunTrigger,
   type WorkspaceRunType,
   type WorkspaceSourceBlock,
+  type WorkspaceWorkflowState,
 } from "@agentifui/shared/apps";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -1194,6 +1198,35 @@ function toWorkspaceSourceBlocks(
   return sourceBlocks.length > 0 ? sourceBlocks : undefined;
 }
 
+function toWorkspacePlanState(value: unknown): WorkspacePlanState | null {
+  return typeof value === "object" && value !== null
+    ? (value as WorkspacePlanState)
+    : null;
+}
+
+function toWorkspaceRunBranch(value: unknown): WorkspaceRunBranch | null {
+  return typeof value === "object" && value !== null
+    ? (value as WorkspaceRunBranch)
+    : null;
+}
+
+function toWorkspaceWorkflowState(value: unknown): WorkspaceWorkflowState | null {
+  return typeof value === "object" && value !== null
+    ? (value as WorkspaceWorkflowState)
+    : null;
+}
+
+function toWorkspaceInternalNotes(value: unknown): WorkspaceInternalNote[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (entry): entry is WorkspaceInternalNote =>
+      typeof entry === "object" && entry !== null,
+  );
+}
+
 function isWorkspaceArtifactKind(
   value: unknown,
 ): value is WorkspaceArtifact["kind"] {
@@ -1789,6 +1822,10 @@ function toWorkspaceRun(row: WorkspaceRunRow): WorkspaceRun {
     ),
     artifacts: toWorkspaceArtifacts(outputs.artifacts),
     citations: toWorkspaceCitations(outputs.citations) ?? [],
+    plan: toWorkspacePlanState(outputs.plan),
+    branch: toWorkspaceRunBranch(outputs.branch),
+    workflow: toWorkspaceWorkflowState(outputs.workflow),
+    internalNotes: toWorkspaceInternalNotes(outputs.internalNotes),
     safetySignals:
       toWorkspaceSafetySignals(outputs.safetySignals) ??
       toWorkspaceSafetySignals(outputs.safety_signals) ??

@@ -15,9 +15,13 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerAdminConnectorRoutes } from './routes/admin-connectors.js';
+import { registerAdminConnectorOpsRoutes } from './routes/admin-connectors-ops.js';
 import { registerAdminIdentityRoutes } from './routes/admin-identity.js';
 import { registerAdminSourceRoutes } from './routes/admin-sources.js';
+import { registerAdminWorkflowRoutes } from './routes/admin-workflows.js';
 import { registerRootRoutes } from './routes/root.js';
+import { registerWorkspaceRunControlRoutes } from './routes/workspace-run-control.js';
+import { registerWorkspaceSourceStatusRoutes } from './routes/workspace-source-status.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { createAdminService, type AdminService } from './services/admin-service.js';
 import { createAuditService, type AuditService } from './services/audit-service.js';
@@ -40,6 +44,9 @@ import { createPersistentAuthService } from './services/persistent-auth-service.
 import { createPersistentKnowledgeService } from './services/persistent-knowledge-service.js';
 import { createPersistentConnectorService } from './services/persistent-connector-service.js';
 import {
+  createPersistentWorkflowDefinitionService,
+} from './services/persistent-workflow-definition-service.js';
+import {
   createPersistentWorkspaceService,
   ensureWorkspaceCatalogSeed,
 } from './services/persistent-workspace-service.js';
@@ -47,6 +54,10 @@ import {
   createConnectorService,
   type ConnectorService,
 } from './services/connector-service.js';
+import {
+  createWorkflowDefinitionService,
+  type WorkflowDefinitionService,
+} from './services/workflow-definition-service.js';
 import { createLocalWorkspaceFileStorage } from './services/workspace-file-storage.js';
 import {
   createWorkspaceService,
@@ -70,6 +81,7 @@ type BuildAppOptions = {
   adminService?: AdminService;
   knowledgeService?: KnowledgeService;
   connectorService?: ConnectorService;
+  workflowDefinitionService?: WorkflowDefinitionService;
   workspaceService?: WorkspaceService;
   runtimeService?: WorkspaceRuntimeService;
   toolRegistryService?: ToolRegistryService;
@@ -162,6 +174,11 @@ export async function buildApp(
       : createWorkspaceService({
           fileStorage: workspaceFileStorage,
         }));
+  const workflowDefinitionService =
+    options.workflowDefinitionService ??
+    (database
+      ? createPersistentWorkflowDefinitionService(database)
+      : createWorkflowDefinitionService());
   const runtimeService =
     options.runtimeService ??
     createWorkspaceRuntimeService({
@@ -245,7 +262,21 @@ export async function buildApp(
   );
   await registerAdminIdentityRoutes(app, authService, adminService, auditService);
   await registerAdminSourceRoutes(app, authService, adminService, knowledgeService, auditService);
+  await registerAdminWorkflowRoutes(
+    app,
+    authService,
+    adminService,
+    workflowDefinitionService,
+    auditService,
+  );
   await registerAdminConnectorRoutes(
+    app,
+    authService,
+    adminService,
+    connectorService,
+    auditService,
+  );
+  await registerAdminConnectorOpsRoutes(
     app,
     authService,
     adminService,
@@ -259,6 +290,18 @@ export async function buildApp(
     auditService,
     runtimeService,
     adminService,
+  );
+  await registerWorkspaceRunControlRoutes(
+    app,
+    authService,
+    workspaceService,
+    auditService,
+  );
+  await registerWorkspaceSourceStatusRoutes(
+    app,
+    authService,
+    knowledgeService,
+    connectorService,
   );
   await registerChatRoutes(
     app,

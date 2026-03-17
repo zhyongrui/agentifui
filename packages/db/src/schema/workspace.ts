@@ -51,6 +51,10 @@ export const runTimelineEventTypeEnum = pgEnum('run_timeline_event_type', [
   'run_created',
   'input_recorded',
   'run_started',
+  'branch_created',
+  'plan_step_updated',
+  'workflow_paused',
+  'workflow_resumed',
   'stop_requested',
   'output_recorded',
   'run_succeeded',
@@ -103,6 +107,18 @@ export const knowledgeIngestionStatusEnum = pgEnum('knowledge_ingestion_status',
 export const knowledgeChunkingStrategyEnum = pgEnum('knowledge_chunking_strategy', [
   'markdown_sections',
   'paragraph_windows',
+]);
+export const workflowVersionStatusEnum = pgEnum('workflow_version_status', [
+  'draft',
+  'published',
+  'archived',
+  'rolled_back',
+]);
+export const workflowPermissionRoleEnum = pgEnum('workflow_permission_role', [
+  'author',
+  'reviewer',
+  'publisher',
+  'runner',
 ]);
 
 export const workspaceApps = pgTable(
@@ -582,6 +598,88 @@ export const knowledgeSourceChunks = pgTable(
       table.sourceId,
       table.sequence
     ),
+  })
+);
+
+export const workflowDefinitions = pgTable(
+  'workflow_definitions',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    slug: varchar('slug', { length: 120 }).notNull(),
+    title: varchar('title', { length: 255 }).notNull(),
+    description: text('description'),
+    currentVersionId: varchar('current_version_id', { length: 120 }),
+    createdByUserId: varchar('created_by_user_id', { length: 120 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workflowDefinitionsTenantSlugUnique: uniqueIndex('workflow_definitions_tenant_slug_unique').on(
+      table.tenantId,
+      table.slug
+    ),
+    workflowDefinitionsTenantIndex: index('workflow_definitions_tenant_idx').on(table.tenantId),
+  })
+);
+
+export const workflowDefinitionVersions = pgTable(
+  'workflow_definition_versions',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    workflowId: varchar('workflow_id', { length: 120 })
+      .notNull()
+      .references(() => workflowDefinitions.id, { onDelete: 'cascade' }),
+    versionNumber: integer('version_number').notNull(),
+    status: workflowVersionStatusEnum('status').notNull().default('draft'),
+    rolledBackFromVersionId: varchar('rolled_back_from_version_id', { length: 120 }),
+    document: jsonb('document').$type<Record<string, unknown>>().notNull().default({}),
+    validationErrors: jsonb('validation_errors').$type<string[]>().notNull().default([]),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workflowDefinitionVersionsWorkflowVersionUnique: uniqueIndex(
+      'workflow_definition_versions_workflow_version_unique'
+    ).on(table.workflowId, table.versionNumber),
+    workflowDefinitionVersionsTenantIndex: index('workflow_definition_versions_tenant_idx').on(
+      table.tenantId
+    ),
+    workflowDefinitionVersionsWorkflowIndex: index(
+      'workflow_definition_versions_workflow_idx'
+    ).on(table.workflowId, table.createdAt),
+  })
+);
+
+export const workflowDefinitionPermissions = pgTable(
+  'workflow_definition_permissions',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    workflowId: varchar('workflow_id', { length: 120 })
+      .notNull()
+      .references(() => workflowDefinitions.id, { onDelete: 'cascade' }),
+    userEmail: varchar('user_email', { length: 255 }).notNull(),
+    role: workflowPermissionRoleEnum('role').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    workflowDefinitionPermissionsUnique: uniqueIndex(
+      'workflow_definition_permissions_workflow_user_role_unique'
+    ).on(table.workflowId, table.userEmail, table.role),
+    workflowDefinitionPermissionsTenantIndex: index(
+      'workflow_definition_permissions_tenant_idx'
+    ).on(table.tenantId),
   })
 );
 

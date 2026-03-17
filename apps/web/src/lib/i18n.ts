@@ -30,7 +30,9 @@ type Messages = {
     users: string;
     groups: string;
     apps: string;
+    connectors: string;
     sources: string;
+    workflows: string;
     audit: string;
     tenants: string;
     eyebrow: string;
@@ -262,7 +264,9 @@ const messages: Record<AppLocale, Messages> = {
       users: '用户',
       groups: '群组',
       apps: '应用',
+      connectors: '连接器',
       sources: '知识源',
+      workflows: '工作流',
       audit: '审计',
       tenants: '租户',
     },
@@ -493,7 +497,9 @@ const messages: Record<AppLocale, Messages> = {
       users: 'Users',
       groups: 'Groups',
       apps: 'Apps',
+      connectors: 'Connectors',
       sources: 'Sources',
+      workflows: 'Workflows',
       audit: 'Audit',
       tenants: 'Tenants',
     },

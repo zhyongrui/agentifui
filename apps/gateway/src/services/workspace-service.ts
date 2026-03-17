@@ -26,10 +26,13 @@ import type {
   WorkspaceConversationMessage,
   WorkspacePendingActionRespondRequest,
   WorkspaceHitlStep,
+  WorkspaceInternalNote,
   WorkspaceMessageFeedbackRating,
+  WorkspacePlanState,
   WorkspacePreferences,
   WorkspacePreferencesUpdateRequest,
   WorkspaceRun,
+  WorkspaceRunBranch,
   WorkspaceRunFailure,
   WorkspaceNotification,
   WorkspaceRunRuntime,
@@ -43,6 +46,7 @@ import type {
   WorkspaceRunTrigger,
   WorkspaceRunType,
   WorkspaceSourceBlock,
+  WorkspaceWorkflowState,
 } from '@agentifui/shared/apps';
 import { evaluateAppLaunch } from '@agentifui/shared/apps';
 import { randomUUID } from 'node:crypto';
@@ -1139,6 +1143,35 @@ function buildSourceBlocksFromOutputs(outputs: Record<string, unknown>): Workspa
   });
 }
 
+function buildPlanStateFromOutputs(outputs: Record<string, unknown>): WorkspacePlanState | null {
+  return typeof outputs.plan === 'object' && outputs.plan !== null
+    ? (outputs.plan as WorkspacePlanState)
+    : null;
+}
+
+function buildBranchStateFromOutputs(outputs: Record<string, unknown>): WorkspaceRunBranch | null {
+  return typeof outputs.branch === 'object' && outputs.branch !== null
+    ? (outputs.branch as WorkspaceRunBranch)
+    : null;
+}
+
+function buildWorkflowStateFromOutputs(
+  outputs: Record<string, unknown>
+): WorkspaceWorkflowState | null {
+  return typeof outputs.workflow === 'object' && outputs.workflow !== null
+    ? (outputs.workflow as WorkspaceWorkflowState)
+    : null;
+}
+
+function buildInternalNotesFromOutputs(outputs: Record<string, unknown>): WorkspaceInternalNote[] {
+  return Array.isArray(outputs.internalNotes)
+    ? (outputs.internalNotes.filter(
+        (note): note is WorkspaceInternalNote =>
+          typeof note === 'object' && note !== null
+      ) as WorkspaceInternalNote[])
+    : [];
+}
+
 function isWorkspaceArtifactKind(value: unknown): value is WorkspaceArtifact['kind'] {
   return ['text', 'markdown', 'json', 'table', 'link'].includes(String(value));
 }
@@ -1543,6 +1576,10 @@ function createRunRecord(input: {
     toolExecutions: [],
     artifacts: [],
     citations: [],
+    plan: null,
+    branch: null,
+    workflow: null,
+    internalNotes: [],
     safetySignals: [],
     sourceBlocks: [],
     usage: {
@@ -3341,6 +3378,10 @@ export function createWorkspaceService(options: {
         run.toolExecutions = buildToolExecutionsFromOutputs(run.outputs);
         run.artifacts = buildArtifactsFromOutputs(run.outputs);
         run.citations = buildCitationsFromOutputs(run.outputs);
+        run.plan = buildPlanStateFromOutputs(run.outputs);
+        run.branch = buildBranchStateFromOutputs(run.outputs);
+        run.workflow = buildWorkflowStateFromOutputs(run.outputs);
+        run.internalNotes = buildInternalNotesFromOutputs(run.outputs);
         run.safetySignals = buildSafetySignalsFromOutputs(run.outputs);
         run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
         appendTimelineEvent(run, 'output_recorded', {
@@ -3392,6 +3433,10 @@ export function createWorkspaceService(options: {
 
       run.artifacts = buildArtifactsFromOutputs(run.outputs);
       run.citations = buildCitationsFromOutputs(run.outputs);
+      run.plan = buildPlanStateFromOutputs(run.outputs);
+      run.branch = buildBranchStateFromOutputs(run.outputs);
+      run.workflow = buildWorkflowStateFromOutputs(run.outputs);
+      run.internalNotes = buildInternalNotesFromOutputs(run.outputs);
       run.safetySignals = buildSafetySignalsFromOutputs(run.outputs);
       run.sourceBlocks = buildSourceBlocksFromOutputs(run.outputs);
       run.runtime = buildRuntimeFromOutputs(run.outputs);

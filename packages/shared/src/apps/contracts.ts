@@ -1,5 +1,9 @@
 import type { ChatToolCall } from "../tools/contracts.js";
 import type {
+  WorkflowDefinitionNodeType,
+  WorkflowPermissionRole,
+} from "../workflows/contracts.js";
+import type {
   RuntimeProviderCircuitBreaker,
   RuntimeProviderPricing,
   RuntimeProviderRequestType,
@@ -153,6 +157,10 @@ export type WorkspaceRunTimelineEventType =
   | "run_created"
   | "input_recorded"
   | "run_started"
+  | "branch_created"
+  | "plan_step_updated"
+  | "workflow_paused"
+  | "workflow_resumed"
   | "stop_requested"
   | "output_recorded"
   | "run_succeeded"
@@ -345,6 +353,41 @@ export type WorkspaceNotification = {
   preview: string;
   createdAt: string;
   readAt: string | null;
+};
+
+export type WorkspaceSourceStatusSeverity = "healthy" | "warning" | "critical";
+
+export type WorkspaceSourceStatusReason =
+  | "stale"
+  | "paused"
+  | "revoked"
+  | "sync_failed"
+  | "sync_partial_failure";
+
+export type WorkspaceSourceStatusItem = {
+  id: string;
+  title: string;
+  sourceId: string;
+  connectorId: string;
+  connectorTitle: string;
+  connectorKind: string;
+  connectorStatus: string;
+  syncStatus: string | null;
+  scope: "tenant" | "group";
+  groupId: string | null;
+  severity: WorkspaceSourceStatusSeverity;
+  reason: WorkspaceSourceStatusReason;
+  summary: string;
+  updatedAt: string;
+  staleSince: string | null;
+};
+
+export type WorkspaceSourceStatusResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    items: WorkspaceSourceStatusItem[];
+  };
 };
 
 export type WorkspaceConversationMessageRole = "user" | "assistant" | "tool";
@@ -552,6 +595,65 @@ export type WorkspaceRunToolExecution = {
   result: WorkspaceRunToolExecutionResult | null;
 };
 
+export type WorkspacePlanStepStatus =
+  | "pending"
+  | "in_progress"
+  | "blocked"
+  | "completed"
+  | "skipped"
+  | "paused";
+
+export type WorkspacePlanStep = {
+  id: string;
+  title: string;
+  description: string | null;
+  nodeType: WorkflowDefinitionNodeType;
+  status: WorkspacePlanStepStatus;
+  owner: string | null;
+  dependsOnStepIds: string[];
+  startedAt: string | null;
+  finishedAt: string | null;
+  internalSummary: string | null;
+  artifacts: WorkspaceArtifactSummary[];
+  citations: WorkspaceCitation[];
+};
+
+export type WorkspacePlanState = {
+  status: "pending" | "in_progress" | "blocked" | "completed" | "paused";
+  activeStepId: string | null;
+  steps: WorkspacePlanStep[];
+};
+
+export type WorkspaceInternalNote = {
+  id: string;
+  channel: "internal_redacted";
+  createdAt: string;
+  summary: string;
+};
+
+export type WorkspaceRunBranch = {
+  parentConversationId: string | null;
+  parentRunId: string | null;
+  rootConversationId: string;
+  depth: number;
+  label: string | null;
+  createdByAction: "launch" | "branch" | "resume";
+};
+
+export type WorkspaceWorkflowState = {
+  definitionId: string | null;
+  versionId: string | null;
+  name: string | null;
+  versionNumber: number | null;
+  status: "ready" | "running" | "paused" | "completed";
+  resumable: boolean;
+  currentStepId: string | null;
+  lastResumedAt: string | null;
+  pausedAt: string | null;
+  resumedFromRunId: string | null;
+  runnerRoles: WorkflowPermissionRole[];
+};
+
 export type WorkspaceRun = WorkspaceRunSummary & {
   conversationId: string;
   app: Pick<
@@ -566,6 +668,10 @@ export type WorkspaceRun = WorkspaceRunSummary & {
   outputs: Record<string, unknown>;
   comments: WorkspaceComment[];
   toolExecutions: WorkspaceRunToolExecution[];
+  plan: WorkspacePlanState | null;
+  branch: WorkspaceRunBranch | null;
+  workflow: WorkspaceWorkflowState | null;
+  internalNotes: WorkspaceInternalNote[];
   artifacts: WorkspaceArtifact[];
   citations: WorkspaceCitation[];
   safetySignals: WorkspaceSafetySignal[];
@@ -803,6 +909,37 @@ export type WorkspaceConversationRunsResponse = {
 export type WorkspaceRunResponse = {
   ok: true;
   data: WorkspaceRun;
+};
+
+export type WorkspaceRunBranchCreateRequest = {
+  title?: string | null;
+};
+
+export type WorkspaceRunBranchCreateResponse = {
+  ok: true;
+  data: {
+    conversation: WorkspaceConversation;
+    branch: WorkspaceRunBranch;
+  };
+};
+
+export type WorkspacePlanStepControlAction =
+  | "pause"
+  | "resume"
+  | "skip"
+  | "restart";
+
+export type WorkspacePlanStepControlRequest = {
+  action: WorkspacePlanStepControlAction;
+  reason?: string | null;
+};
+
+export type WorkspacePlanStepControlResponse = {
+  ok: true;
+  data: {
+    run: WorkspaceRun;
+    step: WorkspacePlanStep;
+  };
 };
 
 export type WorkspacePendingActionsResponse = {

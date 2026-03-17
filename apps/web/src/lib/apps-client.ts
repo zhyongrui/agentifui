@@ -29,10 +29,15 @@ import type {
   WorkspacePendingActionsResponse,
   WorkspaceConversationRunsResponse,
   WorkspaceErrorResponse,
+  WorkspacePlanStepControlRequest,
+  WorkspacePlanStepControlResponse,
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
   WorkspaceArtifactResponse,
+  WorkspaceRunBranchCreateRequest,
+  WorkspaceRunBranchCreateResponse,
   WorkspaceSharedConversationResponse,
+  WorkspaceSourceStatusResponse,
   WorkspaceRunResponse,
 } from '@agentifui/shared/apps';
 
@@ -224,6 +229,15 @@ export async function markWorkspaceNotificationRead(
   );
 }
 
+export async function fetchWorkspaceSourceStatus(
+  sessionToken: string
+): Promise<WorkspaceSourceStatusResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceSourceStatusResponse>('/workspace/source-status', {
+    method: 'GET',
+    sessionToken,
+  });
+}
+
 export async function fetchWorkspaceConversationPresence(
   sessionToken: string,
   conversationId: string
@@ -233,6 +247,37 @@ export async function fetchWorkspaceConversationPresence(
     {
       method: 'GET',
       sessionToken,
+    }
+  );
+}
+
+export async function createWorkspaceRunBranch(
+  sessionToken: string,
+  runId: string,
+  input: WorkspaceRunBranchCreateRequest
+): Promise<WorkspaceRunBranchCreateResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceRunBranchCreateResponse>(
+    `/workspace/runs/${runId}/branch`,
+    {
+      method: 'POST',
+      sessionToken,
+      body: input,
+    }
+  );
+}
+
+export async function controlWorkspacePlanStep(
+  sessionToken: string,
+  runId: string,
+  stepId: string,
+  input: WorkspacePlanStepControlRequest
+): Promise<WorkspacePlanStepControlResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspacePlanStepControlResponse>(
+    `/workspace/runs/${runId}/plan/${stepId}`,
+    {
+      method: 'PUT',
+      sessionToken,
+      body: input,
     }
   );
 }

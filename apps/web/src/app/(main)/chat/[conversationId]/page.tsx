@@ -58,6 +58,8 @@ import {
   WorkspaceToolExecutionSummaryList,
 } from "../../../../components/workspace-tool-summary";
 import {
+  controlWorkspacePlanStep,
+  createWorkspaceRunBranch,
   fetchWorkspaceCatalog,
   createWorkspaceComment,
   fetchWorkspaceConversation,
@@ -336,6 +338,10 @@ const RUN_TIMELINE_EVENT_LABELS: Record<
   run_succeeded: "Run succeeded",
   run_failed: "Run failed",
   run_stopped: "Run stopped",
+  branch_created: "Branch created",
+  plan_step_updated: "Plan step updated",
+  workflow_paused: "Workflow paused",
+  workflow_resumed: "Workflow resumed",
 };
 
 function describeTimelineEvent(event: WorkspaceRunTimelineEvent) {
@@ -456,7 +462,15 @@ export default function ConversationPage() {
     null,
   );
   const [activeConversationAction, setActiveConversationAction] = useState<
-    "archive" | "delete" | "pin" | "rename" | "restore" | "unpin" | null
+    | "archive"
+    | "branch"
+    | "delete"
+    | "pin"
+    | "plan"
+    | "rename"
+    | "restore"
+    | "unpin"
+    | null
   >(null);
   const [gatewayRuntime, setGatewayRuntime] =
     useState<GatewayRuntimeHealthSnapshot | null>(null);
@@ -1051,8 +1065,91 @@ export default function ConversationPage() {
     }
   }
 
+  async function handleCreateRunBranch(runId: string) {
+    if (!session) {
+      return;
+    }
+
+    setConversationActionError(null);
+    setActiveConversationAction("branch");
+
+    try {
+      const result = await createWorkspaceRunBranch(session.sessionToken, runId, {
+        title: titleDraft.trim() ? `${titleDraft.trim()} branch` : null,
+      });
+
+      if (!result.ok) {
+        setConversationActionError(result.error.message);
+        return;
+      }
+
+      router.push(`/chat/${result.data.conversation.id}`);
+    } catch {
+      setConversationActionError("The branch conversation could not be created.");
+    } finally {
+      setActiveConversationAction(null);
+    }
+  }
+
+  async function handlePlanStepAction(
+    runId: string,
+    stepId: string,
+    action: "pause" | "resume" | "restart" | "skip",
+  ) {
+    if (!session) {
+      return;
+    }
+
+    setConversationActionError(null);
+    setActiveConversationAction("plan");
+
+    try {
+      const result = await controlWorkspacePlanStep(
+        session.sessionToken,
+        runId,
+        stepId,
+        {
+          action,
+        },
+      );
+
+      if (!result.ok) {
+        setConversationActionError(result.error.message);
+        return;
+      }
+
+      setSelectedRun(result.data.run);
+      setRuns((currentRuns) =>
+        currentRuns.map((run) =>
+          run.id === result.data.run.id
+            ? {
+                ...run,
+                status: result.data.run.status,
+                totalTokens: result.data.run.totalTokens,
+                totalSteps: result.data.run.totalSteps,
+                triggeredFrom: result.data.run.triggeredFrom,
+                traceId: result.data.run.traceId,
+              }
+            : run,
+        ),
+      );
+    } catch {
+      setConversationActionError("The plan step update could not be saved.");
+    } finally {
+      setActiveConversationAction(null);
+    }
+  }
+
   function isConversationActionPending(
-    action?: "archive" | "delete" | "pin" | "rename" | "restore" | "unpin",
+    action?:
+      | "archive"
+      | "branch"
+      | "delete"
+      | "pin"
+      | "plan"
+      | "rename"
+      | "restore"
+      | "unpin",
   ) {
     return action
       ? activeConversationAction === action
@@ -2812,6 +2909,30 @@ export default function ConversationPage() {
                       <p>{copy.toolExecutionLead}</p>
                     </article>
                   ) : null}
+                  {selectedRun.plan ? (
+                    <article className="chat-meta-card">
+                      <span>Plan</span>
+                      <strong>{selectedRun.plan.steps.length} steps</strong>
+                      <p>{selectedRun.plan.status}</p>
+                    </article>
+                  ) : null}
+                  {selectedRun.workflow ? (
+                    <article className="chat-meta-card">
+                      <span>Workflow</span>
+                      <strong>{selectedRun.workflow.name ?? "Attached"}</strong>
+                      <p>
+                        v{selectedRun.workflow.versionNumber ?? "?"} ·{" "}
+                        {selectedRun.workflow.status}
+                      </p>
+                    </article>
+                  ) : null}
+                  {selectedRun.branch ? (
+                    <article className="chat-meta-card">
+                      <span>Branch</span>
+                      <strong>Depth {selectedRun.branch.depth}</strong>
+                      <p>{selectedRun.branch.parentRunId ?? "root run"}</p>
+                    </article>
+                  ) : null}
                   {selectedRun.safetySignals.length > 0 ? (
                     <article className="chat-meta-card">
                       <span>Safety signals</span>
@@ -3026,6 +3147,92 @@ export default function ConversationPage() {
                         executions={selectedRun.toolExecutions}
                         locale={locale}
                       />
+                    </article>
+                  ) : null}
+                  {selectedRun.plan ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Plan state</span>
+                        <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                          {selectedRun.plan.status}
+                        </span>
+                      </div>
+                      <div className="stack">
+                        {selectedRun.plan.steps.map((step) => (
+                          <div className="card" key={step.id}>
+                            <strong>{step.title}</strong>
+                            <p>{step.description ?? step.nodeType}</p>
+                            <p>
+                              {step.status} · owner {step.owner ?? "unassigned"}
+                            </p>
+                            {!isConversationReadOnly ? (
+                              <div className="actions">
+                                <button className="secondary" type="button" disabled={isConversationActionPending("plan")} onClick={() => void handlePlanStepAction(selectedRun.id, step.id, "pause")}>Pause</button>
+                                <button className="secondary" type="button" disabled={isConversationActionPending("plan")} onClick={() => void handlePlanStepAction(selectedRun.id, step.id, "resume")}>Resume</button>
+                                <button className="secondary" type="button" disabled={isConversationActionPending("plan")} onClick={() => void handlePlanStepAction(selectedRun.id, step.id, "skip")}>Skip</button>
+                                <button className="secondary" type="button" disabled={isConversationActionPending("plan")} onClick={() => void handlePlanStepAction(selectedRun.id, step.id, "restart")}>Restart</button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ) : null}
+                  {selectedRun.workflow ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Workflow memory</span>
+                        <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                          {selectedRun.workflow.status}
+                        </span>
+                      </div>
+                      <p>
+                        {selectedRun.workflow.name ?? "Workflow"} · version{" "}
+                        {selectedRun.workflow.versionNumber ?? "?"}
+                      </p>
+                      <p>
+                        current step {selectedRun.workflow.currentStepId ?? "none"} · resumable{" "}
+                        {selectedRun.workflow.resumable ? "yes" : "no"}
+                      </p>
+                    </article>
+                  ) : null}
+                  {selectedRun.branch || selectedRun.plan || selectedRun.workflow ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Branch lineage</span>
+                        <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                          {selectedRun.branch?.createdByAction ?? "launch"}
+                        </span>
+                      </div>
+                      <p>
+                        root {selectedRun.branch?.rootConversationId ?? selectedRun.conversationId} · parent run{" "}
+                        {selectedRun.branch?.parentRunId ?? "none"}
+                      </p>
+                      {!isConversationReadOnly ? (
+                        <div className="actions">
+                          <button className="secondary" type="button" disabled={isConversationActionPending("branch")} onClick={() => void handleCreateRunBranch(selectedRun.id)}>
+                            {isConversationActionPending("branch") ? "Branching..." : "Create branch"}
+                          </button>
+                        </div>
+                      ) : null}
+                    </article>
+                  ) : null}
+                  {selectedRun.internalNotes.length > 0 ? (
+                    <article className="chat-bubble assistant">
+                      <div className="chat-bubble-meta">
+                        <span className="chat-bubble-label">Internal notes</span>
+                        <span className={`chat-bubble-status status-${selectedRun.status}`}>
+                          hidden from shares
+                        </span>
+                      </div>
+                      <ul className="timeline-list">
+                        {selectedRun.internalNotes.map((note) => (
+                          <li className="timeline-item" key={note.id}>
+                            <strong>{new Date(note.createdAt).toLocaleString()}</strong>
+                            <p>{note.summary}</p>
+                          </li>
+                        ))}
+                      </ul>
                     </article>
                   ) : null}
                   <WorkspaceCommentThread

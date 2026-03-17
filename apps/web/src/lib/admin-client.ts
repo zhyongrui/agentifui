@@ -43,6 +43,36 @@ import type {
   KnowledgeSourceListResponse,
   KnowledgeSourceStatusUpdateRequest,
   KnowledgeSourceStatusUpdateResponse,
+  WorkflowDefinitionCreateRequest,
+  WorkflowDefinitionCreateResponse,
+  WorkflowDefinitionDryRunRequest,
+  WorkflowDefinitionDryRunResponse,
+  WorkflowDefinitionExportResponse,
+  WorkflowDefinitionImportRequest,
+  WorkflowDefinitionImportResponse,
+  WorkflowDefinitionListResponse,
+  WorkflowDefinitionPermissionsUpdateRequest,
+  WorkflowDefinitionPermissionsUpdateResponse,
+  WorkflowDefinitionPublishRequest,
+  WorkflowDefinitionPublishResponse,
+  WorkflowDefinitionRollbackRequest,
+  WorkflowDefinitionRollbackResponse,
+  WorkflowDefinitionUpdateRequest,
+  WorkflowDefinitionUpdateResponse,
+} from '@agentifui/shared';
+import type {
+  ConnectorCreateRequest,
+  ConnectorCreateResponse,
+  ConnectorCredentialRotateRequest,
+  ConnectorCredentialRotateResponse,
+  ConnectorDeleteResponse,
+  ConnectorHealthResponse,
+  ConnectorListResponse,
+  ConnectorStatusUpdateRequest,
+  ConnectorStatusUpdateResponse,
+  ConnectorSyncJobsResponse,
+  ConnectorSyncQueueResponse,
+  ConnectorUpdateCheckpointRequest,
 } from '@agentifui/shared';
 
 const GATEWAY_PROXY_BASE_PATH = '/api/gateway';
@@ -269,6 +299,224 @@ export async function updateAdminSourceStatus(
     {
       method: 'PUT',
       body: payload,
+    }
+  );
+}
+
+export async function fetchAdminWorkflows(
+  sessionToken: string
+): Promise<WorkflowDefinitionListResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionListResponse>('/admin/workflows', sessionToken);
+}
+
+export async function createAdminWorkflow(
+  sessionToken: string,
+  payload: WorkflowDefinitionCreateRequest
+): Promise<WorkflowDefinitionCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionCreateResponse>('/admin/workflows', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function updateAdminWorkflow(
+  sessionToken: string,
+  workflowId: string,
+  payload: WorkflowDefinitionUpdateRequest
+): Promise<WorkflowDefinitionUpdateResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionUpdateResponse>(
+    `/admin/workflows/${workflowId}`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function publishAdminWorkflow(
+  sessionToken: string,
+  workflowId: string,
+  payload: WorkflowDefinitionPublishRequest
+): Promise<WorkflowDefinitionPublishResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionPublishResponse>(
+    `/admin/workflows/${workflowId}/publish`,
+    sessionToken,
+    {
+      method: 'POST',
+      body: payload,
+    }
+  );
+}
+
+export async function rollbackAdminWorkflow(
+  sessionToken: string,
+  workflowId: string,
+  payload: WorkflowDefinitionRollbackRequest
+): Promise<WorkflowDefinitionRollbackResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionRollbackResponse>(
+    `/admin/workflows/${workflowId}/rollback`,
+    sessionToken,
+    {
+      method: 'POST',
+      body: payload,
+    }
+  );
+}
+
+export async function updateAdminWorkflowPermissions(
+  sessionToken: string,
+  workflowId: string,
+  payload: WorkflowDefinitionPermissionsUpdateRequest
+): Promise<WorkflowDefinitionPermissionsUpdateResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionPermissionsUpdateResponse>(
+    `/admin/workflows/${workflowId}/permissions`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function dryRunAdminWorkflow(
+  sessionToken: string,
+  workflowId: string,
+  payload: WorkflowDefinitionDryRunRequest
+): Promise<WorkflowDefinitionDryRunResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionDryRunResponse>(
+    `/admin/workflows/${workflowId}/dry-run`,
+    sessionToken,
+    {
+      method: 'POST',
+      body: payload,
+    }
+  );
+}
+
+export async function exportAdminWorkflow(
+  sessionToken: string,
+  workflowId: string
+): Promise<WorkflowDefinitionExportResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionExportResponse>(
+    `/admin/workflows/${workflowId}/export`,
+    sessionToken
+  );
+}
+
+export async function importAdminWorkflow(
+  sessionToken: string,
+  payload: WorkflowDefinitionImportRequest
+): Promise<WorkflowDefinitionImportResponse | AdminErrorResponse> {
+  return fetchAdminJson<WorkflowDefinitionImportResponse>('/admin/workflows/import', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function fetchAdminConnectors(
+  sessionToken: string
+): Promise<ConnectorListResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorListResponse>('/admin/connectors', sessionToken);
+}
+
+export async function fetchAdminConnectorHealth(
+  sessionToken: string
+): Promise<ConnectorHealthResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorHealthResponse>('/admin/connectors/health', sessionToken);
+}
+
+export async function createAdminConnector(
+  sessionToken: string,
+  payload: ConnectorCreateRequest
+): Promise<ConnectorCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorCreateResponse>('/admin/connectors', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function queueAdminConnectorSync(
+  sessionToken: string,
+  connectorId: string,
+  payload: {
+    checkpointCursor?: string | null;
+  }
+): Promise<ConnectorSyncQueueResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorSyncQueueResponse>(
+    `/admin/connectors/${connectorId}/sync-jobs`,
+    sessionToken,
+    {
+      method: 'POST',
+      body: payload,
+    }
+  );
+}
+
+export async function fetchAdminConnectorSyncJobs(
+  sessionToken: string,
+  connectorId: string
+): Promise<ConnectorSyncJobsResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorSyncJobsResponse>(
+    `/admin/connectors/${connectorId}/sync-jobs`,
+    sessionToken
+  );
+}
+
+export async function updateAdminConnectorCheckpoint(
+  sessionToken: string,
+  connectorId: string,
+  payload: ConnectorUpdateCheckpointRequest
+): Promise<ConnectorCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorCreateResponse>(
+    `/admin/connectors/${connectorId}/checkpoint`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function updateAdminConnectorStatus(
+  sessionToken: string,
+  connectorId: string,
+  payload: ConnectorStatusUpdateRequest
+): Promise<ConnectorStatusUpdateResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorStatusUpdateResponse>(
+    `/admin/connectors/${connectorId}/status`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function rotateAdminConnectorCredential(
+  sessionToken: string,
+  connectorId: string,
+  payload: ConnectorCredentialRotateRequest
+): Promise<ConnectorCredentialRotateResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorCredentialRotateResponse>(
+    `/admin/connectors/${connectorId}/credentials`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
+  );
+}
+
+export async function deleteAdminConnector(
+  sessionToken: string,
+  connectorId: string
+): Promise<ConnectorDeleteResponse | AdminErrorResponse> {
+  return fetchAdminJson<ConnectorDeleteResponse>(
+    `/admin/connectors/${connectorId}`,
+    sessionToken,
+    {
+      method: 'DELETE',
     }
   );
 }

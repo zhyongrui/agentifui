@@ -4,14 +4,17 @@ import type { AdminErrorCode } from "@agentifui/shared/admin";
 import type { AuthUser } from "@agentifui/shared/auth";
 import type {
   ConnectorCheckpoint,
+  ConnectorCredentialRotateRequest,
   ConnectorCreateRequest,
   ConnectorDocumentProvenance,
   ConnectorRecord,
   ConnectorSyncJob,
   ConnectorQueueSyncRequest,
+  ConnectorStatusUpdateRequest,
   ConnectorUpdateCheckpointRequest,
 } from "@agentifui/shared";
 
+import { buildConnectorHealth } from "./connector-health.js";
 import { WORKSPACE_GROUPS } from "./workspace-catalog-fixtures.js";
 
 type ConnectorMutationError = {
@@ -53,6 +56,20 @@ export type ConnectorService = {
     connectorId: string,
     input: ConnectorUpdateCheckpointRequest,
   ): Promise<ConnectorMutationResult<ConnectorRecord>> | ConnectorMutationResult<ConnectorRecord>;
+  updateConnectorStatusForUser(
+    user: AuthUser,
+    connectorId: string,
+    input: ConnectorStatusUpdateRequest,
+  ): Promise<ConnectorMutationResult<ConnectorRecord>> | ConnectorMutationResult<ConnectorRecord>;
+  rotateConnectorCredentialForUser(
+    user: AuthUser,
+    connectorId: string,
+    input: ConnectorCredentialRotateRequest,
+  ): Promise<ConnectorMutationResult<ConnectorRecord>> | ConnectorMutationResult<ConnectorRecord>;
+  deleteConnectorForUser(
+    user: AuthUser,
+    connectorId: string,
+  ): Promise<ConnectorMutationResult<{ connectorId: string; deleted: true }>> | ConnectorMutationResult<{ connectorId: string; deleted: true }>;
 };
 
 function nowIso() {
@@ -90,6 +107,19 @@ function hashSecret(secret: string | null) {
   return createHash("sha256").update(secret).digest("hex");
 }
 
+function decorateConnector(
+  connector: ConnectorRecord,
+  jobs: ConnectorSyncJob[],
+): ConnectorRecord {
+  return {
+    ...connector,
+    health: buildConnectorHealth({
+      connector,
+      jobs,
+    }),
+  };
+}
+
 export function createConnectorService(): ConnectorService {
   const connectors: ConnectorRecord[] = [];
   const credentials = new Map<string, { secretHash: string | null }>();
@@ -100,6 +130,7 @@ export function createConnectorService(): ConnectorService {
     listConnectorsForUser(user) {
       return connectors
         .filter((connector) => connector.tenantId === user.tenantId)
+        .map((connector) => decorateConnector(connector, jobs.get(connector.id) ?? []))
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     },
     createConnectorForUser(user, input) {
@@ -160,6 +191,18 @@ export function createConnectorService(): ConnectorService {
         cadenceMinutes: input.cadenceMinutes,
         lastSyncedAt: null,
         checkpoint: buildCheckpoint(),
+        health: {
+          severity: "healthy",
+          issues: [],
+          failureSummary: {
+            lastSyncStatus: null,
+            lastFailureAt: null,
+            lastFailureMessage: null,
+            totalFailures: 0,
+            hasPartialFailures: false,
+          },
+          staleSince: null,
+        },
         createdAt,
         updatedAt: createdAt,
       };
@@ -173,7 +216,7 @@ export function createConnectorService(): ConnectorService {
 
       return {
         ok: true,
-        data: connector,
+        data: decorateConnector(connector, []),
       };
     },
     queueSyncJobForUser(user, connectorId, input) {
@@ -191,37 +234,56 @@ export function createConnectorService(): ConnectorService {
         };
       }
 
+      if (connector.status === "revoked") {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "ADMIN_CONFLICT",
+          message: "Revoked connectors must rotate credentials before syncing again.",
+        };
+      }
+
       const createdAt = nowIso();
       const checkpointBefore = connector.checkpoint;
       const checkpointAfter = buildCheckpoint({
         cursor: input.checkpointCursor ?? connector.checkpoint.cursor,
         updatedAt: connector.checkpoint.updatedAt ?? createdAt,
       });
+      const syncStatus = input.simulateStatus ?? "queued";
+      const summary = {
+        createdSources: input.summaryOverride?.createdSources ?? (syncStatus === "succeeded" ? 1 : 0),
+        updatedSources: input.summaryOverride?.updatedSources ?? 0,
+        skippedSources: input.summaryOverride?.skippedSources ?? 0,
+        failedSources:
+          input.summaryOverride?.failedSources ??
+          (syncStatus === "failed" || syncStatus === "partial_failure" ? 1 : 0),
+      };
       const job: ConnectorSyncJob = {
         id: `sync_${randomUUID()}`,
         tenantId: user.tenantId,
         connectorId,
-        status: "queued",
-        startedAt: null,
-        finishedAt: null,
+        status: syncStatus,
+        startedAt: syncStatus === "queued" ? null : createdAt,
+        finishedAt:
+          syncStatus === "queued" || syncStatus === "running" ? null : createdAt,
         requestedByUserId: input.requestedByUserId ?? user.id,
         checkpointBefore,
         checkpointAfter,
-        summary: {
-          createdSources: 0,
-          updatedSources: 0,
-          skippedSources: 0,
-          failedSources: 0,
-        },
-        error: null,
+        summary,
+        error: input.simulateError ?? null,
         createdAt,
       };
 
       jobs.set(connectorId, [job, ...(jobs.get(connectorId) ?? [])]);
       connector.updatedAt = createdAt;
       connector.checkpoint = checkpointAfter;
+      if (syncStatus === "succeeded" || syncStatus === "partial_failure") {
+        connector.lastSyncedAt = createdAt;
+      }
 
       const connectorProvenance = provenance.get(connectorId) ?? [];
+      const externalDocumentId =
+        input.externalDocumentId ?? `${connector.kind}:${connectorId}:primary`;
 
       if (connectorProvenance.length === 0) {
         connectorProvenance.push({
@@ -233,19 +295,54 @@ export function createConnectorService(): ConnectorService {
             connector.kind === "file_drop" || connector.kind === "google_drive"
               ? "file"
               : "url",
-          externalDocumentId: `${connector.kind}:${connectorId}:primary`,
-          externalUpdatedAt: null,
+          externalDocumentId,
+          externalUpdatedAt: input.externalUpdatedAt ?? null,
           lastSyncJobId: job.id,
-          lastSyncedAt: null,
+          lastSyncedAt:
+            syncStatus === "succeeded" || syncStatus === "partial_failure"
+              ? createdAt
+              : null,
           createdAt,
           updatedAt: createdAt,
         });
-      } else if (connectorProvenance[0]) {
-        connectorProvenance[0] = {
-          ...connectorProvenance[0],
+      } else {
+        const index = connectorProvenance.findIndex(
+          (entry) => entry.externalDocumentId === externalDocumentId,
+        );
+        const current: ConnectorDocumentProvenance =
+          index >= 0 && connectorProvenance[index]
+            ? connectorProvenance[index]
+            : {
+                id: `prov_${randomUUID()}`,
+                tenantId: user.tenantId,
+                connectorId,
+                knowledgeSourceId: `src_${connectorId}`,
+                sourceKind:
+                  connector.kind === "file_drop" || connector.kind === "google_drive"
+                    ? "file"
+                    : "url",
+                externalDocumentId,
+                externalUpdatedAt: null,
+                lastSyncJobId: null,
+                lastSyncedAt: null,
+                createdAt,
+                updatedAt: createdAt,
+              };
+        const next: ConnectorDocumentProvenance = {
+          ...current,
+          externalUpdatedAt: input.externalUpdatedAt ?? current.externalUpdatedAt,
           lastSyncJobId: job.id,
+          lastSyncedAt:
+            syncStatus === "succeeded" || syncStatus === "partial_failure"
+              ? createdAt
+              : current.lastSyncedAt,
           updatedAt: createdAt,
         };
+        if (index >= 0) {
+          connectorProvenance[index] = next;
+        } else {
+          connectorProvenance.unshift(next);
+        }
       }
 
       provenance.set(connectorId, connectorProvenance);
@@ -319,7 +416,90 @@ export function createConnectorService(): ConnectorService {
 
       return {
         ok: true,
-        data: connector,
+        data: decorateConnector(connector, jobs.get(connectorId) ?? []),
+      };
+    },
+    updateConnectorStatusForUser(user, connectorId, input) {
+      const connector = connectors.find(
+        (candidate) =>
+          candidate.id === connectorId && candidate.tenantId === user.tenantId,
+      );
+
+      if (!connector) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "ADMIN_NOT_FOUND",
+          message: "The connector does not exist.",
+        };
+      }
+
+      const updatedAt = nowIso();
+      connector.status = input.status;
+      connector.auth.status = input.status;
+      connector.updatedAt = updatedAt;
+
+      return {
+        ok: true,
+        data: decorateConnector(connector, jobs.get(connectorId) ?? []),
+      };
+    },
+    rotateConnectorCredentialForUser(user, connectorId, input) {
+      const connector = connectors.find(
+        (candidate) =>
+          candidate.id === connectorId && candidate.tenantId === user.tenantId,
+      );
+
+      if (!connector) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "ADMIN_NOT_FOUND",
+          message: "The connector does not exist.",
+        };
+      }
+
+      const updatedAt = nowIso();
+      credentials.set(connectorId, {
+        secretHash: hashSecret(input.authSecret),
+      });
+      connector.status = "active";
+      connector.auth.status = "active";
+      connector.auth.lastValidatedAt = updatedAt;
+      connector.auth.lastRotatedAt = updatedAt;
+      connector.updatedAt = updatedAt;
+
+      return {
+        ok: true,
+        data: decorateConnector(connector, jobs.get(connectorId) ?? []),
+      };
+    },
+    deleteConnectorForUser(user, connectorId) {
+      const index = connectors.findIndex(
+        (candidate) =>
+          candidate.id === connectorId && candidate.tenantId === user.tenantId,
+      );
+
+      if (index < 0) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "ADMIN_NOT_FOUND",
+          message: "The connector does not exist.",
+        };
+      }
+
+      connectors.splice(index, 1);
+      credentials.delete(connectorId);
+      jobs.delete(connectorId);
+      provenance.delete(connectorId);
+
+      return {
+        ok: true,
+        data: {
+          connectorId,
+          deleted: true as const,
+        },
       };
     },
   };

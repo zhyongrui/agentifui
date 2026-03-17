@@ -25,3 +25,4 @@ export * from "./knowledge/index.js";
 export * from "./tools/index.js";
 export * from "./providers/index.js";
 export * from "./connectors/index.js";
+export * from "./workflows/index.js";

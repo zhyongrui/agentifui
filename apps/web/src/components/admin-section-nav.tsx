@@ -60,8 +60,16 @@ export function AdminSectionNav() {
       label: messages.adminNav.apps,
     },
     {
+      href: '/admin/connectors',
+      label: messages.adminNav.connectors,
+    },
+    {
       href: '/admin/sources',
       label: messages.adminNav.sources,
+    },
+    {
+      href: '/admin/workflows',
+      label: messages.adminNav.workflows,
     },
     {
       href: '/admin/audit',

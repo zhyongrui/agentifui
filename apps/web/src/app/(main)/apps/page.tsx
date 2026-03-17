@@ -12,6 +12,7 @@ import {
   type WorkspaceCatalog,
   type WorkspaceGroup,
   type WorkspaceNotification,
+  type WorkspaceSourceStatusItem,
 } from '@agentifui/shared/apps';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -23,6 +24,7 @@ import {
 } from '../../../lib/apps-workspace';
 import {
   fetchWorkspaceNotifications,
+  fetchWorkspaceSourceStatus,
   fetchWorkspaceCatalog,
   launchWorkspaceApp,
   markWorkspaceNotificationRead,
@@ -354,6 +356,7 @@ export default function AppsPage() {
   const [notifications, setNotifications] = useState<WorkspaceNotification[]>([]);
   const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
   const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
+  const [sourceStatusItems, setSourceStatusItems] = useState<WorkspaceSourceStatusItem[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [activeGroupId, setActiveGroupId] = useState('');
@@ -386,6 +389,7 @@ export default function AppsPage() {
       setActiveGroupId('');
       setNotifications([]);
       setMarkingNotificationId(null);
+      setSourceStatusItems([]);
       return;
     }
 
@@ -398,8 +402,9 @@ export default function AppsPage() {
     Promise.all([
       fetchWorkspaceCatalog(session.sessionToken),
       fetchWorkspaceNotifications(session.sessionToken),
+      fetchWorkspaceSourceStatus(session.sessionToken),
     ])
-      .then(([catalogResult, notificationsResult]) => {
+      .then(([catalogResult, notificationsResult, sourceStatusResult]) => {
         if (isCancelled) {
           return;
         }
@@ -449,6 +454,12 @@ export default function AppsPage() {
         }
 
         setNotifications(notificationsResult.data.items);
+
+        if (sourceStatusResult.ok) {
+          setSourceStatusItems(sourceStatusResult.data.items);
+        } else {
+          setSourceStatusItems([]);
+        }
       })
       .catch(() => {
         if (isCancelled) {
@@ -457,6 +468,7 @@ export default function AppsPage() {
 
         setWorkspace(null);
         setNotifications([]);
+        setSourceStatusItems([]);
         setWorkspaceError(appsCopy.workspaceLoadFailed);
       })
       .finally(() => {
@@ -504,6 +516,9 @@ export default function AppsPage() {
     search: deferredSearch,
   });
   const hasAdminPreview = localizedApps.some(app => app.id === 'app_tenant_control');
+  const currentGroupSourceStatuses = sourceStatusItems.filter(
+    item => item.scope === 'tenant' || item.groupId === currentActiveGroup.id
+  );
 
   function applyWorkspacePreferences(nextPreferences: {
     favoriteAppIds: string[];
@@ -769,6 +784,32 @@ export default function AppsPage() {
             </div>
           ))}
         </div>
+      ) : null}
+
+      {currentGroupSourceStatuses.length > 0 ? (
+        <section className="workspace-section">
+          <div className="section-header">
+            <div>
+              <h2>来源状态</h2>
+              <p>当前群组下存在需要处理的连接器来源，请优先处理 stale、revoked 或失败同步。</p>
+            </div>
+            <span className="workspace-count">{currentGroupSourceStatuses.length}</span>
+          </div>
+          <div className="stack">
+            {currentGroupSourceStatuses.map(item => (
+              <article className="card stack" key={item.id}>
+                <div className="section-header">
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p>{item.connectorTitle} · {item.connectorKind} · {item.connectorStatus}</p>
+                  </div>
+                  <span className={`status-chip status-${item.severity}`}>{item.reason}</span>
+                </div>
+                <p className="app-card-note">{item.summary}</p>
+              </article>
+            ))}
+          </div>
+        </section>
       ) : null}
 
       <WorkspaceSection

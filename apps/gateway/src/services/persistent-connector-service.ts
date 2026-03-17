@@ -4,15 +4,18 @@ import type { DatabaseClient } from "@agentifui/db";
 import type { AuthUser } from "@agentifui/shared/auth";
 import type {
   ConnectorCheckpoint,
+  ConnectorCredentialRotateRequest,
   ConnectorCreateRequest,
   ConnectorDocumentProvenance,
   ConnectorRecord,
   ConnectorQueueSyncRequest,
   ConnectorSyncJob,
+  ConnectorStatusUpdateRequest,
   ConnectorUpdateCheckpointRequest,
   KnowledgeSourceKind,
 } from "@agentifui/shared";
 
+import { buildConnectorHealth } from "./connector-health.js";
 import { WORKSPACE_GROUPS } from "./workspace-catalog-fixtures.js";
 import type { ConnectorService } from "./connector-service.js";
 
@@ -120,6 +123,18 @@ function toConnector(row: ConnectorRow): ConnectorRecord {
       cursor: row.checkpoint_cursor,
       updatedAt: toIso(row.checkpoint_updated_at),
     },
+    health: {
+      severity: "healthy",
+      issues: [],
+      failureSummary: {
+        lastSyncStatus: null,
+        lastFailureAt: null,
+        lastFailureMessage: null,
+        totalFailures: 0,
+        hasPartialFailures: false,
+      },
+      staleSince: null,
+    },
     createdAt: toIso(row.created_at) ?? new Date().toISOString(),
     updatedAt: toIso(row.updated_at) ?? new Date().toISOString(),
   };
@@ -215,7 +230,50 @@ async function getConnector(database: DatabaseClient, tenantId: string, connecto
     limit 1
   `;
 
-  return row ? toConnector(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const connector = toConnector(row);
+  const jobs = await listSyncJobsForConnector(database, tenantId, connector.id);
+
+  return {
+    ...connector,
+    health: buildConnectorHealth({
+      connector,
+      jobs,
+    }),
+  };
+}
+
+async function listSyncJobsForConnector(
+  database: DatabaseClient,
+  tenantId: string,
+  connectorId: string,
+) {
+  const rows = await database<SyncJobRow[]>`
+    select
+      id,
+      tenant_id,
+      connector_id,
+      status,
+      started_at,
+      finished_at,
+      requested_by_user_id,
+      checkpoint_before_cursor,
+      checkpoint_before_updated_at,
+      checkpoint_after_cursor,
+      checkpoint_after_updated_at,
+      summary,
+      error,
+      created_at
+    from knowledge_connector_sync_jobs
+    where tenant_id = ${tenantId}
+      and connector_id = ${connectorId}
+    order by created_at desc
+  `;
+
+  return rows.map(toSyncJob);
 }
 
 export function createPersistentConnectorService(database: DatabaseClient): ConnectorService {
@@ -246,7 +304,20 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
         order by c.updated_at desc
       `;
 
-      return rows.map(toConnector);
+      return Promise.all(
+        rows.map(async (row) => {
+          const connector = toConnector(row);
+          const jobs = await listSyncJobsForConnector(database, user.tenantId, connector.id);
+
+          return {
+            ...connector,
+            health: buildConnectorHealth({
+              connector,
+              jobs,
+            }),
+          };
+        }),
+      );
     },
     async createConnectorForUser(user, input) {
       const title = normalizeTitle(input.title);
@@ -371,10 +442,31 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
         };
       }
 
+      if (connector.status === "revoked") {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "ADMIN_CONFLICT",
+          message: "Revoked connectors must rotate credentials before syncing again.",
+        };
+      }
+
       const jobId = `sync_${randomUUID()}`;
+      const createdAt = new Date().toISOString();
+      const syncStatus = input.simulateStatus ?? "queued";
+      const summary = {
+        createdSources: input.summaryOverride?.createdSources ?? (syncStatus === "succeeded" ? 1 : 0),
+        updatedSources: input.summaryOverride?.updatedSources ?? 0,
+        skippedSources: input.summaryOverride?.skippedSources ?? 0,
+        failedSources:
+          input.summaryOverride?.failedSources ??
+          (syncStatus === "failed" || syncStatus === "partial_failure" ? 1 : 0),
+      };
+      const externalDocumentId =
+        input.externalDocumentId ?? `${connector.kind}:${connectorId}:primary`;
       const checkpointAfter: ConnectorCheckpoint = {
         cursor: input.checkpointCursor ?? connector.checkpoint.cursor,
-        updatedAt: connector.checkpoint.updatedAt ?? new Date().toISOString(),
+        updatedAt: input.externalUpdatedAt ?? connector.checkpoint.updatedAt ?? createdAt,
       };
 
       await database`
@@ -384,11 +476,14 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
           connector_id,
           requested_by_user_id,
           status,
+          started_at,
+          finished_at,
           checkpoint_before_cursor,
           checkpoint_before_updated_at,
           checkpoint_after_cursor,
           checkpoint_after_updated_at,
           summary,
+          error,
           created_at
         )
         values (
@@ -396,17 +491,15 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
           ${user.tenantId},
           ${connectorId},
           ${input.requestedByUserId ?? user.id},
-          ${"queued"},
+          ${syncStatus},
+          ${syncStatus === "queued" ? null : createdAt},
+          ${syncStatus === "queued" || syncStatus === "running" ? null : createdAt},
           ${connector.checkpoint.cursor},
           ${connector.checkpoint.updatedAt},
           ${checkpointAfter.cursor},
           ${checkpointAfter.updatedAt},
-          ${JSON.stringify({
-            createdSources: 0,
-            updatedSources: 0,
-            skippedSources: 0,
-            failedSources: 0,
-          })}::jsonb,
+          ${summary}::jsonb,
+          ${input.simulateError ?? null},
           now()
         )
       `;
@@ -415,6 +508,10 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
         update knowledge_connectors
         set checkpoint_cursor = ${checkpointAfter.cursor},
             checkpoint_updated_at = ${checkpointAfter.updatedAt},
+            last_synced_at = case
+              when ${syncStatus} in ('succeeded', 'partial_failure') then ${createdAt}::timestamptz
+              else last_synced_at
+            end,
             updated_at = now()
         where tenant_id = ${user.tenantId}
           and id = ${connectorId}
@@ -425,7 +522,7 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
         from knowledge_connector_document_provenance
         where tenant_id = ${user.tenantId}
           and connector_id = ${connectorId}
-          and external_document_id = ${`${connector.kind}:${connectorId}:primary`}
+          and external_document_id = ${externalDocumentId}
         limit 1
       `;
 
@@ -491,10 +588,10 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
             ${user.tenantId},
             ${connectorId},
             ${sourceId},
-            ${`${connector.kind}:${connectorId}:primary`},
-            ${null},
+            ${externalDocumentId},
+            ${input.externalUpdatedAt ?? null},
             ${jobId},
-            ${null},
+            ${syncStatus === "succeeded" || syncStatus === "partial_failure" ? createdAt : null},
             now(),
             now()
           )
@@ -503,6 +600,11 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
         await database`
           update knowledge_connector_document_provenance
           set last_sync_job_id = ${jobId},
+              external_updated_at = ${input.externalUpdatedAt ?? null},
+              last_synced_at = case
+                when ${syncStatus} in ('succeeded', 'partial_failure') then ${createdAt}::timestamptz
+                else last_synced_at
+              end,
               updated_at = now()
           where id = ${existing.id}
         `;
@@ -644,6 +746,133 @@ export function createPersistentConnectorService(database: DatabaseClient): Conn
       return {
         ok: true,
         data: updated,
+      };
+    },
+    async updateConnectorStatusForUser(user, connectorId, input) {
+      const connector = await getConnector(database, user.tenantId, connectorId);
+
+      if (!connector) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "ADMIN_NOT_FOUND",
+          message: "The connector does not exist.",
+        };
+      }
+
+      await database`
+        update knowledge_connectors
+        set status = ${input.status},
+            updated_at = now()
+        where tenant_id = ${user.tenantId}
+          and id = ${connectorId}
+      `;
+
+      await database`
+        update knowledge_connector_credentials
+        set status = ${input.status},
+            updated_at = now()
+        where tenant_id = ${user.tenantId}
+          and connector_id = ${connectorId}
+      `;
+
+      const updated = await getConnector(database, user.tenantId, connectorId);
+
+      if (!updated) {
+        throw new Error("connector status update did not persist");
+      }
+
+      return {
+        ok: true,
+        data: updated,
+      };
+    },
+    async rotateConnectorCredentialForUser(user, connectorId, input) {
+      const connector = await getConnector(database, user.tenantId, connectorId);
+
+      if (!connector) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "ADMIN_NOT_FOUND",
+          message: "The connector does not exist.",
+        };
+      }
+
+      const rotatedAt = new Date().toISOString();
+
+      await database`
+        update knowledge_connectors
+        set status = ${"active"},
+            updated_at = now()
+        where tenant_id = ${user.tenantId}
+          and id = ${connectorId}
+      `;
+
+      await database`
+        update knowledge_connector_credentials
+        set secret_hash = ${hashSecret(input.authSecret)},
+            status = ${"active"},
+            last_validated_at = ${rotatedAt},
+            last_rotated_at = ${rotatedAt},
+            updated_at = now()
+        where tenant_id = ${user.tenantId}
+          and connector_id = ${connectorId}
+      `;
+
+      const updated = await getConnector(database, user.tenantId, connectorId);
+
+      if (!updated) {
+        throw new Error("connector credential rotation did not persist");
+      }
+
+      return {
+        ok: true,
+        data: updated,
+      };
+    },
+    async deleteConnectorForUser(user, connectorId) {
+      const connector = await getConnector(database, user.tenantId, connectorId);
+
+      if (!connector) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "ADMIN_NOT_FOUND",
+          message: "The connector does not exist.",
+        };
+      }
+
+      await database`
+        delete from knowledge_connector_document_provenance
+        where tenant_id = ${user.tenantId}
+          and connector_id = ${connectorId}
+      `;
+
+      await database`
+        delete from knowledge_connector_sync_jobs
+        where tenant_id = ${user.tenantId}
+          and connector_id = ${connectorId}
+      `;
+
+      await database`
+        delete from knowledge_connector_credentials
+        where tenant_id = ${user.tenantId}
+          and connector_id = ${connectorId}
+      `;
+
+      await database`
+        delete from knowledge_connectors
+        where tenant_id = ${user.tenantId}
+          and id = ${connectorId}
+      `;
+
+      return {
+        ok: true,
+        data: {
+          connectorId,
+          deleted: true,
+        },
       };
     },
   };

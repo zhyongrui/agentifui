@@ -31,6 +31,31 @@ export type ConnectorCheckpoint = {
   updatedAt: string | null;
 };
 
+export type ConnectorHealthSeverity = "healthy" | "warning" | "critical";
+
+export type ConnectorHealthIssueCode =
+  | "stale_sync"
+  | "paused"
+  | "revoked"
+  | "sync_failed"
+  | "sync_partial_failure";
+
+export type ConnectorHealthIssue = {
+  code: ConnectorHealthIssueCode;
+  severity: ConnectorHealthSeverity;
+  summary: string;
+  detail: string | null;
+  recordedAt: string;
+};
+
+export type ConnectorFailureSummary = {
+  lastSyncStatus: ConnectorSyncStatus | null;
+  lastFailureAt: string | null;
+  lastFailureMessage: string | null;
+  totalFailures: number;
+  hasPartialFailures: boolean;
+};
+
 export type ConnectorRecord = {
   id: string;
   tenantId: string;
@@ -43,6 +68,12 @@ export type ConnectorRecord = {
   cadenceMinutes: number;
   lastSyncedAt: string | null;
   checkpoint: ConnectorCheckpoint;
+  health: {
+    severity: ConnectorHealthSeverity;
+    issues: ConnectorHealthIssue[];
+    failureSummary: ConnectorFailureSummary;
+    staleSince: string | null;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -91,6 +122,16 @@ export type ConnectorCreateRequest = {
   authSecret: string | null;
 };
 
+export type ConnectorStatusUpdateRequest = {
+  status: ConnectorStatus;
+  reason?: string | null;
+};
+
+export type ConnectorCredentialRotateRequest = {
+  authSecret: string;
+  note?: string | null;
+};
+
 export type ConnectorUpdateCheckpointRequest = {
   cursor: string | null;
   updatedAt: string | null;
@@ -99,6 +140,12 @@ export type ConnectorUpdateCheckpointRequest = {
 export type ConnectorQueueSyncRequest = {
   requestedByUserId?: string | null;
   checkpointCursor?: string | null;
+  resumeFromJobId?: string | null;
+  simulateStatus?: ConnectorSyncStatus;
+  simulateError?: string | null;
+  externalDocumentId?: string | null;
+  externalUpdatedAt?: string | null;
+  summaryOverride?: Partial<ConnectorSyncJob["summary"]>;
 };
 
 export type ConnectorListResponse = {
@@ -119,6 +166,24 @@ export type ConnectorSyncQueueResponse = {
   data: ConnectorSyncJob;
 };
 
+export type ConnectorStatusUpdateResponse = {
+  ok: true;
+  data: ConnectorRecord;
+};
+
+export type ConnectorCredentialRotateResponse = {
+  ok: true;
+  data: ConnectorRecord;
+};
+
+export type ConnectorDeleteResponse = {
+  ok: true;
+  data: {
+    connectorId: string;
+    deleted: true;
+  };
+};
+
 export type ConnectorSyncJobsResponse = {
   ok: true;
   data: {
@@ -132,5 +197,14 @@ export type ConnectorProvenanceResponse = {
   data: {
     connectorId: string;
     provenance: ConnectorDocumentProvenance[];
+  };
+};
+
+export type ConnectorHealthResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    connectors: ConnectorRecord[];
+    counts: Record<ConnectorHealthIssueCode, number>;
   };
 };

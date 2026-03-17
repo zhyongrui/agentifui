@@ -4,10 +4,14 @@ import type {
   WorkspaceConversation,
   WorkspaceConversationAttachment,
   WorkspaceHitlStep,
+  WorkspaceInternalNote,
+  WorkspacePlanState,
   WorkspaceRuntimeCapabilities,
+  WorkspaceRunBranch,
   WorkspaceRunRuntime,
   WorkspaceSafetySignal,
   WorkspaceSourceBlock,
+  WorkspaceWorkflowState,
 } from "@agentifui/shared/apps";
 import type { ChatCompletionMessage } from "@agentifui/shared/chat";
 import type {
@@ -72,9 +76,12 @@ export type WorkspaceRuntimeInvocationFailure = {
 export type WorkspaceRuntimeInvocationOutput = {
   assistantText: string;
   artifacts?: WorkspaceArtifact[];
+  branch?: WorkspaceRunBranch | null;
   citations?: WorkspaceCitation[];
+  internalNotes?: WorkspaceInternalNote[];
   model?: string;
   pendingActions?: WorkspaceHitlStep[];
+  plan?: WorkspacePlanState | null;
   runtime: WorkspaceRunRuntime;
   safetySignals?: WorkspaceSafetySignal[];
   sourceBlocks?: WorkspaceSourceBlock[];
@@ -91,6 +98,7 @@ export type WorkspaceRuntimeInvocationOutput = {
     metadata?: Record<string, string>;
     isError?: boolean;
   }>;
+  workflow?: WorkspaceWorkflowState | null;
 };
 
 export type WorkspaceRuntimeInvocationResult =
@@ -738,6 +746,109 @@ function buildStructuredAssistantText(
   ].join("\n\n");
 }
 
+function buildStructuredPlanState(input: {
+  assistantText: string;
+  artifacts: WorkspaceArtifact[];
+  citations: WorkspaceCitation[];
+  createdAt: string;
+}): WorkspacePlanState {
+  const artifactSummaries = input.artifacts.map((artifact) => ({
+    id: artifact.id,
+    title: artifact.title,
+    kind: artifact.kind,
+    source: artifact.source,
+    status: artifact.status,
+    createdAt: artifact.createdAt,
+    updatedAt: artifact.updatedAt,
+    summary: artifact.summary,
+    mimeType: artifact.mimeType,
+    sizeBytes: artifact.sizeBytes,
+  }));
+  const steps: WorkspacePlanState["steps"] = [
+    {
+      id: "step_scope",
+      title: "Confirm scope and owners",
+      description: "Validate request intent, owners, and success criteria before execution.",
+      nodeType: "prompt" as const,
+      status: "in_progress" as const,
+      owner: "operator",
+      dependsOnStepIds: [],
+      startedAt: input.createdAt,
+      finishedAt: null,
+      internalSummary: input.assistantText.split("\n")[0] ?? null,
+      artifacts: [],
+      citations: input.citations.slice(0, 1),
+    },
+    {
+      id: "step_execute",
+      title: "Execute structured workflow",
+      description: "Run the ordered SOP stages and collect evidence.",
+      nodeType: "transform" as const,
+      status: "pending" as const,
+      owner: "agent",
+      dependsOnStepIds: ["step_scope"],
+      startedAt: null,
+      finishedAt: null,
+      internalSummary: null,
+      artifacts: artifactSummaries,
+      citations: input.citations.slice(0, 2),
+    },
+    {
+      id: "step_handoff",
+      title: "Review and handoff",
+      description: "Review follow-up checks, blockers, and final ownership before closeout.",
+      nodeType: "export" as const,
+      status: "pending" as const,
+      owner: "reviewer",
+      dependsOnStepIds: ["step_execute"],
+      startedAt: null,
+      finishedAt: null,
+      internalSummary: null,
+      artifacts: [],
+      citations: input.citations.slice(0, 1),
+    },
+  ];
+
+  return {
+    status: "in_progress",
+    activeStepId: "step_scope",
+    steps,
+  };
+}
+
+function buildStructuredWorkflowState(input: {
+  conversation: WorkspaceConversation;
+  createdAt: string;
+}): WorkspaceWorkflowState {
+  return {
+    definitionId: `workflow_${input.conversation.app.id}`,
+    versionId: `wfver_${input.conversation.app.id}_1`,
+    name: `${input.conversation.app.name} workflow`,
+    versionNumber: 1,
+    status: "running",
+    resumable: true,
+    currentStepId: "step_scope",
+    lastResumedAt: input.createdAt,
+    pausedAt: null,
+    resumedFromRunId: null,
+    runnerRoles: ["runner"],
+  };
+}
+
+function buildStructuredInternalNotes(input: {
+  assistantText: string;
+  createdAt: string;
+}): WorkspaceInternalNote[] {
+  return [
+    {
+      id: `note_${randomUUID()}`,
+      channel: "internal_redacted",
+      createdAt: input.createdAt,
+      summary: truncateArtifactText(input.assistantText, 120),
+    },
+  ];
+}
+
 function buildRuntimeMetadata(input: {
   adapter: WorkspaceRuntimeAdapterHealth;
   modelId: string;
@@ -824,6 +935,32 @@ function createPlaceholderAdapter(input: {
         runtimeInput: runtimeInput.runtimeInput,
       });
       const suggestedPrompts = buildSuggestedPrompts(latestPrompt);
+      const artifacts = buildAssistantArtifacts({
+        appName: runtimeInput.conversation.app.name,
+        assistantText,
+        createdAt,
+        latestPrompt,
+      });
+      const plan = input.structured
+        ? buildStructuredPlanState({
+            assistantText,
+            artifacts,
+            citations,
+            createdAt,
+          })
+        : null;
+      const workflow = input.structured
+        ? buildStructuredWorkflowState({
+            conversation: runtimeInput.conversation,
+            createdAt,
+          })
+        : null;
+      const internalNotes = input.structured
+        ? buildStructuredInternalNotes({
+            assistantText,
+            createdAt,
+          })
+        : [];
       const pendingActions =
         toolExecution?.pendingActions && toolExecution.pendingActions.length > 0
           ? toolExecution.pendingActions
@@ -839,15 +976,13 @@ function createPlaceholderAdapter(input: {
         ok: true,
         data: {
           assistantText,
-          artifacts: buildAssistantArtifacts({
-            appName: runtimeInput.conversation.app.name,
-            assistantText,
-            createdAt,
-            latestPrompt,
-          }),
+          artifacts,
+          branch: null,
           citations,
+          internalNotes,
           model: runtimeInput.requestedModel,
           pendingActions,
+          plan,
           runtime: {
             id: health.id,
             label: health.label,
@@ -860,6 +995,7 @@ function createPlaceholderAdapter(input: {
           suggestedPrompts,
           toolCalls,
           toolResults: toolExecution?.toolResults,
+          workflow,
         },
       };
     },

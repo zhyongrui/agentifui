@@ -31,6 +31,9 @@ export const schemaModules = [
   'workspace_comments',
   'knowledge_sources',
   'knowledge_source_chunks',
+  'workflow_definitions',
+  'workflow_definition_versions',
+  'workflow_definition_permissions',
   'workspace_app_launches',
   'workspace_conversation_shares',
 ] as const;
