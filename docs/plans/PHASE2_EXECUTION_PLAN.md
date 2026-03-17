@@ -178,7 +178,27 @@ Execution status:
 | completed | `P3-F-08` | alert rules 已覆盖 gateway error、degraded mode 和 backlog                                             |
 | completed | `P3-F-09` | deploy smoke 已覆盖 auth/workspace/chat/admin health                                                  |
 | completed | `P3-F-10` | forward-only migration / rollback-by-restore 指南已文档化                                             |
-| active    | `P3-F-11` | 下一项，补 blue/green 或 canary 发布策略说明                                                           |
+| completed | `P3-F-11` | blue/green / canary public release strategy note 已补齐                                                |
+| completed | `P3-F-12` | 这类宿主机的 browser runtime / Playwright caveat 已文档化                                             |
+| completed | `P3-G-01` | chat/admin/auth keyboard accessibility gap audit 已完成                                                |
+| completed | `P3-G-02` | transcript / artifact / HITL screen-reader 语义已补齐                                                 |
+| completed | `P3-G-03` | `/chat`、conversation detail 和 admin 表格的 mobile/tablet 布局已增强                                  |
+| completed | `P3-G-04` | artifact preview、run replay 和 admin surface skeleton state 已补齐                                    |
+| completed | `P3-G-05` | 首次对话、无 artifact run、无 audit tenant 的 empty state 已补齐                                       |
+| completed | `P3-G-06` | 长消息、代码块、表格溢出行为已收口                                                                     |
+| completed | `P3-G-07` | attachment upload progress / cancellation UX 已接入                                                    |
+| completed | `P3-G-08` | 中英文本地化 planning hook 和 i18n scope 标记已补齐                                                    |
+| completed | `P3-G-09` | narrow viewport / tablet landscape browser coverage 已补齐                                             |
+| completed | `P3-G-10` | UX / accessibility convention 文档已补齐                                                               |
+| completed | `P3-H-01` | persisted JSON field normalization audit script 已补齐                                                 |
+| completed | `P3-H-02` | 高风险大表 migration design note 已补齐                                                                |
+| completed | `P3-H-03` | fixture / seed version report 已补齐                                                                   |
+| completed | `P3-H-04` | non-reversible migration downgrade expectation 已文档化                                                |
+| completed | `P3-H-05` | cross-table integrity check 已补齐                                                                     |
+| completed | `P3-H-06` | restore 后 share/artifact route verification 已脚本化                                                  |
+| completed | `P3-H-07` | storage-growth reporting 已补齐                                                                        |
+| completed | `P3-H-08` | corrupted JSON / partial migration recovery checklist 已文档化                                         |
+| active    | `P3-H-09` | 下一项，补 production-like staging replay drill                                                        |
 
 ## 5. First Batch Definition
 
@@ -228,7 +248,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-F-11`
+- the active follow-on item is `P3-H-09`
 
 ## 6. Detailed Execution Notes
 
@@ -841,32 +861,32 @@ Legend:
 - [x] `P3-F-08` Add alerting thresholds for gateway errors, degraded mode, and queue backlogs
 - [x] `P3-F-09` Add deployment smoke scripts that verify auth, workspace launch, chat, and admin health
 - [x] `P3-F-10` Add migration rollback and forward-only safety guidelines
-- [ ] `P3-F-11` Add blue/green or canary deployment strategy notes for public releases
-- [ ] `P3-F-12` Document host-specific browser runtime and Playwright caveats for this server class
+- [x] `P3-F-11` Add blue/green or canary deployment strategy notes for public releases
+- [x] `P3-F-12` Document host-specific browser runtime and Playwright caveats for this server class
 
 ### 7.16 Future Delivery Queue: `P3-G` UX Polish, Accessibility, And Device Coverage
 
-- [ ] `P3-G-01` Audit chat, admin, and auth surfaces for keyboard accessibility gaps
-- [ ] `P3-G-02` Add screen-reader labels and semantics for transcript actions, artifacts, and HITL cards
-- [ ] `P3-G-03` Improve mobile/tablet layout for `/chat`, `/chat/[conversationId]`, and admin tables
-- [ ] `P3-G-04` Add loading/skeleton states for artifact preview, run replay, and admin analytics
-- [ ] `P3-G-05` Add empty-state guidance for first-run conversations, no-artifact runs, and no-audit tenants
-- [ ] `P3-G-06` Improve long-message rendering, wrapping, and code/table overflow behavior
-- [ ] `P3-G-07` Add upload progress and cancellation UX once richer file workflows exist
-- [ ] `P3-G-08` Add localization planning hooks for Chinese/English UI copy
-- [ ] `P3-G-09` Add browser/device coverage for narrow viewports and tablet landscape layouts
-- [ ] `P3-G-10` Document UX conventions so future sessions preserve visual and behavioral consistency
+- [x] `P3-G-01` Audit chat, admin, and auth surfaces for keyboard accessibility gaps
+- [x] `P3-G-02` Add screen-reader labels and semantics for transcript actions, artifacts, and HITL cards
+- [x] `P3-G-03` Improve mobile/tablet layout for `/chat`, `/chat/[conversationId]`, and admin tables
+- [x] `P3-G-04` Add loading/skeleton states for artifact preview, run replay, and admin analytics
+- [x] `P3-G-05` Add empty-state guidance for first-run conversations, no-artifact runs, and no-audit tenants
+- [x] `P3-G-06` Improve long-message rendering, wrapping, and code/table overflow behavior
+- [x] `P3-G-07` Add upload progress and cancellation UX once richer file workflows exist
+- [x] `P3-G-08` Add localization planning hooks for Chinese/English UI copy
+- [x] `P3-G-09` Add browser/device coverage for narrow viewports and tablet landscape layouts
+- [x] `P3-G-10` Document UX conventions so future sessions preserve visual and behavioral consistency
 
 ### 7.17 Future Delivery Queue: `P3-H` Data Lifecycle, Migrations, And Disaster Recovery
 
-- [ ] `P3-H-01` Audit every persisted JSON field for long-term normalization candidates
-- [ ] `P3-H-02` Add migration design notes for high-risk large-table changes
-- [ ] `P3-H-03` Add fixture/seed versioning so browser and persistence tests can evolve safely
-- [ ] `P3-H-04` Add explicit downgrade/rollback expectations for non-reversible migrations
-- [ ] `P3-H-05` Add data integrity checks for cross-table links between conversations, runs, artifacts, and audits
-- [ ] `P3-H-06` Add periodic verification that share links and artifact routes still resolve after backup restore
-- [ ] `P3-H-07` Add storage-growth reporting for conversation history, artifacts, and audit payloads
-- [ ] `P3-H-08` Add a formal recovery checklist for corrupted JSON rows or partially applied migrations
+- [x] `P3-H-01` Audit every persisted JSON field for long-term normalization candidates
+- [x] `P3-H-02` Add migration design notes for high-risk large-table changes
+- [x] `P3-H-03` Add fixture/seed versioning so browser and persistence tests can evolve safely
+- [x] `P3-H-04` Add explicit downgrade/rollback expectations for non-reversible migrations
+- [x] `P3-H-05` Add data integrity checks for cross-table links between conversations, runs, artifacts, and audits
+- [x] `P3-H-06` Add periodic verification that share links and artifact routes still resolve after backup restore
+- [x] `P3-H-07` Add storage-growth reporting for conversation history, artifacts, and audit payloads
+- [x] `P3-H-08` Add a formal recovery checklist for corrupted JSON rows or partially applied migrations
 - [ ] `P3-H-09` Add tests or scripted drills for replaying production-like data into a staging environment
 - [ ] `P3-H-10` Document what operational context must always be copied into the dev log for new sessions
 
