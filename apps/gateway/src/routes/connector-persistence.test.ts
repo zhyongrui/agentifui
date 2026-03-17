@@ -2,7 +2,9 @@ import type {
   ConnectorCreateResponse,
   ConnectorListResponse,
   ConnectorProvenanceResponse,
+  ConnectorStatusUpdateResponse,
   ConnectorSyncJobsResponse,
+  ConnectorSyncQueueResponse,
 } from "@agentifui/shared";
 import { describe, expect, it } from "vitest";
 
@@ -82,6 +84,37 @@ describe.sequential("persistent connectors", () => {
 
       expect(queue.statusCode).toBe(200);
 
+      const advancedQueue = await app.inject({
+        method: "POST",
+        url: `/admin/connectors/${connector.id}/sync-jobs/advanced`,
+        headers,
+        payload: {
+          simulateStatus: "partial_failure",
+          simulateError: "connector-throttled",
+          externalDocumentId: "confluence:policy:duplicate",
+          externalUpdatedAt: "2026-03-17T05:00:00.000Z",
+        },
+      });
+
+      expect(advancedQueue.statusCode).toBe(200);
+      expect((advancedQueue.json() as ConnectorSyncQueueResponse).data).toMatchObject({
+        status: "partial_failure",
+        error: "connector-throttled",
+      });
+
+      const revoke = await app.inject({
+        method: "PUT",
+        url: `/admin/connectors/${connector.id}/status`,
+        headers,
+        payload: {
+          status: "revoked",
+          reason: "token-expired",
+        },
+      });
+
+      expect(revoke.statusCode).toBe(200);
+      expect((revoke.json() as ConnectorStatusUpdateResponse).data.status).toBe("revoked");
+
       const checkpoint = await app.inject({
         method: "PUT",
         url: `/admin/connectors/${connector.id}/checkpoint`,
@@ -111,6 +144,12 @@ describe.sequential("persistent connectors", () => {
           expect.arrayContaining([
             expect.objectContaining({
               id: connector.id,
+              status: "revoked",
+              health: expect.objectContaining({
+                failureSummary: expect.objectContaining({
+                  hasPartialFailures: true,
+                }),
+              }),
               checkpoint: {
                 cursor: "cursor-after-restart",
                 updatedAt: "2026-03-17T06:00:00.000Z",
@@ -132,6 +171,11 @@ describe.sequential("persistent connectors", () => {
               connectorId: connector.id,
               status: "queued",
             }),
+            expect.objectContaining({
+              connectorId: connector.id,
+              status: "partial_failure",
+              error: "connector-throttled",
+            }),
           ]),
         );
 
@@ -147,6 +191,10 @@ describe.sequential("persistent connectors", () => {
             expect.objectContaining({
               connectorId: connector.id,
               externalDocumentId: `confluence:${connector.id}:primary`,
+            }),
+            expect.objectContaining({
+              connectorId: connector.id,
+              externalDocumentId: "confluence:policy:duplicate",
             }),
           ]),
         );

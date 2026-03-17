@@ -1,9 +1,14 @@
 import type {
   ConnectorCreateResponse,
+  ConnectorCredentialRotateResponse,
+  ConnectorDeleteResponse,
+  ConnectorHealthResponse,
   ConnectorListResponse,
   ConnectorProvenanceResponse,
+  ConnectorStatusUpdateResponse,
   ConnectorSyncJobsResponse,
   ConnectorSyncQueueResponse,
+  WorkspaceSourceStatusResponse,
 } from "@agentifui/shared";
 import { describe, expect, it } from "vitest";
 
@@ -189,6 +194,155 @@ describe("admin connector routes", () => {
       expect((checkpoint.json() as ConnectorCreateResponse).data.checkpoint).toEqual({
         cursor: "cursor-2",
         updatedAt: "2026-03-17T00:00:00.000Z",
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("reports connector health, allows status mutations, rotation, deletion, and user-facing source status", async () => {
+    const { app, authService } = await createTestApp();
+
+    authService.register({
+      email: "admin@iflabx.com",
+      password: "Secure123",
+      displayName: "Admin User",
+    });
+
+    const login = authService.login({
+      email: "admin@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const headers = {
+        authorization: `Bearer ${login.data.sessionToken}`,
+      };
+
+      const create = await app.inject({
+        method: "POST",
+        url: "/admin/connectors",
+        headers,
+        payload: {
+          title: "Ops Drive",
+          kind: "google_drive",
+          scope: "group",
+          groupId: "grp_research",
+          cadenceMinutes: 15,
+          authType: "token",
+          authSecret: "drive-secret",
+        },
+      });
+
+      expect(create.statusCode).toBe(200);
+      const connector = (create.json() as ConnectorCreateResponse).data;
+
+      const advancedSync = await app.inject({
+        method: "POST",
+        url: `/admin/connectors/${connector.id}/sync-jobs/advanced`,
+        headers,
+        payload: {
+          simulateStatus: "partial_failure",
+          simulateError: "Drive API throttled",
+          externalDocumentId: "drive:policy-handbook",
+          externalUpdatedAt: "2026-03-17T10:00:00.000Z",
+        },
+      });
+
+      expect(advancedSync.statusCode).toBe(200);
+      expect((advancedSync.json() as ConnectorSyncQueueResponse).data).toMatchObject({
+        status: "partial_failure",
+        error: "Drive API throttled",
+      });
+
+      const health = await app.inject({
+        method: "GET",
+        url: "/admin/connectors/health",
+        headers,
+      });
+
+      expect(health.statusCode).toBe(200);
+      expect((health.json() as ConnectorHealthResponse).data).toMatchObject({
+        counts: expect.objectContaining({
+          sync_partial_failure: 1,
+        }),
+        connectors: [
+          expect.objectContaining({
+            id: connector.id,
+            health: expect.objectContaining({
+              failureSummary: expect.objectContaining({
+                hasPartialFailures: true,
+              }),
+            }),
+          }),
+        ],
+      });
+
+      const paused = await app.inject({
+        method: "PUT",
+        url: `/admin/connectors/${connector.id}/status`,
+        headers,
+        payload: {
+          status: "paused",
+          reason: "maintenance-window",
+        },
+      });
+
+      expect(paused.statusCode).toBe(200);
+      expect((paused.json() as ConnectorStatusUpdateResponse).data.status).toBe("paused");
+
+      const sourceStatus = await app.inject({
+        method: "GET",
+        url: "/workspace/source-status",
+        headers,
+      });
+
+      expect(sourceStatus.statusCode).toBe(200);
+      expect((sourceStatus.json() as WorkspaceSourceStatusResponse).data.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            connectorId: connector.id,
+            reason: "paused",
+            connectorStatus: "paused",
+          }),
+        ]),
+      );
+
+      const rotated = await app.inject({
+        method: "PUT",
+        url: `/admin/connectors/${connector.id}/credentials`,
+        headers,
+        payload: {
+          authSecret: "drive-secret-rotated",
+          note: "rotate-after-revoke",
+        },
+      });
+
+      expect(rotated.statusCode).toBe(200);
+      expect((rotated.json() as ConnectorCredentialRotateResponse).data).toMatchObject({
+        id: connector.id,
+        status: "active",
+        auth: {
+          status: "active",
+        },
+      });
+
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/admin/connectors/${connector.id}`,
+        headers,
+      });
+
+      expect(deleted.statusCode).toBe(200);
+      expect((deleted.json() as ConnectorDeleteResponse).data).toEqual({
+        connectorId: connector.id,
+        deleted: true,
       });
     } finally {
       await app.close();

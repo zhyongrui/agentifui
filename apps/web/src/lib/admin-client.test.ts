@@ -4,23 +4,32 @@ import {
   createAdminBreakGlassSession,
   createAdminDomainClaim,
   createAdminTenant,
+  createAdminWorkflow,
   createAdminAppGrant,
   createAdminSource,
+  dryRunAdminWorkflow,
   exportAdminAudit,
+  exportAdminWorkflow,
   exportAdminUsage,
   fetchAdminApps,
   fetchAdminAudit,
+  fetchAdminWorkflows,
   fetchAdminContext,
   fetchAdminGroups,
   fetchAdminIdentity,
+  importAdminWorkflow,
   fetchAdminSources,
   fetchAdminTenants,
   fetchAdminUsage,
   fetchAdminUsers,
+  publishAdminWorkflow,
   resetAdminUserMfa,
+  rollbackAdminWorkflow,
   reviewAdminAccessRequest,
   reviewAdminDomainClaim,
   revokeAdminAppGrant,
+  updateAdminWorkflow,
+  updateAdminWorkflowPermissions,
   updateAdminBreakGlassSession,
   updateAdminAppTools,
   updateAdminSourceStatus,
@@ -875,6 +884,300 @@ describe('admin client', () => {
           status: 'suspended',
         },
         previousStatus: 'active',
+      },
+    });
+  });
+
+  it('loads and mutates admin workflows through the same-origin gateway proxy', async () => {
+    const emptyDocument = {
+      nodes: [],
+      edges: [],
+      variables: [],
+      approvals: [],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-17T00:00:00.000Z',
+            workflows: [],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            workflow: {
+              id: 'workflow_1',
+              tenantId: 'tenant-dev',
+              slug: 'incident-review',
+              title: 'Incident Review',
+              description: 'Review flow',
+              currentVersionId: 'wfver_1',
+              currentVersionStatus: 'draft',
+              createdAt: '2026-03-17T00:00:00.000Z',
+              updatedAt: '2026-03-17T00:00:00.000Z',
+            },
+            version: {
+              id: 'wfver_1',
+              workflowId: 'workflow_1',
+              versionNumber: 1,
+              status: 'draft',
+              createdAt: '2026-03-17T00:00:00.000Z',
+              updatedAt: '2026-03-17T00:00:00.000Z',
+              publishedAt: null,
+              rolledBackFromVersionId: null,
+              validationErrors: [],
+              document: emptyDocument,
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            workflow: {
+              id: 'workflow_1',
+              tenantId: 'tenant-dev',
+              slug: 'incident-review',
+              title: 'Incident Review',
+              description: 'Review flow',
+              currentVersionId: 'wfver_2',
+              currentVersionStatus: 'draft',
+              createdAt: '2026-03-17T00:00:00.000Z',
+              updatedAt: '2026-03-17T01:00:00.000Z',
+            },
+            version: {
+              id: 'wfver_2',
+              workflowId: 'workflow_1',
+              versionNumber: 2,
+              status: 'draft',
+              createdAt: '2026-03-17T01:00:00.000Z',
+              updatedAt: '2026-03-17T01:00:00.000Z',
+              publishedAt: null,
+              rolledBackFromVersionId: null,
+              validationErrors: [],
+              document: emptyDocument,
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            workflow: {
+              id: 'workflow_1',
+              tenantId: 'tenant-dev',
+              slug: 'incident-review',
+              title: 'Incident Review',
+              description: 'Review flow',
+              currentVersionId: 'wfver_2',
+              currentVersionStatus: 'published',
+              createdAt: '2026-03-17T00:00:00.000Z',
+              updatedAt: '2026-03-17T01:00:00.000Z',
+            },
+            version: {
+              id: 'wfver_2',
+              workflowId: 'workflow_1',
+              versionNumber: 2,
+              status: 'published',
+              createdAt: '2026-03-17T01:00:00.000Z',
+              updatedAt: '2026-03-17T01:00:00.000Z',
+              publishedAt: '2026-03-17T01:00:00.000Z',
+              rolledBackFromVersionId: null,
+              validationErrors: [],
+              document: emptyDocument,
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            workflowId: 'workflow_1',
+            permissions: [
+              {
+                id: 'wfperm_1',
+                userEmail: 'reviewer@example.net',
+                role: 'reviewer',
+                createdAt: '2026-03-17T01:10:00.000Z',
+              },
+            ],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            valid: true,
+            errors: [],
+            warnings: [],
+            planPreview: [
+              {
+                id: 'node_prompt',
+                title: 'Collect context',
+                type: 'prompt',
+              },
+            ],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            workflow: {
+              id: 'workflow_1',
+              tenantId: 'tenant-dev',
+              slug: 'incident-review',
+              title: 'Incident Review',
+              description: 'Review flow',
+              currentVersionId: 'wfver_2',
+              currentVersionStatus: 'published',
+              createdAt: '2026-03-17T00:00:00.000Z',
+              updatedAt: '2026-03-17T01:00:00.000Z',
+            },
+            versions: [],
+            permissions: [],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            workflow: {
+              id: 'workflow_1',
+              tenantId: 'tenant-dev',
+              slug: 'incident-review',
+              title: 'Incident Review',
+              description: 'Review flow',
+              currentVersionId: 'wfver_3',
+              currentVersionStatus: 'rolled_back',
+              createdAt: '2026-03-17T00:00:00.000Z',
+              updatedAt: '2026-03-17T01:20:00.000Z',
+            },
+            version: {
+              id: 'wfver_3',
+              workflowId: 'workflow_1',
+              versionNumber: 3,
+              status: 'rolled_back',
+              createdAt: '2026-03-17T01:20:00.000Z',
+              updatedAt: '2026-03-17T01:20:00.000Z',
+              publishedAt: '2026-03-17T01:20:00.000Z',
+              rolledBackFromVersionId: 'wfver_2',
+              validationErrors: [],
+              document: emptyDocument,
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            workflow: {
+              id: 'workflow_imported',
+              tenantId: 'tenant-dev',
+              slug: 'incident-review-imported',
+              title: 'Imported Incident Review',
+              description: 'Imported flow',
+              currentVersionId: 'wfver_imported',
+              currentVersionStatus: 'draft',
+              createdAt: '2026-03-17T02:00:00.000Z',
+              updatedAt: '2026-03-17T02:00:00.000Z',
+            },
+            importedVersionCount: 2,
+          },
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const sessionToken = 'session-123';
+
+    await fetchAdminWorkflows(sessionToken);
+    await createAdminWorkflow(sessionToken, {
+      slug: 'incident-review',
+      title: 'Incident Review',
+      description: 'Review flow',
+      document: emptyDocument,
+    });
+    await updateAdminWorkflow(sessionToken, 'workflow_1', {
+      document: emptyDocument,
+    });
+    await publishAdminWorkflow(sessionToken, 'workflow_1', {
+      versionId: 'wfver_2',
+    });
+    await updateAdminWorkflowPermissions(sessionToken, 'workflow_1', {
+      permissions: [
+        {
+          userEmail: 'reviewer@example.net',
+          role: 'reviewer',
+        },
+      ],
+    });
+    await dryRunAdminWorkflow(sessionToken, 'workflow_1', {});
+    await exportAdminWorkflow(sessionToken, 'workflow_1');
+    await rollbackAdminWorkflow(sessionToken, 'workflow_1', {
+      targetVersionId: 'wfver_2',
+    });
+    const importResult = await importAdminWorkflow(sessionToken, {
+      workflow: {
+        id: 'workflow_1',
+        tenantId: 'tenant-dev',
+        slug: 'incident-review',
+        title: 'Incident Review',
+        description: 'Review flow',
+        currentVersionId: 'wfver_2',
+        currentVersionStatus: 'published',
+        createdAt: '2026-03-17T00:00:00.000Z',
+        updatedAt: '2026-03-17T01:00:00.000Z',
+      },
+      versions: [],
+      permissions: [],
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/admin/workflows', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/admin/workflows', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        slug: 'incident-review',
+        title: 'Incident Review',
+        description: 'Review flow',
+        document: emptyDocument,
+      }),
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/gateway/admin/workflows/workflow_1/dry-run', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+      cache: 'no-store',
+    });
+    expect(importResult).toMatchObject({
+      ok: true,
+      data: {
+        importedVersionCount: 2,
       },
     });
   });

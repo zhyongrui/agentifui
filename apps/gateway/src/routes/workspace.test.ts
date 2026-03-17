@@ -17,7 +17,9 @@ import type {
   WorkspaceConversationUpdateResponse,
   WorkspaceConversationRunsResponse,
   WorkspacePreferencesResponse,
+  WorkspacePlanStepControlResponse,
   WorkspaceSharedConversationResponse,
+  WorkspaceRunBranchCreateResponse,
   WorkspaceRunResponse,
 } from "@agentifui/shared/apps";
 import { describe, expect, it } from "vitest";
@@ -4191,6 +4193,181 @@ describe("workspace routes", () => {
               runId: "run_expired",
               observedByUserId: login.data.user.id,
             }),
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("creates run branches and mutates plan steps for structured workflow runs", async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
+
+    authService.register({
+      email: "operator@example.net",
+      password: "Secure123",
+      displayName: "Operator",
+    });
+
+    const login = authService.login({
+      email: "operator@example.net",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected operator login to succeed");
+    }
+
+    try {
+      const headers = {
+        authorization: `Bearer ${login.data.sessionToken}`,
+      };
+
+      const launchResponse = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers,
+        payload: {
+          appId: "app_runbook_mentor",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launchResponse.statusCode).toBe(200);
+
+      const launchBody = launchResponse.json() as WorkspaceAppLaunchResponse;
+      const conversationId = launchBody.data.conversationId;
+
+      expect(conversationId).toBeTruthy();
+
+      const completionResponse = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          ...headers,
+          "x-active-group-id": "grp_research",
+        },
+        payload: {
+          app_id: "app_runbook_mentor",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Turn this SOP into an executable checklist.",
+            },
+          ],
+        },
+      });
+
+      expect(completionResponse.statusCode).toBe(200);
+
+      const completionBody = completionResponse.json() as ChatCompletionResponse;
+      const runId = completionBody.metadata?.run_id;
+
+      expect(runId).toBeTruthy();
+
+      const branchResponse = await app.inject({
+        method: "POST",
+        url: `/workspace/runs/${runId}/branch`,
+        headers,
+        payload: {
+          title: "Runbook branch",
+        },
+      });
+
+      expect(branchResponse.statusCode).toBe(200);
+      expect((branchResponse.json() as WorkspaceRunBranchCreateResponse).data).toMatchObject({
+        branch: {
+          parentConversationId: conversationId,
+          parentRunId: runId,
+          depth: 1,
+          createdByAction: "branch",
+        },
+        conversation: {
+          title: "Runbook branch",
+        },
+      });
+
+      const pauseResponse = await app.inject({
+        method: "PUT",
+        url: `/workspace/runs/${runId}/plan/step_scope`,
+        headers,
+        payload: {
+          action: "pause",
+          reason: "Need operator review",
+        },
+      });
+
+      expect(pauseResponse.statusCode).toBe(200);
+      expect((pauseResponse.json() as WorkspacePlanStepControlResponse).data).toMatchObject({
+        step: {
+          id: "step_scope",
+          status: "paused",
+        },
+        run: {
+          plan: {
+            status: "paused",
+            activeStepId: "step_scope",
+          },
+          workflow: {
+            status: "paused",
+            currentStepId: "step_scope",
+          },
+        },
+      });
+
+      const resumeResponse = await app.inject({
+        method: "PUT",
+        url: `/workspace/runs/${runId}/plan/step_scope`,
+        headers,
+        payload: {
+          action: "resume",
+          reason: "Back online",
+        },
+      });
+
+      expect(resumeResponse.statusCode).toBe(200);
+      expect((resumeResponse.json() as WorkspacePlanStepControlResponse).data).toMatchObject({
+        step: {
+          id: "step_scope",
+          status: "in_progress",
+        },
+        run: {
+          plan: {
+            status: "in_progress",
+          },
+          workflow: {
+            status: "running",
+          },
+        },
+      });
+
+      expect(await auditService.listEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.run.branch_created",
+            entityType: "run",
+            entityId: expect.any(String),
+            payload: expect.objectContaining({
+              branch: expect.objectContaining({
+                parentRunId: runId,
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.run.workflow_paused",
+            entityType: "run",
+            entityId: runId,
+          }),
+          expect.objectContaining({
+            action: "workspace.run.workflow_resumed",
+            entityType: "run",
+            entityId: runId,
           }),
         ]),
       );

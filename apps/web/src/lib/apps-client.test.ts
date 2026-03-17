@@ -2,14 +2,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createWorkspaceComment,
+  createWorkspaceRunBranch,
   createWorkspaceConversationShare,
   createWorkspaceSharedComment,
+  controlWorkspacePlanStep,
   downloadWorkspaceArtifact,
   fetchWorkspaceConversation,
   fetchWorkspaceConversationPresence,
   fetchWorkspaceConversationList,
   fetchWorkspaceNotifications,
   fetchWorkspacePendingActions,
+  fetchWorkspaceSourceStatus,
   fetchWorkspaceSharedConversationPresence,
   respondToWorkspacePendingAction,
   fetchWorkspaceConversationRuns,
@@ -1572,5 +1575,258 @@ describe('apps client', () => {
       shareId: null,
     });
     await expect(result.blob.text()).resolves.toBe('# Dorm policy\n');
+  });
+
+  it('fetches workspace source status through the same-origin gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-17T10:00:00.000Z',
+            items: [
+              {
+                id: 'connector-1:source-1:stale_sync:0',
+                title: 'Dorm policy handbook',
+                sourceId: 'source-1',
+                connectorId: 'connector-1',
+                connectorTitle: 'Research Drive',
+                connectorKind: 'google_drive',
+                connectorStatus: 'paused',
+                syncStatus: 'partial_failure',
+                scope: 'group',
+                groupId: 'grp_research',
+                severity: 'warning',
+                reason: 'stale',
+                summary: 'No sync has completed in the expected window.',
+                updatedAt: '2026-03-16T10:00:00.000Z',
+                staleSince: '2026-03-16T10:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceSourceStatus('session-123');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/source-status', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      body: undefined,
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        items: [
+          expect.objectContaining({
+            connectorId: 'connector-1',
+            reason: 'stale',
+          }),
+        ],
+      },
+    });
+  });
+
+  it('creates a workspace run branch through the same-origin gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversation: {
+              id: 'conv_branch',
+              title: 'Runbook branch',
+              status: 'active',
+              pinned: false,
+              app: {
+                id: 'app_runbook_mentor',
+                slug: 'runbook-mentor',
+                name: 'Runbook Mentor',
+                summary: 'summary',
+                kind: 'automation',
+                status: 'ready',
+                shortCode: 'RM',
+                launchCost: 22,
+              },
+              activeGroup: {
+                id: 'grp_research',
+                name: 'Research Lab',
+                summary: 'summary',
+                role: 'member',
+              },
+              traceId: 'trace-branch',
+              runId: 'run_branch',
+              runStatus: 'running',
+              runStartedAt: '2026-03-17T10:10:00.000Z',
+              latestRunId: 'run_branch',
+              latestRunStatus: 'running',
+              latestRunStartedAt: '2026-03-17T10:10:00.000Z',
+              latestRunTraceId: 'trace-branch',
+              messages: [],
+              createdAt: '2026-03-17T10:10:00.000Z',
+              updatedAt: '2026-03-17T10:10:00.000Z',
+              presence: [],
+              share: null,
+            },
+            branch: {
+              parentConversationId: 'conv_parent',
+              parentRunId: 'run_parent',
+              rootConversationId: 'conv_parent',
+              depth: 1,
+              label: 'Runbook branch',
+              createdByAction: 'branch',
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await createWorkspaceRunBranch('session-123', 'run_parent', {
+      title: 'Runbook branch',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/runs/run_parent/branch', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: 'Runbook branch',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        branch: {
+          createdByAction: 'branch',
+          depth: 1,
+        },
+      },
+    });
+  });
+
+  it('controls workspace plan steps through the same-origin gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            run: {
+              id: 'run_parent',
+              status: 'running',
+              traceId: 'trace-plan',
+              type: 'workflow',
+              startedAt: '2026-03-17T10:20:00.000Z',
+              completedAt: null,
+              latestAssistantMessage: null,
+              usage: {
+                promptTokens: 10,
+                completionTokens: 5,
+                totalTokens: 15,
+              },
+              durationMs: 1000,
+              runtime: null,
+              pendingActions: [],
+              toolExecutions: [],
+              plan: {
+                status: 'paused',
+                activeStepId: 'step_scope',
+                steps: [
+                  {
+                    id: 'step_scope',
+                    title: 'Confirm scope',
+                    description: null,
+                    nodeType: 'prompt',
+                    status: 'paused',
+                    owner: 'operator',
+                    dependsOnStepIds: [],
+                    startedAt: '2026-03-17T10:20:00.000Z',
+                    finishedAt: null,
+                    internalSummary: 'Paused for review',
+                    artifacts: [],
+                    citations: [],
+                  },
+                ],
+              },
+              branch: null,
+              workflow: {
+                definitionId: 'workflow_app_runbook_mentor',
+                versionId: 'wfver_app_runbook_mentor_1',
+                name: 'Runbook Mentor workflow',
+                versionNumber: 1,
+                status: 'paused',
+                resumable: true,
+                currentStepId: 'step_scope',
+                lastResumedAt: '2026-03-17T10:20:00.000Z',
+                pausedAt: '2026-03-17T10:21:00.000Z',
+                resumedFromRunId: null,
+                runnerRoles: ['runner'],
+              },
+              internalNotes: [],
+              artifacts: [],
+              citations: [],
+              timeline: [],
+            },
+            step: {
+              id: 'step_scope',
+              title: 'Confirm scope',
+              description: null,
+              nodeType: 'prompt',
+              status: 'paused',
+              owner: 'operator',
+              dependsOnStepIds: [],
+              startedAt: '2026-03-17T10:20:00.000Z',
+              finishedAt: null,
+              internalSummary: 'Paused for review',
+              artifacts: [],
+              citations: [],
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await controlWorkspacePlanStep('session-123', 'run_parent', 'step_scope', {
+      action: 'pause',
+      reason: 'Need operator review',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/runs/run_parent/plan/step_scope', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'pause',
+        reason: 'Need operator review',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        run: {
+          plan: {
+            status: 'paused',
+          },
+          workflow: {
+            status: 'paused',
+          },
+        },
+        step: {
+          status: 'paused',
+        },
+      },
+    });
   });
 });
