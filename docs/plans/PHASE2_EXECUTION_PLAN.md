@@ -148,7 +148,17 @@ Execution status:
 | completed | `P3-C-10` | collaboration semantics / consistency model / known limits 已文档化                                   |
 | completed | `P3-C-06` | shared commenter / editor access modes、shared comments、shared metadata edits、UI/client/persistence 已闭环 |
 | completed | `P3-C-07` | shared metadata optimistic concurrency、409 conflict payload、UI refresh 提示和 route/client coverage 已闭环 |
-| active    | `P3-D-01` | 下一项，补 golden transcript fixtures 和评测基线                                                        |
+| completed | `P3-D-01` | `scripts/evals/fixtures.ts` 已定义核心 app/workflow golden fixtures，并提交了 committed goldens         |
+| completed | `P3-D-02` | `runEvalFixtures()` 已可 deterministic replay in-memory gateway/runtime 会话                           |
+| completed | `P3-D-03` | transcript/artifact/citation/source/safety/tool snapshot compare 已闭环                               |
+| completed | `P3-D-04` | replayable run 的 prompt/runtime/fixture version 已写入 `run.inputs.variables.eval`                   |
+| completed | `P3-D-05` | markdown/json eval comparison report 与 release-gate report surface 已可生成                           |
+| completed | `P3-D-06` | inject-based auth/admin/chat release smoke 已接入 release gate                                         |
+| completed | `P3-D-07` | incident replay CLI 和 saved incident snapshots 已上线                                                 |
+| completed | `P3-D-08` | `eval:run / eval:app / eval:workstream / eval:incident` focused developer commands 已补齐             |
+| completed | `P3-D-09` | CI 已新增 `eval` job，并上传 `eval-ci-report` artifact                                                 |
+| completed | `P3-D-10` | `P3-D_EVAL_REPLAY_QA.md` 已文档化存储、评审、promotion 流程                                           |
+| active    | `P3-E-01` | 下一项，补 enterprise SSO domain-claim 审核流                                                          |
 
 ## 5. First Batch Definition
 
@@ -198,7 +208,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-D-01`
+- the active follow-on item is `P3-E-01`
 
 ## 6. Detailed Execution Notes
 
@@ -775,16 +785,16 @@ Legend:
 
 ### 7.13 Future Delivery Queue: `P3-D` Evaluation, Replay QA, And Release Quality
 
-- [ ] `P3-D-01` Define golden transcript fixtures for core apps and core workflows
-- [ ] `P3-D-02` Build a replay harness that can re-run deterministic placeholder/runtime sessions
-- [ ] `P3-D-03` Add snapshot comparison for transcript body, artifacts, citations, and safety signals
-- [ ] `P3-D-04` Version prompt/runtime config used by each replayable run
-- [ ] `P3-D-05` Add a model/runtime comparison report surface for release candidates
-- [ ] `P3-D-06` Add release gates for critical regressions in auth/chat/admin smoke paths
-- [ ] `P3-D-07` Add incident replay tooling for failed production-like traces
-- [ ] `P3-D-08` Add developer commands to run focused evals for a single app or workstream
-- [ ] `P3-D-09` Add CI integration for a minimal regression pack
-- [ ] `P3-D-10` Document how eval outputs should be stored, reviewed, and promoted
+- [x] `P3-D-01` Define golden transcript fixtures for core apps and core workflows
+- [x] `P3-D-02` Build a replay harness that can re-run deterministic placeholder/runtime sessions
+- [x] `P3-D-03` Add snapshot comparison for transcript body, artifacts, citations, and safety signals
+- [x] `P3-D-04` Version prompt/runtime config used by each replayable run
+- [x] `P3-D-05` Add a model/runtime comparison report surface for release candidates
+- [x] `P3-D-06` Add release gates for critical regressions in auth/chat/admin smoke paths
+- [x] `P3-D-07` Add incident replay tooling for failed production-like traces
+- [x] `P3-D-08` Add developer commands to run focused evals for a single app or workstream
+- [x] `P3-D-09` Add CI integration for a minimal regression pack
+- [x] `P3-D-10` Document how eval outputs should be stored, reviewed, and promoted
 
 ### 7.14 Future Delivery Queue: `P3-E` Governance, Enterprise Controls, And Identity
 
