@@ -1,0 +1,22 @@
+services:
+  gateway:
+    image: node:22-bookworm-slim
+    working_dir: /workspace
+    command: ["npm", "run", "start", "--workspace", "@agentifui/gateway"]
+    env_file:
+      - /etc/agentifui/agentifui.env
+    volumes:
+      - ../../:/workspace
+    network_mode: host
+    restart: unless-stopped
+
+  web:
+    image: node:22-bookworm-slim
+    working_dir: /workspace
+    command: ["npm", "run", "start", "--workspace", "@agentifui/web"]
+    env_file:
+      - /etc/agentifui/agentifui.env
+    volumes:
+      - ../../:/workspace
+    network_mode: host
+    restart: unless-stopped

@@ -1,0 +1,7 @@
+tunnel: agentifui-browser-qa
+credentials-file: /etc/cloudflared/agentifui-browser-qa.json
+
+ingress:
+  - hostname: qa.agentifui.example.com
+    service: http://127.0.0.1:3112
+  - service: http_status:404

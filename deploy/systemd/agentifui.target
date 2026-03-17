@@ -1,0 +1,7 @@
+[Unit]
+Description=AgentifUI application stack
+Wants=agentifui-gateway.service agentifui-web.service
+After=network.target
+
+[Install]
+WantedBy=multi-user.target

@@ -158,7 +158,27 @@ Execution status:
 | completed | `P3-D-08` | `eval:run / eval:app / eval:workstream / eval:incident` focused developer commands 已补齐             |
 | completed | `P3-D-09` | CI 已新增 `eval` job，并上传 `eval-ci-report` artifact                                                 |
 | completed | `P3-D-10` | `P3-D_EVAL_REPLAY_QA.md` 已文档化存储、评审、promotion 流程                                           |
-| active    | `P3-E-01` | 下一项，补 enterprise SSO domain-claim 审核流                                                          |
+| completed | `P3-E-01` | enterprise SSO domain-claim 审核流、SSO discovery/callback 接线与 pending queue 已闭环               |
+| completed | `P3-E-02` | `/admin/identity` 待审核访问队列、批准/拒绝/转移与审计已闭环                                          |
+| completed | `P3-E-03` | MFA reset、租户范围用户过滤和恢复边界已闭环                                                           |
+| completed | `P3-E-04` | break-glass create/revoke、过期收口和审计 drill 已闭环                                                |
+| completed | `P3-E-05` | SCIM/bulk provisioning planning hooks 已持久化到 tenant governance                                    |
+| completed | `P3-E-06` | legal hold / retention override 已接入 tenant governance，并影响 cleanup policy                       |
+| completed | `P3-E-07` | audit export 已支持 tenant/actor/entity/severity/date preset 过滤                                      |
+| completed | `P3-E-08` | policy-pack surface 已落到 governance UI，并对 sharing/download 边界做 enforcement                    |
+| completed | `P3-E-09` | identity edge-case route/client/persistence coverage 已补齐                                            |
+| completed | `P3-E-10` | enterprise onboarding / approval / recovery 文档已补齐                                                 |
+| completed | `P3-F-01` | 稳定 `80/443` 反代公网入口方案已文档化                                                                |
+| completed | `P3-F-02` | 临时 `cloudflared` 公网 QA 方案已文档化                                                                |
+| completed | `P3-F-03` | production-grade nginx same-origin config 已提供                                                      |
+| completed | `P3-F-04` | HTTPS/TLS 签发与续期 runbook 已文档化                                                                 |
+| completed | `P3-F-05` | systemd/container supervision baseline 已提供                                                         |
+| completed | `P3-F-06` | secrets inventory、rotation procedure 和验证清单已文档化                                              |
+| completed | `P3-F-07` | Prometheus/Grafana metrics dashboard baseline 已提供                                                  |
+| completed | `P3-F-08` | alert rules 已覆盖 gateway error、degraded mode 和 backlog                                             |
+| completed | `P3-F-09` | deploy smoke 已覆盖 auth/workspace/chat/admin health                                                  |
+| completed | `P3-F-10` | forward-only migration / rollback-by-restore 指南已文档化                                             |
+| active    | `P3-F-11` | 下一项，补 blue/green 或 canary 发布策略说明                                                           |
 
 ## 5. First Batch Definition
 
@@ -208,7 +228,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-E-01`
+- the active follow-on item is `P3-F-11`
 
 ## 6. Detailed Execution Notes
 
@@ -798,29 +818,29 @@ Legend:
 
 ### 7.14 Future Delivery Queue: `P3-E` Governance, Enterprise Controls, And Identity
 
-- [ ] `P3-E-01` Add domain-claim review workflow for enterprise SSO detection and activation
-- [ ] `P3-E-02` Add admin review queues for pending SSO and tenant-access requests
-- [ ] `P3-E-03` Add richer MFA administration and recovery controls
-- [ ] `P3-E-04` Add break-glass session review and emergency access audit drill
-- [ ] `P3-E-05` Add SCIM or bulk provisioning planning hooks even if implementation lands later
-- [ ] `P3-E-06` Add legal-hold or retention override controls for selected tenants
-- [ ] `P3-E-07` Add audit export filtering by tenant, actor, entity, severity, and date range presets
-- [ ] `P3-E-08` Add policy-pack surfaces for runtime, sharing, and artifact download constraints
-- [ ] `P3-E-09` Add tests for identity edge cases across SSO, MFA, pending review, and tenant transfer
-- [ ] `P3-E-10` Document enterprise onboarding, approval flow, and emergency recovery procedures
+- [x] `P3-E-01` Add domain-claim review workflow for enterprise SSO detection and activation
+- [x] `P3-E-02` Add admin review queues for pending SSO and tenant-access requests
+- [x] `P3-E-03` Add richer MFA administration and recovery controls
+- [x] `P3-E-04` Add break-glass session review and emergency access audit drill
+- [x] `P3-E-05` Add SCIM or bulk provisioning planning hooks even if implementation lands later
+- [x] `P3-E-06` Add legal-hold or retention override controls for selected tenants
+- [x] `P3-E-07` Add audit export filtering by tenant, actor, entity, severity, and date range presets
+- [x] `P3-E-08` Add policy-pack surfaces for runtime, sharing, and artifact download constraints
+- [x] `P3-E-09` Add tests for identity edge cases across SSO, MFA, pending review, and tenant transfer
+- [x] `P3-E-10` Document enterprise onboarding, approval flow, and emergency recovery procedures
 
 ### 7.15 Future Delivery Queue: `P3-F` Deployment, Ingress, And Operational Hardening
 
-- [ ] `P3-F-01` Replace ad hoc public QA access with a documented stable `80/443` reverse-proxy setup
-- [ ] `P3-F-02` Keep the temporary `cloudflared` public-access workflow documented for emergency browser QA
-- [ ] `P3-F-03` Add production-grade `nginx` or equivalent config for same-origin web + gateway routing
-- [ ] `P3-F-04` Add HTTPS/TLS issuance and renewal runbooks for the chosen public domain entrypoint
-- [ ] `P3-F-05` Add systemd/service supervision or container orchestration baselines for web and gateway
-- [ ] `P3-F-06` Add secrets management and rotation procedures for auth, DB, and runtime credentials
-- [ ] `P3-F-07` Add structured metrics dashboards for auth, chat, admin, and cleanup jobs
-- [ ] `P3-F-08` Add alerting thresholds for gateway errors, degraded mode, and queue backlogs
-- [ ] `P3-F-09` Add deployment smoke scripts that verify auth, workspace launch, chat, and admin health
-- [ ] `P3-F-10` Add migration rollback and forward-only safety guidelines
+- [x] `P3-F-01` Replace ad hoc public QA access with a documented stable `80/443` reverse-proxy setup
+- [x] `P3-F-02` Keep the temporary `cloudflared` public-access workflow documented for emergency browser QA
+- [x] `P3-F-03` Add production-grade `nginx` or equivalent config for same-origin web + gateway routing
+- [x] `P3-F-04` Add HTTPS/TLS issuance and renewal runbooks for the chosen public domain entrypoint
+- [x] `P3-F-05` Add systemd/service supervision or container orchestration baselines for web and gateway
+- [x] `P3-F-06` Add secrets management and rotation procedures for auth, DB, and runtime credentials
+- [x] `P3-F-07` Add structured metrics dashboards for auth, chat, admin, and cleanup jobs
+- [x] `P3-F-08` Add alerting thresholds for gateway errors, degraded mode, and queue backlogs
+- [x] `P3-F-09` Add deployment smoke scripts that verify auth, workspace launch, chat, and admin health
+- [x] `P3-F-10` Add migration rollback and forward-only safety guidelines
 - [ ] `P3-F-11` Add blue/green or canary deployment strategy notes for public releases
 - [ ] `P3-F-12` Document host-specific browser runtime and Playwright caveats for this server class
 

@@ -1,0 +1,44 @@
+{
+  "title": "AgentifUI Platform",
+  "timezone": "browser",
+  "panels": [
+    {
+      "title": "Gateway request rate",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(agentifui_http_requests_total[5m]))"
+        }
+      ]
+    },
+    {
+      "title": "Gateway error rate",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(agentifui_http_requests_total{status_code=~\"5..\"}[5m]))"
+        }
+      ]
+    },
+    {
+      "title": "Pending access requests",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "agentifui_admin_pending_access_requests"
+        }
+      ]
+    },
+    {
+      "title": "Active break-glass sessions",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "agentifui_admin_break_glass_sessions{status=\"active\"}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

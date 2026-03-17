@@ -44,6 +44,8 @@ async function main() {
   const smokeAppId = process.env.SMOKE_APP_ID?.trim() || null;
   const smokeGroupId = process.env.SMOKE_ACTIVE_GROUP_ID?.trim() || null;
   const skipRegister = process.env.SMOKE_SKIP_REGISTER === 'true';
+  const adminEmail = process.env.SMOKE_ADMIN_EMAIL?.trim() || null;
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD?.trim() || password;
 
   const loginPage = await fetch(buildUrl(baseUrl, '/login'), {
     redirect: 'follow',
@@ -181,6 +183,59 @@ async function main() {
   );
   const conversationPayload = await expectOkJson('workspace conversation', conversationResponse);
 
+  let adminCheck = 'skipped_not_admin';
+
+  const verifyAdminSurface = async token => {
+    const adminContextResponse = await fetch(buildUrl(baseUrl, '/api/gateway/admin/context'), {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    const adminContextPayload = await readJson(adminContextResponse);
+
+    if (!adminContextResponse.ok || !adminContextPayload.ok) {
+      throw new Error(
+        `admin context failed with ${adminContextResponse.status}: ${JSON.stringify(adminContextPayload)}`
+      );
+    }
+
+    const adminIdentityResponse = await fetch(buildUrl(baseUrl, '/api/gateway/admin/identity'), {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+    const adminIdentityPayload = await readJson(adminIdentityResponse);
+
+    if (!adminIdentityResponse.ok || !adminIdentityPayload.ok) {
+      throw new Error(
+        `admin identity failed with ${adminIdentityResponse.status}: ${JSON.stringify(adminIdentityPayload)}`
+      );
+    }
+
+    return adminContextPayload.data.capabilities.canReadAdmin ? 'verified' : 'skipped_not_admin';
+  };
+
+  try {
+    adminCheck = await verifyAdminSurface(sessionToken);
+  } catch (error) {
+    if (!adminEmail) {
+      throw error;
+    }
+
+    const adminLoginResponse = await fetch(buildUrl(baseUrl, '/api/gateway/auth/login'), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: adminEmail,
+        password: adminPassword,
+      }),
+    });
+    const adminLoginPayload = await expectOkJson('admin login', adminLoginResponse);
+    adminCheck = await verifyAdminSurface(adminLoginPayload.data.sessionToken);
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -192,6 +247,7 @@ async function main() {
         runId: completionPayload.metadata?.run_id ?? launchPayload.data.runId,
         traceId: completionPayload.trace_id ?? launchPayload.data.traceId,
         messageCount: conversationPayload.data.messages.length,
+        adminCheck,
       },
       null,
       2

@@ -1,0 +1,24 @@
+groups:
+  - name: agentifui
+    rules:
+      - alert: AgentifuiGatewayHighErrorRate
+        expr: rate(agentifui_http_requests_total{status_code=~"5.."}[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: AgentifUI gateway 5xx rate is elevated
+      - alert: AgentifuiGatewayDegradedMode
+        expr: agentifui_runtime_degraded == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: AgentifUI runtime degraded mode is active
+      - alert: AgentifuiPendingApprovalsBacklog
+        expr: agentifui_admin_pending_access_requests > 25
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Pending access review queue backlog is growing
