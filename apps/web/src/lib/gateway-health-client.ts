@@ -1,5 +1,7 @@
 export type GatewayRuntimeHealthState = "available" | "degraded";
 
+import type { RuntimeProviderDescriptor } from "@agentifui/shared";
+
 export type GatewayRuntimeHealthSnapshot = {
   overallStatus: GatewayRuntimeHealthState;
   runtimes: Array<{
@@ -15,6 +17,7 @@ export type GatewayRuntimeHealthSnapshot = {
       files: boolean;
     };
   }>;
+  providers?: RuntimeProviderDescriptor[];
 };
 
 export type GatewayHealthResponse = {

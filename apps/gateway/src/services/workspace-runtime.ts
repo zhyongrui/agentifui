@@ -14,6 +14,7 @@ import type {
   ChatToolCall,
   ChatToolChoice,
   ChatToolDescriptor,
+  RuntimeProviderDescriptor,
   ToolExecutionPolicy,
   ToolInputSchema,
 } from "@agentifui/shared";
@@ -21,6 +22,10 @@ import type { KnowledgeRetrievalResult } from "@agentifui/shared";
 import { createHash, randomUUID } from "node:crypto";
 
 import { resolveWorkspaceAppRuntimeId } from "./workspace-catalog-fixtures.js";
+import {
+  createWorkspaceProviderRoutingService,
+  type WorkspaceTenantRuntimeMode,
+} from "./workspace-provider-routing.js";
 import { buildPlaceholderHitlSteps } from "./workspace-hitl.js";
 import { resolveSafetySignals } from "./workspace-safety.js";
 import { buildWorkspaceToolApprovalStep } from "./workspace-tool-approval.js";
@@ -39,6 +44,7 @@ export type WorkspaceRuntimeAdapterHealth = {
 export type WorkspaceRuntimeHealthSnapshot = {
   overallStatus: "available" | "degraded";
   runtimes: WorkspaceRuntimeAdapterHealth[];
+  providers?: RuntimeProviderDescriptor[];
 };
 
 export type WorkspaceRuntimeInvocationInput = {
@@ -50,6 +56,7 @@ export type WorkspaceRuntimeInvocationInput = {
   requestedModel: string;
   retrieval: KnowledgeRetrievalResult | null;
   runtimeInput: Record<string, unknown> | null;
+  tenantId?: string;
   toolChoice?: ChatToolChoice;
   tools?: ChatToolDescriptor[];
 };
@@ -731,13 +738,32 @@ function buildStructuredAssistantText(
   ].join("\n\n");
 }
 
-function buildRuntimeMetadata(input: WorkspaceRuntimeAdapterHealth): WorkspaceRunRuntime {
+function buildRuntimeMetadata(input: {
+  adapter: WorkspaceRuntimeAdapterHealth;
+  modelId: string;
+  provider: RuntimeProviderDescriptor;
+  requestType: "chat_completion" | "file_ingest" | "safety_review" | "tool_execution";
+  selection: WorkspaceRunRuntime["selection"];
+}): WorkspaceRunRuntime {
   return {
-    id: input.id,
-    label: input.label,
-    status: input.status,
-    capabilities: input.capabilities,
+    id: input.adapter.id,
+    label: input.adapter.label,
+    status: input.adapter.status,
+    capabilities: input.adapter.capabilities,
     invokedAt: new Date().toISOString(),
+    providerId: input.provider.id,
+    providerLabel: input.provider.label,
+    modelId: input.modelId,
+    requestType: input.requestType,
+    pricing: input.provider.models[0]?.pricing ?? {
+      currency: "credits",
+      promptPer1kTokens: 0,
+      completionPer1kTokens: 0,
+      requestFlat: 0,
+    },
+    retryPolicy: input.provider.retryPolicy,
+    circuitBreaker: input.provider.circuitBreaker,
+    selection: input.selection,
   };
 }
 
@@ -822,7 +848,13 @@ function createPlaceholderAdapter(input: {
           citations,
           model: runtimeInput.requestedModel,
           pendingActions,
-          runtime: buildRuntimeMetadata(health),
+          runtime: {
+            id: health.id,
+            label: health.label,
+            status: health.status,
+            capabilities: health.capabilities,
+            invokedAt: createdAt,
+          },
           safetySignals,
           sourceBlocks,
           suggestedPrompts,
@@ -837,7 +869,10 @@ function createPlaceholderAdapter(input: {
 export function createWorkspaceRuntimeService(input: {
   adapters?: Partial<Record<WorkspaceRuntimeAdapterId, WorkspaceRuntimeAdapter>>;
   degradedRuntimeIds?: string[];
+  degradedProviderIds?: string[];
+  openCircuitProviderIds?: string[];
   resolveAppRuntimeId?: (appId: string) => WorkspaceRuntimeAdapterId;
+  resolveTenantRuntimeMode?: (tenantId: string) => WorkspaceTenantRuntimeMode;
 } = {}): WorkspaceRuntimeService {
   const degradedRuntimeIds = new Set(input.degradedRuntimeIds ?? []);
   const adapters: Record<WorkspaceRuntimeAdapterId, WorkspaceRuntimeAdapter> = {
@@ -856,55 +891,229 @@ export function createWorkspaceRuntimeService(input: {
     }),
     ...input.adapters,
   };
+  const providerRoutingService = createWorkspaceProviderRoutingService({
+    degradedProviderIds: input.degradedProviderIds,
+    openCircuitProviderIds: input.openCircuitProviderIds,
+    resolveTenantRuntimeMode: input.resolveTenantRuntimeMode,
+  });
 
   return {
     getHealthSnapshot() {
       const runtimes = Object.values(adapters).map((adapter) =>
         adapter.getHealth(),
       );
+      const providers = providerRoutingService.listProviders();
 
       return {
-        overallStatus: runtimes.some((runtime) => runtime.status === "degraded")
+        overallStatus:
+          runtimes.some((runtime) => runtime.status === "degraded") ||
+          providers.some(
+            (provider) =>
+              provider.status === "degraded" ||
+              provider.circuitBreaker.state === "open",
+          )
           ? "degraded"
           : "available",
         runtimes,
+        providers,
       };
     },
     async invoke(runtimeInput) {
-      const runtimeId =
-        input.resolveAppRuntimeId?.(runtimeInput.appId) ??
-        resolveWorkspaceAppRuntimeId(runtimeInput.appId);
-      const adapter = adapters[runtimeId];
+      const selection = providerRoutingService.resolveSelection({
+        appId: runtimeInput.appId,
+        latestPrompt: runtimeInput.latestPrompt,
+        requestedModel: runtimeInput.requestedModel,
+        tenantId: runtimeInput.tenantId ?? "default-tenant",
+        requestType:
+          runtimeInput.tools && runtimeInput.tools.length > 0
+            ? "tool_execution"
+            : runtimeInput.attachments.length > 0
+              ? "file_ingest"
+              : "chat_completion",
+      });
 
-      if (!adapter) {
+      if (!selection) {
         return {
           ok: false,
           error: {
             code: "runtime_unavailable",
-            message: `The runtime adapter "${runtimeId}" is not configured.`,
-            detail: "Register the adapter before routing this app to it.",
-            retryable: false,
+            message: "No runtime provider is currently available.",
+            detail:
+              "Review provider health, circuit-breaker state, and tenant runtime policy before retrying.",
+            retryable: true,
             runtime: null,
           },
         };
       }
 
-      const health = adapter.getHealth();
+      const candidateSelections = selection.selection.candidates
+        .map((candidate) => ({
+          candidate,
+          provider: providerRoutingService.getProvider(candidate.providerId),
+        }))
+        .filter(
+          (entry): entry is {
+            candidate: (typeof selection.selection.candidates)[number];
+            provider: RuntimeProviderDescriptor;
+          } => entry.provider !== null,
+        );
 
-      if (health.status !== "available") {
-        return {
-          ok: false,
-          error: {
+      let lastFailure: WorkspaceRuntimeInvocationFailure | null = null;
+
+      for (const [index, entry] of candidateSelections.entries()) {
+        const provider = entry.provider;
+        const providerAdapter =
+          adapters[provider.adapterId as WorkspaceRuntimeAdapterId] ?? null;
+
+        if (
+          provider.status !== "available" ||
+          provider.circuitBreaker.state === "open"
+        ) {
+          lastFailure = {
+            code: "runtime_unavailable",
+            message: `${provider.label} is currently unavailable.`,
+            detail:
+              provider.circuitBreaker.state === "open"
+                ? "The provider circuit breaker is open and the router will try the next candidate."
+                : "The provider is degraded and the router will try the next candidate.",
+            retryable: true,
+            runtime: providerAdapter
+              ? buildRuntimeMetadata({
+                  adapter: providerAdapter.getHealth(),
+                  modelId: entry.candidate.modelId,
+                  provider,
+                  requestType: selection.requestType,
+                  selection: {
+                    ...selection.selection,
+                    attemptedProviderIds: selection.selection.attemptedProviderIds.slice(
+                      0,
+                      index + 1,
+                    ),
+                    fallbackFromProviderId:
+                      index === 0 ? null : candidateSelections[0]?.candidate.providerId ?? null,
+                  },
+                })
+              : null,
+          };
+          continue;
+        }
+
+        const adapterId =
+          input.resolveAppRuntimeId?.(runtimeInput.appId) ??
+          (provider.adapterId as WorkspaceRuntimeAdapterId) ??
+          resolveWorkspaceAppRuntimeId(runtimeInput.appId);
+        const adapter = adapters[adapterId];
+
+        if (!adapter) {
+          lastFailure = {
+            code: "runtime_unavailable",
+            message: `The runtime adapter "${adapterId}" is not configured.`,
+            detail: "Register the adapter before routing this app to it.",
+            retryable: false,
+            runtime: null,
+          };
+          continue;
+        }
+
+        const health = adapter.getHealth();
+
+        if (health.status !== "available") {
+          lastFailure = {
             code: "runtime_unavailable",
             message: `${health.label} is currently degraded.`,
-            detail: "Wait for the adapter health probe to recover before retrying.",
+            detail:
+              "Wait for the adapter health probe to recover or allow the router to fall back.",
             retryable: true,
-            runtime: buildRuntimeMetadata(health),
-          },
+            runtime: buildRuntimeMetadata({
+              adapter: health,
+              modelId: entry.candidate.modelId,
+              provider,
+              requestType: selection.requestType,
+              selection: {
+                ...selection.selection,
+                attemptedProviderIds: selection.selection.attemptedProviderIds.slice(
+                  0,
+                  index + 1,
+                ),
+                fallbackFromProviderId:
+                  index === 0 ? null : candidateSelections[0]?.candidate.providerId ?? null,
+              },
+            }),
+          };
+          continue;
+        }
+
+        const result = await adapter.invoke(runtimeInput);
+
+        if (result.ok) {
+          return {
+            ok: true,
+            data: {
+              ...result.data,
+              model: entry.candidate.modelId,
+              runtime: buildRuntimeMetadata({
+                adapter: health,
+                modelId: entry.candidate.modelId,
+                provider,
+                requestType: selection.requestType,
+                selection: {
+                  ...selection.selection,
+                  source:
+                    index === 0 ? selection.selection.source : "fallback",
+                  attemptedProviderIds: selection.selection.attemptedProviderIds.slice(
+                    0,
+                    index + 1,
+                  ),
+                  fallbackFromProviderId:
+                    index === 0 ? null : candidateSelections[0]?.candidate.providerId ?? null,
+                },
+              }),
+            },
+          };
+        }
+
+        lastFailure = {
+          ...result.error,
+          runtime: buildRuntimeMetadata({
+            adapter: health,
+            modelId: entry.candidate.modelId,
+            provider,
+            requestType: selection.requestType,
+            selection: {
+              ...selection.selection,
+              source:
+                index === 0 ? selection.selection.source : "fallback",
+              attemptedProviderIds: selection.selection.attemptedProviderIds.slice(
+                0,
+                index + 1,
+              ),
+              fallbackFromProviderId:
+                index === 0 ? null : candidateSelections[0]?.candidate.providerId ?? null,
+            },
+          }),
         };
+
+        if (!result.error.retryable) {
+          return {
+            ok: false,
+            error: lastFailure,
+          };
+        }
       }
 
-      return adapter.invoke(runtimeInput);
+      return {
+        ok: false,
+        error:
+          lastFailure ??
+          {
+            code: "runtime_unavailable",
+            message: "No runtime provider could satisfy this request.",
+            detail:
+              "Review provider policy candidates, adapter health, and circuit-breaker state.",
+            retryable: true,
+            runtime: null,
+          },
+      };
     },
   };
 }

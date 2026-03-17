@@ -1210,6 +1210,8 @@ describe("chat routes", () => {
           run_id: expect.any(String),
           active_group_id: "grp_research",
           runtime_id: "placeholder_structured",
+          provider_id: "local_structured",
+          provider_model_id: "local-structured-v1",
         },
         choices: [
           {
@@ -1239,6 +1241,9 @@ describe("chat routes", () => {
         id: "placeholder_structured",
         label: "Structured Placeholder Runtime",
         status: "available",
+        providerId: "local_structured",
+        modelId: "local-structured-v1",
+        requestType: "chat_completion",
       });
     } finally {
       await app.close();

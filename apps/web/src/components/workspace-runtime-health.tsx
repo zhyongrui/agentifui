@@ -45,22 +45,42 @@ export function WorkspaceRuntimeHealthCards(props: {
     return null;
   }
 
+  const providers = snapshot.providers ?? [];
+
   return (
-    <div className="admin-stat-grid">
-      {snapshot.runtimes.map((runtime) => (
-        <article className="admin-stat-card" key={runtime.id}>
-          <span>{runtime.label}</span>
-          <strong>{runtime.status}</strong>
-          <p>{runtime.id}</p>
-          <div className="tag-row admin-tag-row">
-            {listEnabledCapabilities(runtime.capabilities).map((capability) => (
-              <span className="tag tag-muted" key={`${runtime.id}:${capability}`}>
-                {capability}
-              </span>
-            ))}
-          </div>
-        </article>
-      ))}
-    </div>
+    <>
+      <div className="admin-stat-grid">
+        {snapshot.runtimes.map((runtime) => (
+          <article className="admin-stat-card" key={runtime.id}>
+            <span>{runtime.label}</span>
+            <strong>{runtime.status}</strong>
+            <p>{runtime.id}</p>
+            <div className="tag-row admin-tag-row">
+              {listEnabledCapabilities(runtime.capabilities).map((capability) => (
+                <span className="tag tag-muted" key={`${runtime.id}:${capability}`}>
+                  {capability}
+                </span>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+      {providers.length > 0 ? (
+        <div className="admin-stat-grid">
+          {providers.map((provider) => (
+            <article className="admin-stat-card" key={provider.id}>
+              <span>{provider.label}</span>
+              <strong>{provider.status}</strong>
+              <p>{provider.models.map((model) => model.id).join(", ")}</p>
+              <div className="tag-row admin-tag-row">
+                <span className="tag tag-muted">{provider.adapterId}</span>
+                <span className="tag tag-muted">circuit {provider.circuitBreaker.state}</span>
+                <span className="tag tag-muted">retry {provider.retryPolicy.maxAttempts}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }

@@ -56,6 +56,69 @@ describe("workspace runtime service", () => {
           status: "available",
         }),
       ]),
+      providers: expect.arrayContaining([
+        expect.objectContaining({
+          id: "local_fast",
+          adapterId: "placeholder",
+        }),
+        expect.objectContaining({
+          id: "local_structured",
+          adapterId: "placeholder_structured",
+        }),
+      ]),
+    });
+  });
+
+  it("falls back to the fast provider when the structured provider circuit is open", async () => {
+    const service = createWorkspaceRuntimeService({
+      openCircuitProviderIds: ["local_structured"],
+      resolveTenantRuntimeMode() {
+        return "strict";
+      },
+    });
+
+    const result = await service.invoke({
+      appId: "app_runbook_mentor",
+      attachments: [],
+      conversation: {
+        ...baseConversation,
+        app: {
+          ...baseConversation.app,
+          id: "app_runbook_mentor",
+          slug: "runbook-mentor",
+          name: "Runbook Mentor",
+          kind: "automation",
+          shortCode: "RM",
+        },
+      },
+      latestPrompt: "Turn this SOP into ordered steps.",
+      messages: [
+        {
+          role: "user",
+          content: "Turn this SOP into ordered steps.",
+        },
+      ],
+      requestedModel: "runbook-mentor",
+      retrieval: null,
+      runtimeInput: null,
+      tenantId: "tenant-dev",
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error("expected fallback runtime invocation to succeed");
+    }
+
+    expect(result.data.runtime).toMatchObject({
+      id: "placeholder",
+      providerId: "local_fast",
+      modelId: "local-fast-v1",
+      selection: {
+        source: "fallback",
+        fallbackFromProviderId: "local_structured",
+        attemptedProviderIds: ["local_structured", "local_fast"],
+      },
     });
   });
 

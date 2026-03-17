@@ -23,3 +23,5 @@ export * from "./chat/index.js";
 export * from "./admin/index.js";
 export * from "./knowledge/index.js";
 export * from "./tools/index.js";
+export * from "./providers/index.js";
+export * from "./connectors/index.js";

@@ -1,4 +1,11 @@
 import type { ChatToolCall } from "../tools/contracts.js";
+import type {
+  RuntimeProviderCircuitBreaker,
+  RuntimeProviderPricing,
+  RuntimeProviderRequestType,
+  RuntimeProviderRetryPolicy,
+  RuntimeProviderSelectionPolicy,
+} from "../providers/contracts.js";
 
 export type WorkspaceAppKind =
   | "chat"
@@ -511,6 +518,17 @@ export type WorkspaceRunRuntime = {
   status: WorkspaceRuntimeHealthState;
   capabilities: WorkspaceRuntimeCapabilities;
   invokedAt: string;
+  providerId?: string;
+  providerLabel?: string;
+  modelId?: string;
+  requestType?: RuntimeProviderRequestType;
+  pricing?: RuntimeProviderPricing;
+  retryPolicy?: RuntimeProviderRetryPolicy;
+  circuitBreaker?: RuntimeProviderCircuitBreaker;
+  selection?: RuntimeProviderSelectionPolicy & {
+    attemptedProviderIds: string[];
+    fallbackFromProviderId: string | null;
+  };
 };
 
 export type WorkspaceRunToolExecutionStatus = "succeeded" | "failed";

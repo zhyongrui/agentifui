@@ -14,6 +14,7 @@ import { registerBasePlugins } from './plugins/base.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAdminRoutes } from './routes/admin.js';
+import { registerAdminConnectorRoutes } from './routes/admin-connectors.js';
 import { registerAdminIdentityRoutes } from './routes/admin-identity.js';
 import { registerAdminSourceRoutes } from './routes/admin-sources.js';
 import { registerRootRoutes } from './routes/root.js';
@@ -37,10 +38,15 @@ import { createPersistentAdminService } from './services/persistent-admin-servic
 import { createPersistentAuditService } from './services/persistent-audit-service.js';
 import { createPersistentAuthService } from './services/persistent-auth-service.js';
 import { createPersistentKnowledgeService } from './services/persistent-knowledge-service.js';
+import { createPersistentConnectorService } from './services/persistent-connector-service.js';
 import {
   createPersistentWorkspaceService,
   ensureWorkspaceCatalogSeed,
 } from './services/persistent-workspace-service.js';
+import {
+  createConnectorService,
+  type ConnectorService,
+} from './services/connector-service.js';
 import { createLocalWorkspaceFileStorage } from './services/workspace-file-storage.js';
 import {
   createWorkspaceService,
@@ -63,6 +69,7 @@ type BuildAppOptions = {
   auditService?: AuditService;
   adminService?: AdminService;
   knowledgeService?: KnowledgeService;
+  connectorService?: ConnectorService;
   workspaceService?: WorkspaceService;
   runtimeService?: WorkspaceRuntimeService;
   toolRegistryService?: ToolRegistryService;
@@ -143,6 +150,9 @@ export async function buildApp(
   const knowledgeService =
     options.knowledgeService ??
     (database ? createPersistentKnowledgeService(database) : createKnowledgeService());
+  const connectorService =
+    options.connectorService ??
+    (database ? createPersistentConnectorService(database) : createConnectorService());
   const workspaceService =
     options.workspaceService ??
     (database
@@ -156,6 +166,10 @@ export async function buildApp(
     options.runtimeService ??
     createWorkspaceRuntimeService({
       degradedRuntimeIds: env.degradedRuntimeIds,
+      degradedProviderIds: env.degradedProviderIds,
+      openCircuitProviderIds: env.openCircuitProviderIds,
+      resolveTenantRuntimeMode: tenantId =>
+        env.tenantRuntimeModes?.[tenantId] ?? 'standard',
     });
   const toolRegistryService =
     options.toolRegistryService ??
@@ -231,6 +245,13 @@ export async function buildApp(
   );
   await registerAdminIdentityRoutes(app, authService, adminService, auditService);
   await registerAdminSourceRoutes(app, authService, adminService, knowledgeService, auditService);
+  await registerAdminConnectorRoutes(
+    app,
+    authService,
+    adminService,
+    connectorService,
+    auditService,
+  );
   await registerWorkspaceRoutes(
     app,
     authService,

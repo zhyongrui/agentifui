@@ -85,6 +85,7 @@ import {
   buildWorkspaceToolExecutionFailure,
   parseWorkspaceRunFailure,
 } from "./workspace-run-failure.js";
+import { parseWorkspaceRunRuntime } from "./workspace-run-runtime.js";
 import {
   buildWorkspaceConversationPresence,
   pruneWorkspacePresenceEntries,
@@ -1717,46 +1718,7 @@ function toWorkspaceRunUsage(
 }
 
 function toWorkspaceRunRuntime(value: unknown): WorkspaceRunRuntime | null {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-
-  const runtime = value as Record<string, unknown>;
-  const capabilities =
-    typeof runtime.capabilities === "object" && runtime.capabilities !== null
-      ? (runtime.capabilities as Record<string, unknown>)
-      : null;
-
-  if (
-    typeof runtime.id !== "string" ||
-    typeof runtime.label !== "string" ||
-    (runtime.status !== "available" && runtime.status !== "degraded") ||
-    typeof runtime.invokedAt !== "string" ||
-    !capabilities ||
-    typeof capabilities.streaming !== "boolean" ||
-    typeof capabilities.citations !== "boolean" ||
-    typeof capabilities.artifacts !== "boolean" ||
-    typeof capabilities.safety !== "boolean" ||
-    typeof capabilities.pendingActions !== "boolean" ||
-    typeof capabilities.files !== "boolean"
-  ) {
-    return null;
-  }
-
-  return {
-    id: runtime.id,
-    label: runtime.label,
-    status: runtime.status,
-    invokedAt: runtime.invokedAt,
-    capabilities: {
-      streaming: capabilities.streaming,
-      citations: capabilities.citations,
-      artifacts: capabilities.artifacts,
-      safety: capabilities.safety,
-      pendingActions: capabilities.pendingActions,
-      files: capabilities.files,
-    },
-  };
+  return parseWorkspaceRunRuntime(value);
 }
 
 function toWorkspaceConversation(row: ConversationRow): WorkspaceConversation {

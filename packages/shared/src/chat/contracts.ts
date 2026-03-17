@@ -90,6 +90,8 @@ export type ChatCompletionResponse = {
     run_id: string;
     active_group_id: string;
     runtime_id?: string;
+    provider_id?: string;
+    provider_model_id?: string;
   };
 };
 

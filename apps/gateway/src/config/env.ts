@@ -17,6 +17,9 @@ export type GatewayEnv = {
   authLockoutThreshold: number;
   authLockoutDurationMs: number;
   degradedRuntimeIds?: string[];
+  degradedProviderIds?: string[];
+  openCircuitProviderIds?: string[];
+  tenantRuntimeModes?: Record<string, 'degraded' | 'standard' | 'strict'>;
 };
 
 const DEFAULT_GATEWAY_HOST = '0.0.0.0';
@@ -112,6 +115,36 @@ function parseRuntimeIdList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function parseTenantRuntimeModes(
+  value: string | undefined,
+): Record<string, 'degraded' | 'standard' | 'strict'> {
+  if (!value) {
+    return {};
+  }
+
+  return value
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean)
+    .reduce<Record<string, 'degraded' | 'standard' | 'strict'>>(
+      (accumulator, entry) => {
+        const [rawTenantId, rawMode] = entry.split('=');
+        const tenantId = rawTenantId?.trim();
+        const mode = rawMode?.trim();
+
+        if (
+          tenantId &&
+          (mode === 'degraded' || mode === 'standard' || mode === 'strict')
+        ) {
+          accumulator[tenantId] = mode;
+        }
+
+        return accumulator;
+      },
+      {},
+    );
+}
+
 function parseBetterAuthSecret(
   value: string | undefined,
   nodeEnv: GatewayEnv['nodeEnv']
@@ -161,5 +194,12 @@ export function parseGatewayEnv(source: NodeJS.ProcessEnv): GatewayEnv {
       'GATEWAY_AUTH_LOCKOUT_DURATION_MS'
     ),
     degradedRuntimeIds: parseRuntimeIdList(source.GATEWAY_DEGRADED_RUNTIMES),
+    degradedProviderIds: parseRuntimeIdList(source.GATEWAY_DEGRADED_PROVIDERS),
+    openCircuitProviderIds: parseRuntimeIdList(
+      source.GATEWAY_OPEN_CIRCUIT_PROVIDERS
+    ),
+    tenantRuntimeModes: parseTenantRuntimeModes(
+      source.GATEWAY_TENANT_RUNTIME_MODES
+    ),
   };
 }

@@ -1505,12 +1505,16 @@ async function resolveConversationAttachments(
 function buildMetadataEvent(input: {
   conversation: WorkspaceConversation;
   runtimeId?: string;
+  providerId?: string;
+  providerModelId?: string;
 }): string {
   return `event: agentif.metadata\ndata: ${JSON.stringify({
     conversation_id: input.conversation.id,
     run_id: input.conversation.run.id,
     trace_id: input.conversation.run.traceId,
     ...(input.runtimeId ? { runtime_id: input.runtimeId } : {}),
+    ...(input.providerId ? { provider_id: input.providerId } : {}),
+    ...(input.providerModelId ? { provider_model_id: input.providerModelId } : {}),
   })}\n\n`;
 }
 
@@ -1593,6 +1597,8 @@ function buildBlockingResponse(input: {
   suggestedPrompts: string[];
   toolCalls: ChatToolCall[];
   runtimeId?: string;
+  providerId?: string;
+  providerModelId?: string;
 }): ChatCompletionResponse {
   return {
     id: input.conversation.run.id,
@@ -1634,6 +1640,8 @@ function buildBlockingResponse(input: {
       run_id: input.conversation.run.id,
       active_group_id: input.conversation.activeGroup.id,
       ...(input.runtimeId ? { runtime_id: input.runtimeId } : {}),
+      ...(input.providerId ? { provider_id: input.providerId } : {}),
+      ...(input.providerModelId ? { provider_model_id: input.providerModelId } : {}),
     },
   };
 }
@@ -1676,6 +1684,8 @@ async function* streamCompletionEvents(input: {
     yield buildMetadataEvent({
       conversation: input.conversation,
       runtimeId: input.runtime?.id,
+      providerId: input.runtime?.providerId,
+      providerModelId: input.runtime?.modelId,
     });
     yield buildChunkEvent(
       buildStreamingChunk({
@@ -2613,6 +2623,8 @@ export async function registerChatRoutes(
       suggestedPrompts,
       toolCalls,
       runtimeId: runtime.id,
+      providerId: runtime.providerId,
+      providerModelId: runtime.modelId,
     });
   });
 

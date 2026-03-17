@@ -59,6 +59,7 @@ import {
   buildWorkspaceToolExecutionFailure,
   parseWorkspaceRunFailure,
 } from './workspace-run-failure.js';
+import { parseWorkspaceRunRuntime } from './workspace-run-runtime.js';
 import {
   buildWorkspaceConversationPresence,
   pruneWorkspacePresenceEntries,
@@ -740,48 +741,7 @@ function buildUsageFromOutputs(run: WorkspaceRunRecord): WorkspaceRun['usage'] {
 function buildRuntimeFromOutputs(
   outputs: Record<string, unknown>
 ): WorkspaceRunRuntime | null {
-  const candidate = outputs.runtime;
-
-  if (typeof candidate !== 'object' || candidate === null) {
-    return null;
-  }
-
-  const runtime = candidate as Record<string, unknown>;
-  const capabilities =
-    typeof runtime.capabilities === 'object' && runtime.capabilities !== null
-      ? (runtime.capabilities as Record<string, unknown>)
-      : null;
-
-  if (
-    typeof runtime.id !== 'string' ||
-    typeof runtime.label !== 'string' ||
-    (runtime.status !== 'available' && runtime.status !== 'degraded') ||
-    typeof runtime.invokedAt !== 'string' ||
-    !capabilities ||
-    typeof capabilities.streaming !== 'boolean' ||
-    typeof capabilities.citations !== 'boolean' ||
-    typeof capabilities.artifacts !== 'boolean' ||
-    typeof capabilities.safety !== 'boolean' ||
-    typeof capabilities.pendingActions !== 'boolean' ||
-    typeof capabilities.files !== 'boolean'
-  ) {
-    return null;
-  }
-
-  return {
-    id: runtime.id,
-    label: runtime.label,
-    status: runtime.status,
-    invokedAt: runtime.invokedAt,
-    capabilities: {
-      streaming: capabilities.streaming,
-      citations: capabilities.citations,
-      artifacts: capabilities.artifacts,
-      safety: capabilities.safety,
-      pendingActions: capabilities.pendingActions,
-      files: capabilities.files,
-    },
-  };
+  return parseWorkspaceRunRuntime(outputs.runtime);
 }
 
 function readPendingActionsFromOutputs(outputs: Record<string, unknown>): WorkspaceHitlStep[] {
