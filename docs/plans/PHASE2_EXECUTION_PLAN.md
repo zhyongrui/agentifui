@@ -251,11 +251,11 @@ Execution status:
 | completed | `P4-E-01` | launch / completion / retrieval / storage / export billable records 已落地                            |
 | completed | `P4-E-02` | tenant billing plans / soft limit / hard stop / feature flags 已落地                                  |
 | completed | `P4-E-03` | reconciliation script 已补到 ops lane                                                                  |
-| pending   | `P4-E-04` | 下一项，补 invoice/export-ready summary breakdown（tenant/app/group/provider）                         |
+| completed | `P4-E-04` | invoice/export-ready summary breakdown（tenant/app/group/provider） 已落地                             |
 | completed | `P4-E-05` | admin billing override controls 已落地                                                                 |
 | completed | `P4-E-06` | workspace billing warning banner 已落地                                                                |
 | completed | `P4-E-07` | billing audit coverage 已补齐                                                                          |
-| pending   | `P4-E-08` | 继续补 grace / corrected-entry 更细测试                                                                |
+| completed | `P4-E-08` | grace / corrected-entry 语义和验证已补齐                                                               |
 | completed | `P4-E-09` | billing browser coverage 已补齐                                                                        |
 | completed | `P4-E-10` | billing masking / retention rules已文档化并落到 export boundary                                        |
 | completed | `P4-E-11` | finance/ops billing export surface 已落地                                                              |
@@ -309,7 +309,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P4-E-04`
+- the active follow-on item is `P4-F-01`
 
 ## 6. Detailed Execution Notes
 
@@ -1016,11 +1016,11 @@ Legend:
 - [x] `P4-E-01` Define billable usage records for launch, completion, retrieval, storage, and export actions
 - [x] `P4-E-02` Add tenant billing plans with feature flags, quotas, soft limits, and hard-stop behavior
 - [x] `P4-E-03` Add metering reconciliation jobs that compare provider-side usage with local run records
-- [ ] `P4-E-04` Add invoice/export-ready cost summaries by tenant, app, group, and provider
+- [x] `P4-E-04` Add invoice/export-ready cost summaries by tenant, app, group, and provider
 - [x] `P4-E-05` Add admin override controls for grace periods, credit grants, and temporary limit raises
 - [x] `P4-E-06` Add end-user warning banners for approaching cost thresholds
 - [x] `P4-E-07` Add audit coverage for billing-plan changes, overrides, and meter adjustments
-- [ ] `P4-E-08` Add tests for overage behavior, grace windows, and corrected billing entries
+- [x] `P4-E-08` Add tests for overage behavior, grace windows, and corrected billing entries
 - [x] `P4-E-09` Add browser coverage for quota/cost warning states and admin override flows
 - [x] `P4-E-10` Add retention and masking rules for billing payloads that contain user or run references
 - [x] `P4-E-11` Add data export surfaces for finance/ops review without leaking raw prompts
@@ -1073,18 +1073,18 @@ Legend:
 
 ### 7.26 Future Platform Queue: `P4-I` Documentation, Onboarding, And AI-Session Continuity
 
-- [ ] `P4-I-01` Define a required dev-log template for code, test, infra, and browser-validation continuity
-- [ ] `P4-I-02` Add a rolling environment-status document with active ports, ingress rules, and known host caveats
-- [ ] `P4-I-03` Add architecture diagrams for auth, chat runtime, persistence, and admin governance flows
-- [ ] `P4-I-04` Add a “new AI session bootstrap” guide that explains where to read first and what to verify
-- [ ] `P4-I-05` Add a release-state document mapping completed plan items to shipped user-facing behavior
-- [ ] `P4-I-06` Add a “known flaky host behaviors” appendix with mitigation commands and recovery steps
-- [ ] `P4-I-07` Add onboarding checklists for local dev, browser QA, staging deploy, and production diagnostics
-- [ ] `P4-I-08` Add naming/versioning rules for plans, migrations, fixtures, and seeded app data
+- [x] `P4-I-01` Define a required dev-log template for code, test, infra, and browser-validation continuity
+- [x] `P4-I-02` Add a rolling environment-status document with active ports, ingress rules, and known host caveats
+- [x] `P4-I-03` Add architecture diagrams for auth, chat runtime, persistence, and admin governance flows
+- [x] `P4-I-04` Add a “new AI session bootstrap” guide that explains where to read first and what to verify
+- [x] `P4-I-05` Add a release-state document mapping completed plan items to shipped user-facing behavior
+- [x] `P4-I-06` Add a “known flaky host behaviors” appendix with mitigation commands and recovery steps
+- [x] `P4-I-07` Add onboarding checklists for local dev, browser QA, staging deploy, and production diagnostics
+- [x] `P4-I-08` Add naming/versioning rules for plans, migrations, fixtures, and seeded app data
 - [ ] `P4-I-09` Add ownership fields to long-range plan items so future sessions can group work coherently
-- [ ] `P4-I-10` Add archival rules for old dev logs, stale plans, and superseded deployment guides
-- [ ] `P4-I-11` Add documentation coverage checks into CI so critical guides cannot silently drift
-- [ ] `P4-I-12` Document what must be pushed to git before ending any long-running implementation round
+- [x] `P4-I-10` Add archival rules for old dev logs, stale plans, and superseded deployment guides
+- [x] `P4-I-11` Add documentation coverage checks into CI so critical guides cannot silently drift
+- [x] `P4-I-12` Document what must be pushed to git before ending any long-running implementation round
 
 ## 8. References
 
