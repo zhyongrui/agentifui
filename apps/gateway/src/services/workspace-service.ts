@@ -109,7 +109,14 @@ type WorkspaceConversationResult =
       ok: true;
       data: WorkspaceConversation;
     }
-  | WorkspaceLookupFailure;
+  | WorkspaceLookupFailure
+  | {
+      ok: false;
+      statusCode: 409;
+      code: 'WORKSPACE_ACTION_CONFLICT';
+      message: string;
+      details?: unknown;
+    };
 
 type WorkspaceConversationRunsResult =
   | {
@@ -141,6 +148,7 @@ type WorkspaceConversationListInput = {
 
 type WorkspaceConversationUpdateInput = {
   conversationId: string;
+  expectedUpdatedAt?: string;
   pinned?: boolean;
   status?: WorkspaceConversationStatus;
   title?: string;
@@ -212,6 +220,7 @@ type WorkspaceSharedCommentCreateInput = {
 };
 
 type WorkspaceSharedConversationUpdateInput = {
+  expectedUpdatedAt?: string;
   shareId: string;
   pinned?: boolean;
   status?: WorkspaceConversationStatus;
@@ -617,6 +626,16 @@ function buildTraceId() {
   return randomUUID().replace(/-/g, '');
 }
 
+function nextWorkspaceUpdatedAt(currentUpdatedAt?: string | null) {
+  const now = Date.now();
+  const currentMs =
+    typeof currentUpdatedAt === 'string' ? new Date(currentUpdatedAt).getTime() : Number.NaN;
+  const nextMs =
+    Number.isFinite(currentMs) && currentMs >= now ? currentMs + 1 : now;
+
+  return new Date(nextMs).toISOString();
+}
+
 function applyConversationUpdates(
   conversation: WorkspaceConversationRecord,
   input: {
@@ -637,7 +656,28 @@ function applyConversationUpdates(
     conversation.pinned = input.pinned;
   }
 
-  conversation.updatedAt = new Date().toISOString();
+  conversation.updatedAt = nextWorkspaceUpdatedAt(conversation.updatedAt);
+}
+
+function buildConversationUpdateConflict(
+  conversation: Pick<WorkspaceConversation, "id" | "updatedAt" | "title" | "status" | "pinned">,
+  expectedUpdatedAt?: string,
+): WorkspaceConversationResult {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: 'WORKSPACE_ACTION_CONFLICT',
+    message:
+      'The workspace conversation was updated by another collaborator. Refresh and retry your changes.',
+    details: {
+      conversationId: conversation.id,
+      expectedUpdatedAt: expectedUpdatedAt ?? null,
+      currentUpdatedAt: conversation.updatedAt,
+      currentTitle: conversation.title,
+      currentStatus: conversation.status,
+      currentPinned: conversation.pinned,
+    },
+  };
 }
 
 function resolveRunType(kind: WorkspaceAppLaunch['app']['kind']): WorkspaceRunType {
@@ -2078,6 +2118,16 @@ export function createWorkspaceService(options: {
         };
       }
 
+      if (
+        input.expectedUpdatedAt !== undefined &&
+        input.expectedUpdatedAt !== conversation.updatedAt
+      ) {
+        return buildConversationUpdateConflict(
+          toWorkspaceConversationData(conversation),
+          input.expectedUpdatedAt,
+        );
+      }
+
       applyConversationUpdates(conversation, input);
 
       return {
@@ -3114,6 +3164,16 @@ export function createWorkspaceService(options: {
           code: "WORKSPACE_NOT_FOUND",
           message: "The target workspace conversation could not be found.",
         };
+      }
+
+      if (
+        input.expectedUpdatedAt !== undefined &&
+        input.expectedUpdatedAt !== conversation.updatedAt
+      ) {
+        return buildConversationUpdateConflict(
+          toWorkspaceConversationData(conversation),
+          input.expectedUpdatedAt,
+        );
       }
 
       applyConversationUpdates(conversation, input);

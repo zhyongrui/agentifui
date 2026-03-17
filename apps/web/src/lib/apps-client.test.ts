@@ -879,6 +879,7 @@ describe('apps client', () => {
     );
 
     const result = await updateWorkspaceSharedConversation('session-123', 'share-123', {
+      expectedUpdatedAt: '2026-03-17T10:00:00.000Z',
       title: 'Reviewer updated title',
       status: 'archived',
       pinned: true,
@@ -891,6 +892,7 @@ describe('apps client', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
+        expectedUpdatedAt: '2026-03-17T10:00:00.000Z',
         title: 'Reviewer updated title',
         status: 'archived',
         pinned: true,

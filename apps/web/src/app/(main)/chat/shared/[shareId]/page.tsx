@@ -159,6 +159,7 @@ export default function SharedConversationPage() {
           pinned: "置顶会话",
           saveMetadata: "保存会话设置",
           savingMetadata: "保存中...",
+          conflict: "有其他协作者先更新了会话设置。页面已刷新到最新状态，请检查后重试。",
           active: "活跃",
           archived: "已归档",
           liveSync: "协作视图",
@@ -204,6 +205,8 @@ export default function SharedConversationPage() {
           pinned: "Pin conversation",
           saveMetadata: "Save conversation settings",
           savingMetadata: "Saving...",
+          conflict:
+            "Another collaborator updated the conversation settings first. The page has been refreshed to the latest state; review and retry.",
           active: "Active",
           archived: "Archived",
           liveSync: "Live view",
@@ -441,6 +444,7 @@ export default function SharedConversationPage() {
 
     try {
       const result = await updateWorkspaceSharedConversation(session.sessionToken, shareId, {
+        expectedUpdatedAt: payload.data.conversation.updatedAt,
         title: draftTitle,
         status: draftStatus,
         pinned: draftPinned,
@@ -450,6 +454,20 @@ export default function SharedConversationPage() {
         if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
           clearAuthSession(window.sessionStorage);
           router.replace("/login");
+          return;
+        }
+
+        if (result.error.code === "WORKSPACE_ACTION_CONFLICT") {
+          const refreshed = await fetchWorkspaceSharedConversation(
+            session.sessionToken,
+            shareId,
+          );
+
+          if (refreshed.ok) {
+            setPayload(refreshed);
+          }
+
+          setMetadataError(copy.conflict);
           return;
         }
 

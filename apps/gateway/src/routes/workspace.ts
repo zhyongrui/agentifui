@@ -874,6 +874,10 @@ export async function registerWorkspaceRoutes(
     const title =
       typeof body.title === 'string' ? body.title.trim() : undefined;
     const nextTitle = body.title === undefined ? undefined : title;
+    const expectedUpdatedAt =
+      typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt.trim() : undefined;
+    const nextExpectedUpdatedAt =
+      body.expectedUpdatedAt === undefined ? undefined : expectedUpdatedAt;
     const nextStatus =
       body.status === undefined
         ? undefined
@@ -885,6 +889,7 @@ export async function registerWorkspaceRoutes(
 
     if (
       !conversationId ||
+      (body.expectedUpdatedAt !== undefined && !nextExpectedUpdatedAt) ||
       nextStatus === null ||
       nextPinned === null ||
       (body.title !== undefined && !nextTitle)
@@ -910,6 +915,7 @@ export async function registerWorkspaceRoutes(
 
     const result = await workspaceService.updateConversationForUser(access.user, {
       conversationId,
+      expectedUpdatedAt: nextExpectedUpdatedAt,
       title: nextTitle,
       status: nextStatus ?? undefined,
       pinned: nextPinned ?? undefined,
@@ -1802,6 +1808,10 @@ export async function registerWorkspaceRoutes(
     const body = (request.body ?? {}) as Partial<WorkspaceConversationUpdateRequest>;
     const title = typeof body.title === 'string' ? body.title.trim() : undefined;
     const nextTitle = body.title === undefined ? undefined : title;
+    const expectedUpdatedAt =
+      typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt.trim() : undefined;
+    const nextExpectedUpdatedAt =
+      body.expectedUpdatedAt === undefined ? undefined : expectedUpdatedAt;
     const nextStatus =
       body.status === undefined ? undefined : isConversationStatus(body.status) ? body.status : null;
     const nextPinned =
@@ -1809,6 +1819,7 @@ export async function registerWorkspaceRoutes(
 
     if (
       !shareId ||
+      (body.expectedUpdatedAt !== undefined && !nextExpectedUpdatedAt) ||
       nextStatus === null ||
       nextPinned === null ||
       (body.title !== undefined && !nextTitle)
@@ -1841,6 +1852,7 @@ export async function registerWorkspaceRoutes(
 
     const result = await workspaceService.updateSharedConversationForUser(access.user, {
       shareId,
+      expectedUpdatedAt: nextExpectedUpdatedAt,
       title: nextTitle,
       status: nextStatus ?? undefined,
       pinned: nextPinned ?? undefined,

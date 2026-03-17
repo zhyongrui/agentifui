@@ -655,6 +655,7 @@ export type WorkspaceConversationResponse = {
 };
 
 export type WorkspaceConversationUpdateRequest = {
+  expectedUpdatedAt?: string;
   title?: string;
   status?: WorkspaceConversationStatus;
   pinned?: boolean;

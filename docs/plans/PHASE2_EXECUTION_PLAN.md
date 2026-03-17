@@ -147,7 +147,8 @@ Execution status:
 | completed | `P3-C-09` | multi-user collaboration browser coverage 已补齐并适配默认中文 UI                                      |
 | completed | `P3-C-10` | collaboration semantics / consistency model / known limits 已文档化                                   |
 | completed | `P3-C-06` | shared commenter / editor access modes、shared comments、shared metadata edits、UI/client/persistence 已闭环 |
-| active    | `P3-C-07` | 下一项，补共享会话元数据并发冲突处理和冲突提示                                                        |
+| completed | `P3-C-07` | shared metadata optimistic concurrency、409 conflict payload、UI refresh 提示和 route/client coverage 已闭环 |
+| active    | `P3-D-01` | 下一项，补 golden transcript fixtures 和评测基线                                                        |
 
 ## 5. First Batch Definition
 
@@ -197,7 +198,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P3-C-07`
+- the active follow-on item is `P3-D-01`
 
 ## 6. Detailed Execution Notes
 
@@ -767,7 +768,7 @@ Legend:
 - [x] `P3-C-04` Add comment or note threads attached to runs, artifacts, or messages
 - [x] `P3-C-05` Add mention/notification primitives for shared work review
 - [x] `P3-C-06` Add fine-grained permission modes for commenter vs editor vs owner
-- [ ] `P3-C-07` Add conflict handling for concurrent conversation metadata edits
+- [x] `P3-C-07` Add conflict handling for concurrent conversation metadata edits
 - [x] `P3-C-08` Add audit coverage for collaborative edits and comment actions
 - [x] `P3-C-09` Add browser coverage for multi-user collaboration behavior
 - [x] `P3-C-10` Document collaboration semantics, consistency model, and known limits

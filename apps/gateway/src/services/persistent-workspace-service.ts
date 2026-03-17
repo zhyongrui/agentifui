@@ -2779,7 +2779,7 @@ async function updateConversationForUser(
   database: DatabaseClient,
   user: AuthUser,
   input: WorkspaceConversationUpdateInput,
-): Promise<WorkspaceConversation | null> {
+): Promise<WorkspaceConversationResult> {
   const nextUpdatedAt = new Date().toISOString();
   const nextTitle = input.title ?? null;
   const nextStatus = input.status ?? null;
@@ -2790,19 +2790,67 @@ async function updateConversationForUser(
     set title = coalesce(${nextTitle}::varchar, c.title),
         status = coalesce(${nextStatus}::conversation_status, c.status),
         pinned = coalesce(${nextPinned}::boolean, c.pinned),
-        updated_at = ${nextUpdatedAt}::timestamptz
+        updated_at = greatest(
+          ${nextUpdatedAt}::timestamptz,
+          c.updated_at + interval '1 millisecond'
+        )
     where c.id = ${input.conversationId}
       and c.user_id = ${user.id}
+      and (
+        ${input.expectedUpdatedAt ?? null}::timestamptz is null
+        or c.updated_at = ${input.expectedUpdatedAt ?? null}::timestamptz
+      )
     returning c.id
   `;
 
   if (rows.length === 0) {
-    return null;
+    const conversation = await readConversationForUser(database, user, input.conversationId, {
+      includeDeleted: true,
+    });
+
+    if (!conversation) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "WORKSPACE_NOT_FOUND",
+        message: "The target workspace conversation could not be found.",
+      };
+    }
+
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "WORKSPACE_ACTION_CONFLICT",
+      message:
+        "The workspace conversation was updated by another collaborator. Refresh and retry your changes.",
+      details: {
+        conversationId: conversation.id,
+        expectedUpdatedAt: input.expectedUpdatedAt ?? null,
+        currentUpdatedAt: conversation.updatedAt,
+        currentTitle: conversation.title,
+        currentStatus: conversation.status,
+        currentPinned: conversation.pinned,
+      },
+    };
   }
 
-  return readConversationForUser(database, user, input.conversationId, {
+  const conversation = await readConversationForUser(database, user, input.conversationId, {
     includeDeleted: true,
   });
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace conversation could not be found.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: conversation,
+  };
 }
 
 async function readRunTimelineForUser(
@@ -4111,17 +4159,46 @@ async function updateSharedConversationForUser(
     set title = coalesce(${nextTitle}::varchar, title),
         status = coalesce(${nextStatus}::conversation_status, status),
         pinned = coalesce(${nextPinned}::boolean, pinned),
-        updated_at = ${nextUpdatedAt}::timestamptz
+        updated_at = greatest(
+          ${nextUpdatedAt}::timestamptz,
+          updated_at + interval '1 millisecond'
+        )
     where id = ${share.conversation_id}
+      and (
+        ${input.expectedUpdatedAt ?? null}::timestamptz is null
+        or updated_at = ${input.expectedUpdatedAt ?? null}::timestamptz
+      )
     returning id
   `;
 
   if (rows.length === 0) {
+    const conversation = await readConversationById(database, share.conversation_id, {
+      includeDeleted: true,
+    });
+
+    if (!conversation) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "WORKSPACE_NOT_FOUND",
+        message: "The target workspace conversation could not be found.",
+      };
+    }
+
     return {
       ok: false,
-      statusCode: 404,
-      code: "WORKSPACE_NOT_FOUND",
-      message: "The target workspace conversation could not be found.",
+      statusCode: 409,
+      code: "WORKSPACE_ACTION_CONFLICT",
+      message:
+        "The workspace conversation was updated by another collaborator. Refresh and retry your changes.",
+      details: {
+        conversationId: conversation.id,
+        expectedUpdatedAt: input.expectedUpdatedAt ?? null,
+        currentUpdatedAt: conversation.updatedAt,
+        currentTitle: conversation.title,
+        currentStatus: conversation.status,
+        currentPinned: conversation.pinned,
+      },
     };
   }
 
@@ -4959,21 +5036,7 @@ export function createPersistentWorkspaceService(
       user,
       input,
     ): Promise<WorkspaceConversationResult> {
-      const conversation = await updateConversationForUser(database, user, input);
-
-      if (!conversation) {
-        return {
-          ok: false,
-          statusCode: 404,
-          code: "WORKSPACE_NOT_FOUND",
-          message: "The target workspace conversation could not be found.",
-        };
-      }
-
-      return {
-        ok: true,
-        data: conversation,
-      };
+      return updateConversationForUser(database, user, input);
     },
     async listConversationRunsForUser(
       user,

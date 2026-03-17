@@ -2244,6 +2244,127 @@ describe("workspace routes", () => {
     }
   });
 
+  it("returns a conflict when shared editors submit stale conversation metadata", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService);
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+    authService.register({
+      email: "reviewer@example.com",
+      password: "Secure123",
+      displayName: "Reviewer",
+    });
+
+    const ownerLogin = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+    const reviewerLogin = authService.login({
+      email: "reviewer@example.com",
+      password: "Secure123",
+    });
+
+    expect(ownerLogin.ok).toBe(true);
+    expect(reviewerLogin.ok).toBe(true);
+
+    if (!ownerLogin.ok || !reviewerLogin.ok) {
+      throw new Error("expected conflict test logins to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const conversationId = (launch.json() as WorkspaceAppLaunchResponse).data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include a conversation id");
+      }
+
+      const shareCreate = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          groupId: "grp_research",
+          access: "editor",
+        },
+      });
+
+      expect(shareCreate.statusCode).toBe(200);
+      const share = (shareCreate.json() as WorkspaceConversationShareResponse).data;
+
+      const sharedConversation = await app.inject({
+        method: "GET",
+        url: `/workspace/shares/${share.id}`,
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(sharedConversation.statusCode).toBe(200);
+
+      const staleUpdatedAt = "2026-01-01T00:00:00.000Z";
+
+      const ownerUpdate = await app.inject({
+        method: "PUT",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          title: "Owner changed title first",
+        },
+      });
+
+      expect(ownerUpdate.statusCode).toBe(200);
+
+      const staleUpdate = await app.inject({
+        method: "PUT",
+        url: `/workspace/shares/${share.id}/conversation`,
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+        payload: {
+          expectedUpdatedAt: staleUpdatedAt,
+          title: "Reviewer stale title",
+        },
+      });
+
+      expect(staleUpdate.statusCode).toBe(409);
+      expect(staleUpdate.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_ACTION_CONFLICT",
+          details: expect.objectContaining({
+            conversationId,
+            expectedUpdatedAt: staleUpdatedAt,
+            currentTitle: "Owner changed title first",
+          }),
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("tracks shared conversation presence sessions for shared viewers", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);
