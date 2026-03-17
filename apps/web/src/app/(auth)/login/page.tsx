@@ -255,12 +255,13 @@ function LoginPageContent() {
         </div>
       ) : null}
 
-      {error ? <div className="notice error">{error}</div> : null}
+      {error ? <div className="notice error" aria-live="polite">{error}</div> : null}
 
       <form className="stack" onSubmit={handlePasswordSubmit}>
         <label className="field">
           <span>{loginMessages.email}</span>
           <input
+            autoComplete="email"
             type="email"
             placeholder="name@company.com"
             value={email}
@@ -285,6 +286,7 @@ function LoginPageContent() {
             <label className="field">
               <span>{loginMessages.password}</span>
               <input
+                autoComplete="current-password"
                 type="password"
                 placeholder="••••••••"
                 value={password}

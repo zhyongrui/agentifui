@@ -15,7 +15,12 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const { messages } = useI18n();
 
   return (
-    <main className="shell shell-main">
+    <main
+      className="shell shell-main"
+      data-i18n-scope="admin-shell"
+      id="main-content"
+      tabIndex={-1}
+    >
       <section className="panel panel-main stack">
         <div className="layout-toolbar">
           <LanguageSwitcher />

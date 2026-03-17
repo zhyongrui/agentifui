@@ -34,15 +34,18 @@ export function WorkspaceCommentThread(props: WorkspaceCommentThreadProps) {
   }
 
   return (
-    <section className="workspace-comment-thread">
+    <section
+      aria-label={props.title}
+      className="workspace-comment-thread"
+    >
       <div className="workspace-comment-thread-header">
         <h3>{props.title}</h3>
-        <span>{props.comments.length}</span>
+        <span aria-label={`${props.comments.length} comments`}>{props.comments.length}</span>
       </div>
       {props.comments.length > 0 ? (
-        <div className="workspace-comment-list">
+        <div className="workspace-comment-list" role="list">
           {props.comments.map((comment) => (
-            <article key={comment.id} className="workspace-comment-card">
+            <article key={comment.id} className="workspace-comment-card" role="listitem">
               <div className="workspace-comment-meta">
                 <strong>{comment.authorDisplayName ?? "Unknown user"}</strong>
                 <span>{new Date(comment.createdAt).toLocaleString(props.locale)}</span>
@@ -68,6 +71,7 @@ export function WorkspaceCommentThread(props: WorkspaceCommentThreadProps) {
           <label className="field">
             {props.textareaLabel}
             <textarea
+              aria-label={props.textareaLabel}
               rows={3}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -78,6 +82,7 @@ export function WorkspaceCommentThread(props: WorkspaceCommentThreadProps) {
           ) : null}
           {props.submitError ? <div className="notice error">{props.submitError}</div> : null}
           <button
+            aria-label={`${props.submitLabel}: ${props.title}`}
             className="primary"
             type="button"
             onClick={() => {

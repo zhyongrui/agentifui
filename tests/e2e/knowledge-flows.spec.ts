@@ -76,7 +76,13 @@ async function register(
 }
 
 async function login(page: Page, email: string) {
-  await page.goto("/login");
+  await page
+    .waitForURL(/\/login(?:\?|$)/, { timeout: 5_000 })
+    .catch(async () => {
+      if (!/\/login(?:\?|$)/.test(page.url())) {
+        await page.goto("/login");
+      }
+    });
   await page.getByLabel(EMAIL_LABEL).fill(email);
   await page.getByLabel(PASSWORD_LABEL).fill(DEFAULT_PASSWORD);
   await Promise.all([
@@ -95,6 +101,9 @@ async function expectAppsWorkspace(page: Page) {
   await expect(
     page.getByRole("heading", { name: APPS_WORKSPACE_NAME }),
   ).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByLabel(WORKING_GROUP_LABEL)).toBeVisible({
     timeout: 60_000,
   });
 }
@@ -175,7 +184,7 @@ Residents may request approved late access for labs.`);
     sourceCard.getByRole("button", { name: MARK_SUCCEEDED_BUTTON }).click(),
   ]);
 
-  await expect(sourceCard.getByText(/succeeded/)).toBeVisible();
+  await expect(sourceCard.locator("strong").filter({ hasText: /^succeeded$/i })).toBeVisible();
 
   await page.goto("/apps");
   await expectAppsWorkspace(page);

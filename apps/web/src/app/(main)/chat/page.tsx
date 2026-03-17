@@ -14,6 +14,7 @@ import { startTransition, useEffect, useState } from 'react';
 
 import { useI18n } from '../../../components/i18n-provider';
 import { MainSectionNav } from '../../../components/main-section-nav';
+import { EmptyState, SectionSkeleton } from '../../../components/section-state';
 import { WorkspaceRuntimeDegradedBanner } from '../../../components/workspace-runtime-health';
 import {
   fetchWorkspaceCatalog,
@@ -359,7 +360,7 @@ export default function ChatHistoryPage() {
   }
 
   if (isLoading) {
-    return <p className="lead">{copy.session}</p>;
+    return <SectionSkeleton blocks={4} lead={copy.session} title={copy.title} />;
   }
 
   const localizedApps = localizeWorkspaceCatalogApps(apps, locale);
@@ -552,10 +553,7 @@ export default function ChatHistoryPage() {
         {error ? <div className="notice error">{error}</div> : null}
 
         {items.length === 0 ? (
-          <div className="chat-empty-state">
-            <strong>{copy.noResultsTitle}</strong>
-            <p>{copy.noResultsLead}</p>
-          </div>
+          <EmptyState lead={copy.noResultsLead} title={copy.noResultsTitle} />
         ) : (
           <div className="conversation-history-list">
             {items.map(item => (

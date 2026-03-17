@@ -167,7 +167,10 @@ export function WorkspaceToolCallSummaryList(input: {
       {input.title ? (
         <span className="chat-suggested-prompts-label">{input.title}</span>
       ) : null}
-      <ul className="tool-summary-list">
+      <ul
+        aria-label={input.title ?? (input.locale === "zh-CN" ? "工具调用" : "Tool calls")}
+        className="tool-summary-list"
+      >
         {input.toolCalls.map((toolCall) => {
           const argumentPreview = parseToolArguments(toolCall.function.arguments);
 
@@ -212,7 +215,10 @@ export function WorkspaceToolExecutionSummaryList(input: {
       {input.title ? (
         <span className="chat-suggested-prompts-label">{input.title}</span>
       ) : null}
-      <ul className="tool-summary-list">
+      <ul
+        aria-label={input.title ?? (input.locale === "zh-CN" ? "工具执行" : "Tool executions")}
+        className="tool-summary-list"
+      >
         {input.executions.map((execution) => {
           const argumentPreview = parseToolArguments(
             execution.request.function.arguments,

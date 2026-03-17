@@ -13,6 +13,7 @@ import { ChatMarkdown } from "../../../../../components/chat-markdown";
 import { useI18n } from "../../../../../components/i18n-provider";
 import { MainSectionNav } from "../../../../../components/main-section-nav";
 import { WorkspaceCommentThread } from "../../../../../components/workspace-comments";
+import { SectionSkeleton } from "../../../../../components/section-state";
 import { WorkspaceSafetySignalList } from "../../../../../components/workspace-safety";
 import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-artifacts";
 import { WorkspaceCitationList } from "../../../../../components/workspace-sources";
@@ -494,7 +495,7 @@ export default function SharedConversationPage() {
   }
 
   if (isLoading) {
-    return <p className="lead">{copy.checking}</p>;
+    return <SectionSkeleton blocks={4} lead={copy.checking} title={copy.sharedConversation} />;
   }
 
   if (error) {
@@ -512,7 +513,7 @@ export default function SharedConversationPage() {
   }
 
   if (!payload || !payload.ok) {
-    return <p className="lead">{copy.loading}</p>;
+    return <SectionSkeleton blocks={5} lead={copy.loading} title={copy.sharedConversation} />;
   }
 
   const { conversation, share } = payload.data;

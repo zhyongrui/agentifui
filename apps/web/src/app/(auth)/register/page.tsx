@@ -53,12 +53,13 @@ export default function RegisterPage() {
       <h1>{registerMessages.title}</h1>
       <p className="lead">{registerMessages.lead}</p>
 
-      {error ? <div className="notice error">{error}</div> : null}
+      {error ? <div className="notice error" aria-live="polite">{error}</div> : null}
 
       <form className="stack" onSubmit={handleSubmit}>
         <label className="field">
           <span>{registerMessages.displayName}</span>
           <input
+            autoComplete="name"
             type="text"
             placeholder={registerMessages.displayNamePlaceholder}
             value={displayName}
@@ -69,6 +70,7 @@ export default function RegisterPage() {
         <label className="field">
           <span>{registerMessages.email}</span>
           <input
+            autoComplete="email"
             type="email"
             placeholder={registerMessages.emailPlaceholder}
             value={email}
@@ -80,6 +82,7 @@ export default function RegisterPage() {
         <label className="field">
           <span>{registerMessages.password}</span>
           <input
+            autoComplete="new-password"
             type="password"
             placeholder={registerMessages.passwordPlaceholder}
             value={password}

@@ -83,6 +83,7 @@ export function WorkspaceArtifactLinkList({
     <div className="artifact-link-list">
       {artifacts.map((artifact) => (
         <Link
+          aria-label={artifact.title}
           key={artifact.id}
           className="artifact-link-card"
           href={buildWorkspaceArtifactPreviewHref(artifact.id, {
@@ -134,7 +135,7 @@ export function WorkspaceArtifactPreview({
 
   if (artifact.kind === "table") {
     return (
-      <div className="artifact-table-wrap">
+      <div aria-label={artifact.title} className="artifact-table-wrap" role="region">
         <table className="artifact-table">
           <thead>
             <tr>
@@ -163,7 +164,7 @@ export function WorkspaceArtifactPreview({
 
   if (artifact.kind === "link") {
     return (
-      <div className="artifact-link-preview">
+      <div className="artifact-link-preview" role="group" aria-label={artifact.title}>
         <p>
           {artifact.summary ?? "This artifact points to an external resource."}
         </p>

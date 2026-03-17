@@ -259,6 +259,9 @@ async function expectAppsWorkspace(page: Page) {
   ).toBeVisible({
     timeout: 60_000,
   });
+  await expect(page.getByLabel(WORKING_GROUP_LABEL)).toBeVisible({
+    timeout: 60_000,
+  });
 }
 
 async function expectConversationSurface(
@@ -786,30 +789,36 @@ test("register/login/workspace controls work for a normal active user", async ({
   await page.getByRole("link", { name: APPS_WORKSPACE_NAME }).click();
   await expectAppsWorkspace(page);
 
-  await expect(appCard(page, "Service Copilot")).toBeVisible();
-  await expect(appCard(page, "Policy Watch")).toBeVisible();
+  await expect(appCard(page, SERVICE_COPILOT_APP)).toBeVisible();
+  await expect(appCard(page, POLICY_WATCH_APP)).toBeVisible();
   await expect(appCard(page, "Audit Lens")).toHaveCount(0);
 
   await Promise.all([
     waitForGatewayPut(page, "/workspace/preferences"),
-    appCard(page, "Service Copilot")
+    appCard(page, SERVICE_COPILOT_APP)
       .getByRole("button", { name: /^(Favorite|收藏)$/ })
       .click(),
   ]);
   await expect(
-    page.locator("section.workspace-section").filter({
-      has: page.getByRole("heading", { name: FAVORITES_NAME }),
-    }),
-  ).toContainText("Service Copilot");
+    page
+      .locator("section.workspace-section")
+      .filter({
+        has: page.getByRole("heading", { name: FAVORITES_NAME }),
+      })
+      .locator("article.app-card")
+      .filter({
+        has: page.getByRole("heading", { name: SERVICE_COPILOT_APP }),
+      }),
+  ).toHaveCount(1);
 
   await page.getByLabel(SEARCH_APPS_LABEL).fill("policy");
-  await expect(appCard(page, "Policy Watch")).toBeVisible();
-  await expect(appCard(page, "Service Copilot")).toHaveCount(0);
+  await expect(appCard(page, POLICY_WATCH_APP)).toBeVisible();
+  await expect(appCard(page, SERVICE_COPILOT_APP)).toHaveCount(0);
   await page.getByLabel(SEARCH_APPS_LABEL).fill("");
 
   await Promise.all([
     waitForGatewayPut(page, "/workspace/preferences"),
-    appCard(page, "Policy Watch")
+    appCard(page, POLICY_WATCH_APP)
       .getByRole("button", { name: /^(Switch to|切换到) Research Lab$/ })
       .click(),
   ]);
@@ -824,7 +833,7 @@ test("register/login/workspace controls work for a normal active user", async ({
 
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
-    appCard(page, "Policy Watch")
+    appCard(page, POLICY_WATCH_APP)
       .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);
@@ -979,19 +988,25 @@ test("register/login/workspace controls work for a normal active user", async ({
     page.locator("section.workspace-section").filter({
       has: page.getByRole("heading", { name: RECENT_NAME }),
     }),
-  ).toContainText("Policy Watch");
+  ).toContainText(POLICY_WATCH_APP);
 
   await page.reload();
   await expect(
-    page.locator("section.workspace-section").filter({
-      has: page.getByRole("heading", { name: FAVORITES_NAME }),
-    }),
-  ).toContainText("Service Copilot");
+    page
+      .locator("section.workspace-section")
+      .filter({
+        has: page.getByRole("heading", { name: FAVORITES_NAME }),
+      })
+      .locator("article.app-card")
+      .filter({
+        has: page.getByRole("heading", { name: SERVICE_COPILOT_APP }),
+      }),
+  ).toHaveCount(1);
   await expect(
     page.locator("section.workspace-section").filter({
       has: page.getByRole("heading", { name: RECENT_NAME }),
     }),
-  ).toContainText("Policy Watch");
+  ).toContainText(POLICY_WATCH_APP);
 
   await logout(page);
   await page.goto("/apps");
@@ -1012,7 +1027,7 @@ test("chat transcript renders markdown and math content", async ({ page }) => {
   });
   await expectAppsWorkspace(page);
 
-  const switchPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
+  const switchPolicyWatchButton = appCard(page, POLICY_WATCH_APP).getByRole(
     "button",
     {
       name: /^(Switch to|切换到) Research Lab$/,
@@ -1031,7 +1046,7 @@ test("chat transcript renders markdown and math content", async ({ page }) => {
     timeout: 15_000,
   });
 
-  const openPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
+  const openPolicyWatchButton = appCard(page, POLICY_WATCH_APP).getByRole(
     "button",
     {
       name: /^(Open app|打开应用)$/,
@@ -1258,7 +1273,7 @@ test("flagged prompts render safety banners and replay panels", async ({
   });
   await expectAppsWorkspace(page);
 
-  const switchPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
+  const switchPolicyWatchButton = appCard(page, POLICY_WATCH_APP).getByRole(
     "button",
     {
       name: /^(Switch to|切换到) Research Lab$/,
@@ -1275,7 +1290,7 @@ test("flagged prompts render safety banners and replay panels", async ({
     timeout: 15_000,
   });
 
-  const openPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
+  const openPolicyWatchButton = appCard(page, POLICY_WATCH_APP).getByRole(
     "button",
     {
       name: /^(Open app|打开应用)$/,
@@ -1343,7 +1358,7 @@ test("assistant suggested prompts can seed the composer", async ({ page }) => {
   });
   await expectAppsWorkspace(page);
 
-  const switchPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
+  const switchPolicyWatchButton = appCard(page, POLICY_WATCH_APP).getByRole(
     "button",
     {
       name: /^(Switch to|切换到) Research Lab$/,
@@ -1362,7 +1377,7 @@ test("assistant suggested prompts can seed the composer", async ({ page }) => {
     timeout: 15_000,
   });
 
-  const openPolicyWatchButton = appCard(page, "Policy Watch").getByRole(
+  const openPolicyWatchButton = appCard(page, POLICY_WATCH_APP).getByRole(
     "button",
     {
       name: /^(Open app|打开应用)$/,
@@ -1810,7 +1825,7 @@ test("chat history lists recent conversations and links back to timeline-aware r
   });
   await expectAppsWorkspace(page);
 
-  await appCard(page, "Policy Watch")
+  await appCard(page, POLICY_WATCH_APP)
     .getByRole("button", { name: /^(Switch to|切换到) Research Lab$/ })
     .click();
   await expect(
@@ -1818,7 +1833,7 @@ test("chat history lists recent conversations and links back to timeline-aware r
   ).toHaveValue("grp_research");
   await Promise.all([
     waitForGatewayPost(page, "/workspace/apps/launch"),
-    appCard(page, "Policy Watch")
+    appCard(page, POLICY_WATCH_APP)
       .getByRole("button", { name: /^(Open app|打开应用)$/ })
       .click(),
   ]);

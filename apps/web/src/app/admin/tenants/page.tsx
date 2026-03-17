@@ -16,6 +16,7 @@ import {
   updateAdminTenantStatus,
 } from '../../../lib/admin-client';
 import { useI18n } from '../../../components/i18n-provider';
+import { SectionSkeleton } from '../../../components/section-state';
 import { useAdminPageData } from '../../../lib/use-admin-page';
 
 function formatTimestamp(value: string) {
@@ -364,7 +365,7 @@ export default function AdminTenantsPage() {
   });
 
   if (isLoading) {
-    return <p className="lead">{copy.loading}</p>;
+    return <SectionSkeleton blocks={6} lead={copy.loading} title={copy.title} />;
   }
 
   return (

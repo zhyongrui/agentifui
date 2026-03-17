@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { useI18n } from '../../../components/i18n-provider';
+import { SectionSkeleton } from '../../../components/section-state';
 import {
   createAdminBreakGlassSession,
   createAdminDomainClaim,
@@ -285,7 +286,7 @@ export default function AdminIdentityPage() {
   );
 
   if (isLoading) {
-    return <p className="lead">{copy.loading}</p>;
+    return <SectionSkeleton blocks={6} lead={copy.loading} title={copy.title} />;
   }
 
   async function withMutation<T>(actionId: string, task: () => Promise<T>) {

@@ -120,6 +120,7 @@ async function fetchWorkspaceJson<TSuccess>(
     method: 'GET' | 'POST' | 'PUT';
     sessionToken: string;
     body?: unknown;
+    signal?: AbortSignal;
   }
 ): Promise<TSuccess | WorkspaceErrorResponse> {
   const response = await fetch(`${getGatewayBaseUrl()}${path}`, {
@@ -130,6 +131,7 @@ async function fetchWorkspaceJson<TSuccess>(
     },
     body: input.body ? JSON.stringify(input.body) : undefined,
     cache: 'no-store',
+    signal: input.signal,
   });
 
   return (await response.json()) as TSuccess | WorkspaceErrorResponse;
@@ -412,7 +414,10 @@ export async function fetchWorkspaceConversationRuns(
 export async function uploadWorkspaceConversationFile(
   sessionToken: string,
   conversationId: string,
-  input: WorkspaceConversationUploadRequest
+  input: WorkspaceConversationUploadRequest,
+  options: {
+    signal?: AbortSignal;
+  } = {}
 ): Promise<WorkspaceConversationUploadResponse | WorkspaceErrorResponse> {
   return fetchWorkspaceJson<WorkspaceConversationUploadResponse>(
     `/workspace/conversations/${conversationId}/uploads`,
@@ -420,6 +425,7 @@ export async function uploadWorkspaceConversationFile(
       method: 'POST',
       sessionToken,
       body: input,
+      signal: options.signal,
     }
   );
 }

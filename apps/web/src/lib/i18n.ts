@@ -4,6 +4,12 @@ export type AppLocale = (typeof supportedLocales)[number];
 
 export const defaultLocale: AppLocale = 'zh-CN';
 export const localeStorageKey = 'agentifui.locale';
+export const translationScopes = {
+  admin: ['admin.identity', 'admin.audit', 'admin.sources', 'admin.tenants'],
+  auth: ['auth.login', 'auth.register', 'auth.pending', 'auth.mfa'],
+  shared: ['chat.shared', 'chat.artifact_preview'],
+  workspace: ['apps.workspace', 'chat.history', 'chat.conversation'],
+} as const;
 
 type Messages = {
   language: {

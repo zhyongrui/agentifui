@@ -16,6 +16,7 @@ import {
   fetchAdminTenants,
 } from '../../../lib/admin-client';
 import { useI18n } from '../../../components/i18n-provider';
+import { EmptyState, SectionSkeleton } from '../../../components/section-state';
 import { useProtectedSession } from '../../../lib/use-protected-session';
 
 type AuditFilterFormState = {
@@ -393,7 +394,7 @@ export default function AdminAuditPage() {
       : EMPTY_FILTERS;
 
   if (isSessionLoading || (isDataLoading && !data)) {
-    return <p className="lead">{copy.loading}</p>;
+    return <SectionSkeleton blocks={6} lead={copy.loading} title={copy.title} />;
   }
 
   async function handleExport(format: 'csv' | 'json') {
@@ -812,7 +813,7 @@ export default function AdminAuditPage() {
           ) : null}
 
           {data.events.length === 0 ? (
-            <div className="workspace-empty">{copy.noMatchedEvents}</div>
+            <EmptyState lead={copy.filtersLead} title={copy.noMatchedEvents} />
           ) : (
             <div className="admin-grid">
               {data.events.map(event => (

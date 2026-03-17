@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "../../../../../components/i18n-provider";
 import { MainSectionNav } from "../../../../../components/main-section-nav";
 import { WorkspaceCommentThread } from "../../../../../components/workspace-comments";
+import { SectionSkeleton } from "../../../../../components/section-state";
 import {
   WorkspaceArtifactPreview,
   formatWorkspaceArtifactSize,
@@ -266,7 +267,7 @@ export default function ArtifactPreviewPage() {
   }
 
   if (isLoading) {
-    return <p className="lead">{copy.checking}</p>;
+    return <SectionSkeleton blocks={4} lead={copy.checking} title={copy.artifactPreview} />;
   }
 
   if (error) {
@@ -289,7 +290,7 @@ export default function ArtifactPreviewPage() {
   }
 
   if (!payload || !payload.ok) {
-    return <p className="lead">{copy.loading}</p>;
+    return <SectionSkeleton blocks={5} lead={copy.loading} title={copy.artifactPreview} />;
   }
 
   const artifact = payload.data;

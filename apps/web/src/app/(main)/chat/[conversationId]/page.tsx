@@ -40,6 +40,7 @@ import { MainSectionNav } from "../../../../components/main-section-nav";
 import { ChatMarkdown } from "../../../../components/chat-markdown";
 import { ConversationSharePanel } from "../../../../components/conversation-share-panel";
 import { WorkspaceCommentThread } from "../../../../components/workspace-comments";
+import { EmptyState, SectionSkeleton } from "../../../../components/section-state";
 import { WorkspaceArtifactLinkList } from "../../../../components/workspace-artifacts";
 import {
   WorkspaceRuntimeDegradedBanner,
@@ -421,6 +422,11 @@ export default function ConversationPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    completedCount: number;
+    currentFileName: string | null;
+    totalCount: number;
+  } | null>(null);
   const [isAwaitingRunMetadata, setIsAwaitingRunMetadata] = useState(false);
   const [activeFeedbackMessageId, setActiveFeedbackMessageId] = useState<
     string | null
@@ -455,6 +461,7 @@ export default function ConversationPage() {
   const [gatewayRuntime, setGatewayRuntime] =
     useState<GatewayRuntimeHealthSnapshot | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const uploadAbortControllerRef = useRef<AbortController | null>(null);
   const copiedMessageResetRef = useRef<number | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
@@ -516,6 +523,11 @@ export default function ConversationPage() {
           attachmentHint: `单个文件最多 ${formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)}。支持：文本、JSON、CSV、PDF、PNG、JPEG、WEBP、GIF。`,
           remove: "移除",
           uploading: "上传中...",
+          uploadCurrentFile: "当前文件",
+          uploadProgress: (completed: number, total: number) =>
+            `已完成 ${completed} / ${total} 个附件。`,
+          cancelUpload: "取消上传",
+          uploadCancelled: "附件上传已取消。",
           send: "发送消息",
           stopping: "停止中...",
           starting: "启动中...",
@@ -587,6 +599,11 @@ export default function ConversationPage() {
           attachmentHint: `Up to ${formatAttachmentSize(WORKSPACE_ATTACHMENT_MAX_BYTES)} per file. Supported: text, JSON, CSV, PDF, PNG, JPEG, WEBP, GIF.`,
           remove: "Remove",
           uploading: "Uploading...",
+          uploadCurrentFile: "Current file",
+          uploadProgress: (completed: number, total: number) =>
+            `${completed} / ${total} attachments uploaded.`,
+          cancelUpload: "Cancel upload",
+          uploadCancelled: "Attachment upload cancelled.",
           send: "Send message",
           stopping: "Stopping...",
           starting: "Starting...",
@@ -1058,11 +1075,22 @@ export default function ConversationPage() {
 
     setComposerError(null);
     setIsUploadingAttachments(true);
+    setUploadProgress({
+      completedCount: 0,
+      currentFileName: selectedFiles[0]?.name ?? null,
+      totalCount: selectedFiles.length,
+    });
+    const abortController = new AbortController();
+    uploadAbortControllerRef.current = abortController;
+    const uploadedAttachments: WorkspaceConversationAttachment[] = [];
 
     try {
-      const uploadedAttachments: WorkspaceConversationAttachment[] = [];
-
-      for (const file of selectedFiles) {
+      for (const [index, file] of selectedFiles.entries()) {
+        setUploadProgress({
+          completedCount: uploadedAttachments.length,
+          currentFileName: file.name,
+          totalCount: selectedFiles.length,
+        });
         const contentType = file.type.trim().toLowerCase();
 
         if (
@@ -1089,6 +1117,9 @@ export default function ConversationPage() {
             fileName: file.name,
             contentType,
             base64Data: await fileToBase64(file),
+          },
+          {
+            signal: abortController.signal,
           },
         );
 
@@ -1122,19 +1153,31 @@ export default function ConversationPage() {
         }
 
         uploadedAttachments.push(result.data);
-      }
-
-      if (uploadedAttachments.length > 0) {
         setDraftAttachments((currentAttachments) => [
           ...currentAttachments,
-          ...uploadedAttachments,
+          result.data,
         ]);
+        setUploadProgress({
+          completedCount: uploadedAttachments.length,
+          currentFileName: selectedFiles[index + 1]?.name ?? null,
+          totalCount: selectedFiles.length,
+        });
       }
-    } catch {
-      setComposerError("The attachment upload failed. Please retry.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setComposerError(copy.uploadCancelled);
+      } else {
+        setComposerError("The attachment upload failed. Please retry.");
+      }
     } finally {
       setIsUploadingAttachments(false);
+      setUploadProgress(null);
+      uploadAbortControllerRef.current = null;
     }
+  }
+
+  function handleAttachmentUploadCancel() {
+    uploadAbortControllerRef.current?.abort();
   }
 
   function handleAttachmentRemove(attachmentId: string) {
@@ -1812,11 +1855,11 @@ export default function ConversationPage() {
   }
 
   if (isLoading) {
-    return <p className="lead">{copy.checking}</p>;
+    return <SectionSkeleton blocks={4} lead={copy.checking} title={copy.conversation} />;
   }
 
   if (isConversationLoading) {
-    return <p className="lead">{copy.loading}</p>;
+    return <SectionSkeleton blocks={6} lead={copy.loading} title={copy.conversation} />;
   }
 
   if (conversationError) {
@@ -2137,7 +2180,11 @@ export default function ConversationPage() {
               const draftValues = pendingActionDrafts[step.id] ?? {};
 
               return (
-                <article key={step.id} className="chat-bubble assistant">
+                <article
+                  key={step.id}
+                  aria-label={`Pending action ${step.title}`}
+                  className="chat-bubble assistant"
+                >
                   <div className="chat-bubble-meta">
                     <span className="chat-bubble-label">Pending action</span>
                     <span
@@ -2160,6 +2207,7 @@ export default function ConversationPage() {
                   {step.kind === "approval" ? (
                     <div className="actions">
                       <button
+                        aria-label={step.approveLabel}
                         type="button"
                         className="primary"
                         disabled={isSubmitting || !isPending || isRuntimeDegraded}
@@ -2170,6 +2218,7 @@ export default function ConversationPage() {
                         {isSubmitting ? "Saving..." : step.approveLabel}
                       </button>
                       <button
+                        aria-label={step.rejectLabel}
                         type="button"
                         className="secondary"
                         disabled={isSubmitting || !isPending || isRuntimeDegraded}
@@ -2180,6 +2229,7 @@ export default function ConversationPage() {
                         {step.rejectLabel}
                       </button>
                       <button
+                        aria-label="Abandon pending action"
                         type="button"
                         className="secondary danger"
                         disabled={isSubmitting || !isPending || isRuntimeDegraded}
@@ -2251,6 +2301,7 @@ export default function ConversationPage() {
                       ))}
                       <div className="actions">
                         <button
+                          aria-label={step.submitLabel}
                           type="button"
                           className="primary"
                           disabled={isSubmitting || !isPending || isRuntimeDegraded}
@@ -2261,6 +2312,7 @@ export default function ConversationPage() {
                           {isSubmitting ? "Saving..." : step.submitLabel}
                         </button>
                         <button
+                          aria-label="Abandon pending action"
                           type="button"
                           className="secondary danger"
                           disabled={isSubmitting || !isPending || isRuntimeDegraded}
@@ -2307,15 +2359,22 @@ export default function ConversationPage() {
         ) : null}
 
         {messages.length === 0 ? (
-          <div className="chat-empty-state">
-            <strong>No messages yet.</strong>
-            <p>
-              Start with a prompt like "Summarize the current policy changes for
-              my team."
-            </p>
-          </div>
+          <EmptyState
+            lead={
+              locale === "zh-CN"
+                ? "先发一条具体问题，或附上一份文件让当前应用开始处理。"
+                : "Start with a concrete prompt, or attach a file to give this app context."
+            }
+            title={locale === "zh-CN" ? "还没有消息。" : "No messages yet."}
+          />
         ) : (
-          <div className="chat-placeholder">
+          <div
+            aria-busy={isStreaming}
+            aria-label={copy.transcript}
+            aria-live="polite"
+            className="chat-placeholder"
+            role="log"
+          >
             {messages.map((message, index) => (
               <article
                 key={message.id}
@@ -2351,6 +2410,12 @@ export default function ConversationPage() {
                 ) : null}
                 <div className="chat-message-actions">
                   <button
+                    aria-label={`${copy.copy}: ${describeTranscriptMessageLabel({
+                      appName: localizedApp.name,
+                      locale,
+                      message,
+                      userLabel: session.user.displayName,
+                    })}`}
                     type="button"
                     className="message-action-button"
                     onClick={() =>
@@ -2361,6 +2426,12 @@ export default function ConversationPage() {
                     {copiedMessageId === message.id ? copy.copied : copy.copy}
                   </button>
                   <button
+                    aria-label={`${copy.quote}: ${describeTranscriptMessageLabel({
+                      appName: localizedApp.name,
+                      locale,
+                      message,
+                      userLabel: session.user.displayName,
+                    })}`}
                     type="button"
                     className="message-action-button"
                     onClick={() => handleQuoteMessage(message)}
@@ -2370,6 +2441,7 @@ export default function ConversationPage() {
                   </button>
                   {message.role === "user" ? (
                     <button
+                      aria-label={`${copy.retry}: ${session.user.displayName}`}
                       type="button"
                       className="message-action-button"
                       onClick={() => handleRetryMessage(message)}
@@ -2386,6 +2458,7 @@ export default function ConversationPage() {
                   message.status === "completed" &&
                   index === messages.length - 1 ? (
                     <button
+                      aria-label={`${copy.regenerate}: ${localizedApp.name}`}
                       type="button"
                       className="message-action-button"
                       onClick={() => void handleRegenerateMessage(message.id)}
@@ -2423,6 +2496,7 @@ export default function ConversationPage() {
                       <button
                         type="button"
                         className="feedback-button"
+                        aria-label={copy.helpful}
                         aria-pressed={message.feedback?.rating === "positive"}
                         onClick={() =>
                           void handleFeedback(message.id, "positive")
@@ -2434,6 +2508,7 @@ export default function ConversationPage() {
                       <button
                         type="button"
                         className="feedback-button"
+                        aria-label={copy.needsWork}
                         aria-pressed={message.feedback?.rating === "negative"}
                         onClick={() =>
                           void handleFeedback(message.id, "negative")
@@ -2548,6 +2623,33 @@ export default function ConversationPage() {
             }
           />
           <p className="chat-composer-hint">{copy.attachmentHint}</p>
+          {uploadProgress ? (
+            <div aria-live="polite" className="upload-progress-card">
+              <div className="upload-progress-meta">
+                <strong>{copy.uploadProgress(uploadProgress.completedCount, uploadProgress.totalCount)}</strong>
+                {uploadProgress.currentFileName ? (
+                  <span>
+                    {copy.uploadCurrentFile}: {uploadProgress.currentFileName}
+                  </span>
+                ) : null}
+              </div>
+              <div className="upload-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={uploadProgress.totalCount} aria-valuenow={uploadProgress.completedCount}>
+                <span
+                  className="upload-progress-fill"
+                  style={{
+                    width: `${uploadProgress.totalCount > 0 ? (uploadProgress.completedCount / uploadProgress.totalCount) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+              <button
+                className="secondary"
+                type="button"
+                onClick={handleAttachmentUploadCancel}
+              >
+                {copy.cancelUpload}
+              </button>
+            </div>
+          ) : null}
           {draftAttachments.length > 0 ? (
             <div className="chat-attachment-draft-list">
               {draftAttachments.map((attachment) => (
@@ -2611,10 +2713,7 @@ export default function ConversationPage() {
         <div className="run-history-grid">
           <div className="run-history-list">
             {runs.length === 0 ? (
-              <div className="chat-empty-state">
-                <strong>{copy.noRuns}</strong>
-                <p>{copy.noRunsLead}</p>
-              </div>
+              <EmptyState lead={copy.noRunsLead} title={copy.noRuns} />
             ) : (
               runs.map((run) => (
                 <button
@@ -2974,10 +3073,7 @@ export default function ConversationPage() {
                 </div>
               </>
             ) : (
-              <div className="chat-empty-state">
-                <strong>{copy.selectRun}</strong>
-                <p>{copy.selectRunLead}</p>
-              </div>
+              <EmptyState lead={copy.selectRunLead} title={copy.selectRun} />
             )}
           </div>
         </div>

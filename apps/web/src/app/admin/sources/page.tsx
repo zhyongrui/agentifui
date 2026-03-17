@@ -21,6 +21,7 @@ import {
   updateAdminSourceStatus,
 } from '../../../lib/admin-client';
 import { useI18n } from '../../../components/i18n-provider';
+import { EmptyState, SectionSkeleton } from '../../../components/section-state';
 import { useAdminPageData } from '../../../lib/use-admin-page';
 
 const STATUS_OPTIONS: KnowledgeIngestionStatus[] = [
@@ -245,7 +246,7 @@ export default function AdminSourcesPage() {
   }, [data?.sources, deferredQuery, statusFilter]);
 
   if (isLoading) {
-    return <p className="lead">{copy.loading}</p>;
+    return <SectionSkeleton blocks={6} lead={copy.loading} title={copy.title} />;
   }
 
   return (
@@ -441,7 +442,9 @@ export default function AdminSourcesPage() {
           </article>
         ))}
 
-        {filteredSources.length === 0 ? <p>{copy.noMatches}</p> : null}
+        {filteredSources.length === 0 ? (
+          <EmptyState lead={copy.searchPlaceholder} title={copy.noMatches} />
+        ) : null}
       </div>
     </div>
   );
