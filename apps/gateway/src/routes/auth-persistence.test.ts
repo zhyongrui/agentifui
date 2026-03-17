@@ -2164,10 +2164,12 @@ describe.sequential('persistent auth runtime', () => {
           },
           payload: {
             groupId: 'grp_research',
+            access: 'editor',
           },
         });
 
         expect(share.statusCode).toBe(200);
+        const shareBody = (share.json() as WorkspaceConversationShareResponse).data;
 
         for (const payload of [
           {
@@ -2198,6 +2200,36 @@ describe.sequential('persistent auth runtime', () => {
           expect(response.statusCode).toBe(200);
         }
 
+        const sharedComment = await app.inject({
+          method: 'POST',
+          url: `/workspace/shares/${shareBody.id}/comments`,
+          headers: {
+            authorization: `Bearer ${reviewerSessionToken}`,
+          },
+          payload: {
+            targetType: 'message',
+            targetId: assistantMessage.id,
+            content: 'Shared reviewer note after restart.',
+          },
+        });
+
+        expect(sharedComment.statusCode).toBe(200);
+
+        const sharedUpdate = await app.inject({
+          method: 'PUT',
+          url: `/workspace/shares/${shareBody.id}/conversation`,
+          headers: {
+            authorization: `Bearer ${reviewerSessionToken}`,
+          },
+          payload: {
+            title: 'Shared review archive',
+            status: 'archived',
+            pinned: true,
+          },
+        });
+
+        expect(sharedUpdate.statusCode).toBe(200);
+
         await app.close();
         appClosed = true;
 
@@ -2220,7 +2252,7 @@ describe.sequential('persistent auth runtime', () => {
             expect.arrayContaining([
               expect.objectContaining({
                 id: assistantMessage.id,
-                comments: [
+                comments: expect.arrayContaining([
                   expect.objectContaining({
                     content: 'Message review note. @reviewer@example.net please confirm.',
                     mentions: [
@@ -2229,10 +2261,18 @@ describe.sequential('persistent auth runtime', () => {
                       }),
                     ],
                   }),
-                ],
+                  expect.objectContaining({
+                    content: 'Shared reviewer note after restart.',
+                  }),
+                ]),
               }),
             ]),
           );
+          expect((refreshedConversation.json() as WorkspaceConversationResponse).data).toMatchObject({
+            title: 'Shared review archive',
+            status: 'archived',
+            pinned: true,
+          });
 
           const refreshedRun = await restartedApp.inject({
             method: 'GET',
@@ -2281,6 +2321,24 @@ describe.sequential('persistent auth runtime', () => {
           expect(auditEvents.statusCode).toBe(200);
           expect(auditEvents.json().data.events).toEqual(
             expect.arrayContaining([
+              expect.objectContaining({
+                action: 'workspace.comment.created',
+                entityType: 'conversation_comment',
+                payload: expect.objectContaining({
+                  accessScope: 'shared_editor',
+                  shareId: shareBody.id,
+                  targetType: 'message',
+                }),
+              }),
+              expect.objectContaining({
+                action: 'workspace.conversation.updated',
+                entityType: 'conversation',
+                payload: expect.objectContaining({
+                  accessScope: 'shared_editor',
+                  shareId: shareBody.id,
+                  title: 'Shared review archive',
+                }),
+              }),
               expect.objectContaining({
                 action: 'workspace.comment.created',
                 entityType: 'conversation_comment',

@@ -34,7 +34,11 @@ export const conversationShareStatusEnum = pgEnum('conversation_share_status', [
   'active',
   'revoked',
 ]);
-export const conversationShareAccessEnum = pgEnum('conversation_share_access', ['read_only']);
+export const conversationShareAccessEnum = pgEnum('conversation_share_access', [
+  'read_only',
+  'commenter',
+  'editor',
+]);
 export const runTypeEnum = pgEnum('run_type', ['workflow', 'agent', 'generation']);
 export const runStatusEnum = pgEnum('run_status', [
   'pending',

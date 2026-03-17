@@ -20,6 +20,7 @@ import type {
   WorkspaceConversationPresenceUpdateRequest,
   WorkspaceConversationMessageFeedbackResponse,
   WorkspaceConversationResponse,
+  WorkspaceConversationShareAccess,
   WorkspaceConversationStatus,
   WorkspaceConversationShareCreateRequest,
   WorkspaceConversationShareResponse,
@@ -219,6 +220,10 @@ function isConversationStatus(value: unknown): value is WorkspaceConversationSta
   return value === 'active' || value === 'archived' || value === 'deleted';
 }
 
+function isConversationShareAccess(value: unknown): value is WorkspaceConversationShareAccess {
+  return value === 'read_only' || value === 'commenter' || value === 'editor';
+}
+
 function isConversationListStatusFilter(
   value: unknown,
 ): value is WorkspaceConversationListStatusFilter {
@@ -358,7 +363,7 @@ function buildArtifactDownloadPayload(artifact: WorkspaceArtifact): {
 }
 
 async function recordArtifactAccessAudit(input: {
-  accessScope: 'owner' | 'shared_read_only';
+  accessScope: 'owner' | 'shared_read_only' | 'shared_commenter' | 'shared_editor';
   artifact: WorkspaceArtifact;
   auditService: AuditService;
   ipAddress: string;
@@ -388,6 +393,20 @@ async function recordArtifactAccessAudit(input: {
       shareId: input.shareId ?? null,
     },
   });
+}
+
+function toSharedAccessScope(
+  access: WorkspaceConversationShareAccess,
+): 'shared_read_only' | 'shared_commenter' | 'shared_editor' {
+  if (access === 'commenter') {
+    return 'shared_commenter';
+  }
+
+  if (access === 'editor') {
+    return 'shared_editor';
+  }
+
+  return 'shared_read_only';
 }
 
 async function requireActiveWorkspaceSession(
@@ -1445,18 +1464,25 @@ export async function registerWorkspaceRoutes(
     const conversationId = params.conversationId?.trim();
     const body = (request.body ?? {}) as Partial<WorkspaceConversationShareCreateRequest>;
     const groupId = body.groupId?.trim();
+    const shareAccess =
+      body.access === undefined
+        ? 'read_only'
+        : isConversationShareAccess(body.access)
+          ? body.access
+          : null;
 
-    if (!conversationId || !groupId) {
+    if (!conversationId || !groupId || shareAccess === null) {
       reply.code(400);
       return buildErrorResponse(
         'WORKSPACE_INVALID_PAYLOAD',
-        'Workspace share creation requires a conversation id and group id.'
+        'Workspace share creation requires a conversation id, group id, and valid access mode.'
       );
     }
 
     const result = await workspaceService.createConversationShareForUser(access.user, {
       conversationId,
       groupId,
+      access: shareAccess,
     });
 
     if (!result.ok) {
@@ -1481,6 +1507,7 @@ export async function registerWorkspaceRoutes(
         conversationId: result.data.conversationId,
         groupId: result.data.group.id,
         groupName: result.data.group.name,
+        access: result.data.access,
         shareUrl: result.data.shareUrl,
       },
     });
@@ -1760,6 +1787,96 @@ export async function registerWorkspaceRoutes(
     return response;
   });
 
+  app.put('/workspace/shares/:shareId/conversation', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      shareId?: string;
+    };
+    const shareId = params.shareId?.trim();
+    const body = (request.body ?? {}) as Partial<WorkspaceConversationUpdateRequest>;
+    const title = typeof body.title === 'string' ? body.title.trim() : undefined;
+    const nextTitle = body.title === undefined ? undefined : title;
+    const nextStatus =
+      body.status === undefined ? undefined : isConversationStatus(body.status) ? body.status : null;
+    const nextPinned =
+      typeof body.pinned === 'boolean' ? body.pinned : body.pinned === undefined ? undefined : null;
+
+    if (
+      !shareId ||
+      nextStatus === null ||
+      nextPinned === null ||
+      (body.title !== undefined && !nextTitle)
+    ) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace shared conversation updates require a share id plus valid title, status, or pinned changes.'
+      );
+    }
+
+    if (nextTitle === undefined && nextStatus === undefined && nextPinned === undefined) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace shared conversation updates require at least one title, status, or pinned change.'
+      );
+    }
+
+    const sharedConversation = await workspaceService.getSharedConversationForUser(access.user, shareId);
+
+    if (!sharedConversation.ok) {
+      reply.code(sharedConversation.statusCode);
+      return buildErrorResponse(
+        sharedConversation.code,
+        sharedConversation.message,
+        sharedConversation.details
+      );
+    }
+
+    const result = await workspaceService.updateSharedConversationForUser(access.user, {
+      shareId,
+      title: nextTitle,
+      status: nextStatus ?? undefined,
+      pinned: nextPinned ?? undefined,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceConversationUpdateResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.conversation.updated',
+      entityType: 'conversation',
+      entityId: result.data.id,
+      ipAddress: request.ip,
+      payload: {
+        accessScope: 'shared_editor',
+        conversationId: result.data.id,
+        shareId,
+        title: result.data.title,
+        status: result.data.status,
+        pinned: result.data.pinned,
+        shareAccess: sharedConversation.data.share.access,
+      },
+    });
+
+    return response;
+  });
+
   app.get('/workspace/shares/:shareId/presence', async (request, reply) => {
     const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
 
@@ -1843,6 +1960,87 @@ export async function registerWorkspaceRoutes(
     return response;
   });
 
+  app.post('/workspace/shares/:shareId/comments', async (request, reply) => {
+    const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
+
+    if (!access.ok) {
+      reply.code(access.statusCode);
+      return access.response;
+    }
+
+    const params = (request.params ?? {}) as {
+      shareId?: string;
+    };
+    const shareId = params.shareId?.trim();
+    const body = request.body;
+
+    if (!shareId || !isWorkspaceCommentCreateRequest(body)) {
+      reply.code(400);
+      return buildErrorResponse(
+        'WORKSPACE_INVALID_PAYLOAD',
+        'Workspace shared comments require a share id plus a valid message/run/artifact target and non-empty content.'
+      );
+    }
+
+    const sharedConversation = await workspaceService.getSharedConversationForUser(access.user, shareId);
+
+    if (!sharedConversation.ok) {
+      reply.code(sharedConversation.statusCode);
+      return buildErrorResponse(
+        sharedConversation.code,
+        sharedConversation.message,
+        sharedConversation.details
+      );
+    }
+
+    const mentions = await resolveWorkspaceCommentMentions({
+      authService,
+      workspaceService,
+      actorUser: access.user,
+      conversationId: sharedConversation.data.conversation.id,
+      content: body.content,
+    });
+
+    const result = await workspaceService.createSharedCommentForUser(access.user, {
+      shareId,
+      request: body,
+      mentions,
+    });
+
+    if (!result.ok) {
+      reply.code(result.statusCode);
+      return buildErrorResponse(result.code, result.message, result.details);
+    }
+
+    const response: WorkspaceCommentCreateResponse = {
+      ok: true,
+      data: result.data,
+    };
+
+    await auditService.recordEvent({
+      tenantId: access.user.tenantId,
+      actorUserId: access.user.id,
+      action: 'workspace.comment.created',
+      entityType: 'conversation_comment',
+      entityId: result.data.comment.id,
+      ipAddress: request.ip,
+      payload: {
+        accessScope: toSharedAccessScope(sharedConversation.data.share.access),
+        shareAccess: sharedConversation.data.share.access,
+        shareId,
+        conversationId: result.data.conversationId,
+        targetType: result.data.targetType,
+        targetId: result.data.targetId,
+        threadLength: result.data.thread.length,
+        mentionCount: result.data.comment.mentions?.length ?? 0,
+        mentionedUserIds:
+          result.data.comment.mentions?.map((mention) => mention.userId) ?? [],
+      },
+    });
+
+    return response;
+  });
+
   app.get('/workspace/shares/:shareId/artifacts/:artifactId', async (request, reply) => {
     const access = await requireActiveWorkspaceSession(authService, request.headers.authorization);
 
@@ -1881,8 +2079,19 @@ export async function registerWorkspaceRoutes(
       data: result.data,
     };
 
+    const sharedConversation = await workspaceService.getSharedConversationForUser(access.user, shareId);
+
+    if (!sharedConversation.ok) {
+      reply.code(sharedConversation.statusCode);
+      return buildErrorResponse(
+        sharedConversation.code,
+        sharedConversation.message,
+        sharedConversation.details
+      );
+    }
+
     await recordArtifactAccessAudit({
-      accessScope: 'shared_read_only',
+      accessScope: toSharedAccessScope(sharedConversation.data.share.access),
       artifact: result.data,
       auditService,
       ipAddress: request.ip,
@@ -1929,6 +2138,17 @@ export async function registerWorkspaceRoutes(
 
     const download = buildArtifactDownloadPayload(result.data);
 
+    const sharedConversation = await workspaceService.getSharedConversationForUser(access.user, shareId);
+
+    if (!sharedConversation.ok) {
+      reply.code(sharedConversation.statusCode);
+      return buildErrorResponse(
+        sharedConversation.code,
+        sharedConversation.message,
+        sharedConversation.details
+      );
+    }
+
     reply.header('content-type', download.contentType);
     reply.header('content-disposition', `attachment; filename="${download.fileName}"`);
     reply.header('x-agentifui-artifact-filename', download.fileName);
@@ -1936,7 +2156,7 @@ export async function registerWorkspaceRoutes(
     reply.header('x-agentifui-artifact-id', result.data.id);
 
     await recordArtifactAccessAudit({
-      accessScope: 'shared_read_only',
+      accessScope: toSharedAccessScope(sharedConversation.data.share.access),
       artifact: result.data,
       auditService,
       ipAddress: request.ip,

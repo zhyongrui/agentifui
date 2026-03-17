@@ -22,6 +22,7 @@ import type {
   WorkspaceConversationPresence,
   WorkspaceConversationPresenceUpdateRequest,
   WorkspaceConversationShare,
+  WorkspaceConversationShareAccess,
   WorkspaceConversationMessage,
   WorkspacePendingActionRespondRequest,
   WorkspaceHitlStep,
@@ -90,8 +91,8 @@ type WorkspaceLaunchFailure = {
 
 type WorkspaceLookupFailure = {
   ok: false;
-  statusCode: 404;
-  code: 'WORKSPACE_NOT_FOUND';
+  statusCode: 403 | 404;
+  code: 'WORKSPACE_FORBIDDEN' | 'WORKSPACE_NOT_FOUND';
   message: string;
   details?: unknown;
 };
@@ -196,11 +197,25 @@ type WorkspaceCommentCreateInput = {
 type WorkspaceConversationShareCreateInput = {
   conversationId: string;
   groupId: string;
+  access: WorkspaceConversationShareAccess;
 };
 
 type WorkspaceConversationShareRevokeInput = {
   conversationId: string;
   shareId: string;
+};
+
+type WorkspaceSharedCommentCreateInput = {
+  shareId: string;
+  request: WorkspaceCommentCreateRequest;
+  mentions?: WorkspaceCommentMention[];
+};
+
+type WorkspaceSharedConversationUpdateInput = {
+  shareId: string;
+  pinned?: boolean;
+  status?: WorkspaceConversationStatus;
+  title?: string;
 };
 
 type WorkspacePendingActionsResult =
@@ -304,8 +319,8 @@ type WorkspaceCommentCreateResult =
   | WorkspaceLookupFailure
   | {
       ok: false;
-      statusCode: 400;
-      code: "WORKSPACE_INVALID_PAYLOAD";
+      statusCode: 400 | 403;
+      code: "WORKSPACE_FORBIDDEN" | "WORKSPACE_INVALID_PAYLOAD";
       message: string;
       details?: unknown;
     };
@@ -436,6 +451,10 @@ type WorkspaceService = {
     user: AuthUser,
     input: WorkspaceCommentCreateInput
   ): WorkspaceCommentCreateResult | Promise<WorkspaceCommentCreateResult>;
+  createSharedCommentForUser(
+    user: AuthUser,
+    input: WorkspaceSharedCommentCreateInput
+  ): WorkspaceCommentCreateResult | Promise<WorkspaceCommentCreateResult>;
   canUserAccessConversationForCollaboration(
     user: AuthUser,
     conversationId: string
@@ -499,6 +518,10 @@ type WorkspaceService = {
     user: AuthUser,
     input: WorkspaceConversationShareCreateInput
   ): WorkspaceConversationShareResult | Promise<WorkspaceConversationShareResult>;
+  updateSharedConversationForUser(
+    user: AuthUser,
+    input: WorkspaceSharedConversationUpdateInput
+  ): WorkspaceConversationResult | Promise<WorkspaceConversationResult>;
   revokeConversationShareForUser(
     user: AuthUser,
     input: WorkspaceConversationShareRevokeInput
@@ -553,6 +576,7 @@ type WorkspaceNotificationRecord = WorkspaceNotification & {
 };
 
 type WorkspaceConversationShareRecord = {
+  access: WorkspaceConversationShareAccess;
   conversationId: string;
   createdAt: string;
   creatorUserId: string;
@@ -591,6 +615,29 @@ function buildShareUrl(shareId: string) {
 
 function buildTraceId() {
   return randomUUID().replace(/-/g, '');
+}
+
+function applyConversationUpdates(
+  conversation: WorkspaceConversationRecord,
+  input: {
+    pinned?: boolean;
+    status?: WorkspaceConversationStatus;
+    title?: string;
+  },
+) {
+  if (input.title !== undefined) {
+    conversation.title = input.title;
+  }
+
+  if (input.status !== undefined) {
+    conversation.status = input.status;
+  }
+
+  if (input.pinned !== undefined) {
+    conversation.pinned = input.pinned;
+  }
+
+  conversation.updatedAt = new Date().toISOString();
 }
 
 function resolveRunType(kind: WorkspaceAppLaunch['app']['kind']): WorkspaceRunType {
@@ -1733,7 +1780,7 @@ export function createWorkspaceService(options: {
       id: share.id,
       conversationId: share.conversationId,
       status: share.status,
-      access: 'read_only',
+      access: share.access,
       shareUrl: buildShareUrl(share.id),
       group: share.group,
       createdAt: share.createdAt,
@@ -1746,6 +1793,22 @@ export function createWorkspaceService(options: {
       .map(shareId => sharesById.get(shareId))
       .filter((share): share is WorkspaceConversationShareRecord => Boolean(share))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  function findActiveShareRecordForUser(user: AuthUser, shareId: string) {
+    const share = sharesById.get(shareId);
+
+    if (!share || share.status !== "active") {
+      return null;
+    }
+
+    const memberGroupIds = resolveDefaultMemberGroupIds(user.email);
+
+    if (!memberGroupIds.includes(share.group.id)) {
+      return null;
+    }
+
+    return share;
   }
 
   return {
@@ -2015,19 +2078,7 @@ export function createWorkspaceService(options: {
         };
       }
 
-      if (input.title !== undefined) {
-        conversation.title = input.title;
-      }
-
-      if (input.status !== undefined) {
-        conversation.status = input.status;
-      }
-
-      if (input.pinned !== undefined) {
-        conversation.pinned = input.pinned;
-      }
-
-      conversation.updatedAt = new Date().toISOString();
+      applyConversationUpdates(conversation, input);
 
       return {
         ok: true,
@@ -2344,6 +2395,151 @@ export function createWorkspaceService(options: {
         ok: true,
         data: {
           conversationId: input.conversationId,
+          targetType,
+          targetId,
+          comment,
+          thread,
+        },
+      };
+    },
+    createSharedCommentForUser(user, input) {
+      const share = findActiveShareRecordForUser(user, input.shareId);
+
+      if (!share) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace share could not be found.',
+        };
+      }
+
+      if (share.access === "read_only") {
+        return {
+          ok: false,
+          statusCode: 403,
+          code: "WORKSPACE_FORBIDDEN",
+          message: "The current user can review the shared conversation, but cannot add comments.",
+        };
+      }
+
+      const conversation = conversationsById.get(share.conversationId);
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The target workspace conversation could not be found.',
+        };
+      }
+
+      const content = normalizeWorkspaceCommentContent(input.request.content);
+
+      if (!content || input.request.targetId.trim().length === 0) {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: 'WORKSPACE_INVALID_PAYLOAD',
+          message:
+            'Workspace comments require a non-empty target id and comment content.',
+        };
+      }
+
+      const targetId = input.request.targetId.trim();
+      const targetType = input.request.targetType;
+      const mentions = input.mentions ?? [];
+      const comment = createWorkspaceCommentRecord({
+        authorDisplayName: user.displayName ?? null,
+        content,
+        conversationId: conversation.id,
+        mentions,
+        targetId,
+        targetType,
+        userId: user.id,
+      });
+      let thread: WorkspaceComment[];
+
+      if (targetType === "message") {
+        const messageIndex = conversation.messages.findIndex(
+          (message) => message.id === targetId,
+        );
+        const currentMessage =
+          messageIndex >= 0 ? conversation.messages[messageIndex] ?? null : null;
+
+        if (!currentMessage) {
+          return {
+            ok: false,
+            statusCode: 404,
+            code: "WORKSPACE_NOT_FOUND",
+            message: "The target workspace message could not be found.",
+          };
+        }
+
+        const nextThread = [...(currentMessage.comments ?? []), comment];
+        conversation.messages = conversation.messages.map((message, index) =>
+          index === messageIndex ? { ...message, comments: nextThread } : message
+        );
+        conversation.updatedAt = comment.updatedAt;
+        thread = nextThread;
+      } else if (targetType === "run") {
+        const run = runsById.get(targetId);
+
+        if (!run || run.conversationId !== conversation.id) {
+          return {
+            ok: false,
+            statusCode: 404,
+            code: "WORKSPACE_NOT_FOUND",
+            message: "The target workspace run could not be found.",
+          };
+        }
+
+        run.comments = [...run.comments, comment];
+        conversation.updatedAt = comment.updatedAt;
+        thread = run.comments;
+      } else {
+        const artifact = artifactsById.get(targetId);
+
+        if (!artifact || artifact.conversationId !== conversation.id) {
+          return {
+            ok: false,
+            statusCode: 404,
+            code: "WORKSPACE_NOT_FOUND",
+            message: "The target workspace artifact could not be found.",
+          };
+        }
+
+        artifact.comments = [...(artifact.comments ?? []), comment];
+        conversation.updatedAt = comment.updatedAt;
+        thread = artifact.comments;
+      }
+
+      for (const mention of mentions) {
+        if (mention.userId === user.id) {
+          continue;
+        }
+
+        const notification = createWorkspaceNotificationRecord({
+          actorDisplayName: user.displayName ?? null,
+          actorUserId: user.id,
+          comment,
+          conversationId: conversation.id,
+          conversationTitle: conversation.title,
+          targetId,
+          targetType,
+          userId: mention.userId,
+        });
+        notificationsById.set(notification.id, notification);
+        notificationIdsByUserId.set(mention.userId, [
+          notification.id,
+          ...(notificationIdsByUserId.get(mention.userId) ?? []),
+        ]);
+      }
+
+      return {
+        ok: true,
+        data: {
+          conversationId: conversation.id,
           targetType,
           targetId,
           comment,
@@ -2847,6 +3043,7 @@ export function createWorkspaceService(options: {
 
       if (existingShare) {
         existingShare.status = 'active';
+        existingShare.access = input.access;
         existingShare.revokedAt = null;
 
         return {
@@ -2857,6 +3054,7 @@ export function createWorkspaceService(options: {
 
       const share: WorkspaceConversationShareRecord = {
         id: `share_${randomUUID()}`,
+        access: input.access,
         conversationId: input.conversationId,
         creatorUserId: user.id,
         group: targetGroup,
@@ -2874,6 +3072,55 @@ export function createWorkspaceService(options: {
       return {
         ok: true,
         data: toWorkspaceConversationShare(share),
+      };
+    },
+    updateSharedConversationForUser(user, input) {
+      const share = findActiveShareRecordForUser(user, input.shareId);
+
+      if (!share) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "WORKSPACE_NOT_FOUND",
+          message: "The target workspace share could not be found.",
+        };
+      }
+
+      if (share.access !== "editor") {
+        return {
+          ok: false,
+          statusCode: 403,
+          code: "WORKSPACE_FORBIDDEN",
+          message:
+            "The current user can review the shared conversation, but cannot edit conversation metadata.",
+        };
+      }
+
+      if (input.status === "deleted") {
+        return {
+          ok: false,
+          statusCode: 403,
+          code: "WORKSPACE_FORBIDDEN",
+          message: "Shared editors cannot delete workspace conversations.",
+        };
+      }
+
+      const conversation = conversationsById.get(share.conversationId);
+
+      if (!conversation) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "WORKSPACE_NOT_FOUND",
+          message: "The target workspace conversation could not be found.",
+        };
+      }
+
+      applyConversationUpdates(conversation, input);
+
+      return {
+        ok: true,
+        data: toWorkspaceConversationData(conversation),
       };
     },
     revokeConversationShareForUser(user, input) {
@@ -3168,6 +3415,8 @@ export type {
   WorkspaceConversationShareCreateInput,
   WorkspaceConversationShareResult,
   WorkspaceConversationShareRevokeInput,
+  WorkspaceSharedCommentCreateInput,
+  WorkspaceSharedConversationUpdateInput,
   WorkspaceConversationSharesResult,
   WorkspaceConversationUploadInput,
   WorkspaceConversationUploadResult,

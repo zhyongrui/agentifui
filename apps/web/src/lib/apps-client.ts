@@ -481,6 +481,33 @@ export async function fetchWorkspaceSharedConversation(
   });
 }
 
+export async function createWorkspaceSharedComment(
+  sessionToken: string,
+  shareId: string,
+  input: WorkspaceCommentCreateRequest
+): Promise<WorkspaceCommentCreateResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceCommentCreateResponse>(`/workspace/shares/${shareId}/comments`, {
+    method: 'POST',
+    sessionToken,
+    body: input,
+  });
+}
+
+export async function updateWorkspaceSharedConversation(
+  sessionToken: string,
+  shareId: string,
+  input: WorkspaceConversationUpdateRequest
+): Promise<WorkspaceConversationUpdateResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceConversationUpdateResponse>(
+    `/workspace/shares/${shareId}/conversation`,
+    {
+      method: 'PUT',
+      sessionToken,
+      body: input,
+    }
+  );
+}
+
 export async function fetchWorkspaceRun(
   sessionToken: string,
   runId: string

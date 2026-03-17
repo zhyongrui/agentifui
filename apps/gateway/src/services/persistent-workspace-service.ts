@@ -17,6 +17,7 @@ import {
   type WorkspaceConversationListItem,
   type WorkspaceConversationPresence,
   type WorkspaceConversationShare,
+  type WorkspaceConversationShareAccess,
   type WorkspaceConversationMessage,
   type WorkspaceConversationStatus,
   type WorkspaceGroup,
@@ -61,6 +62,8 @@ import type {
   WorkspaceConversationShareCreateInput,
   WorkspaceConversationShareResult,
   WorkspaceConversationShareRevokeInput,
+  WorkspaceSharedCommentCreateInput,
+  WorkspaceSharedConversationUpdateInput,
   WorkspaceConversationSharesResult,
   WorkspaceConversationUpdateInput,
   WorkspaceConversationUploadInput,
@@ -278,6 +281,7 @@ type WorkspaceUploadedFileRow = {
 };
 
 type WorkspaceConversationShareRow = {
+  access: WorkspaceConversationShareAccess;
   conversation_id: string;
   created_at: Date | string;
   group_description: string | null;
@@ -1570,7 +1574,7 @@ function toWorkspaceConversationShare(
     id: row.id,
     conversationId: row.conversation_id,
     status: row.status,
-    access: "read_only",
+    access: row.access,
     shareUrl: buildShareUrl(row.id),
     group: {
       id: row.group_id,
@@ -2504,6 +2508,53 @@ async function canUserAccessConversationForCollaboration(
   return rows.some((row) => effectiveGroupIds.includes(row.shared_group_id));
 }
 
+async function readActiveShareRecord(
+  database: DatabaseClient,
+  shareId: string,
+): Promise<WorkspaceConversationShareRow | null> {
+  const [shareRow] = await database<WorkspaceConversationShareRow[]>`
+    select
+      s.id,
+      s.conversation_id,
+      s.status,
+      s.access,
+      s.created_at,
+      s.revoked_at,
+      g.id as group_id,
+      g.name as group_name,
+      g.description as group_description
+    from workspace_conversation_shares s
+    inner join groups g on g.id = s.shared_group_id
+    where s.id = ${shareId}
+      and s.status = 'active'
+    limit 1
+  `;
+
+  if (!shareRow) {
+    return null;
+  }
+
+  return shareRow;
+}
+
+async function readActiveShareForCollaborator(
+  database: DatabaseClient,
+  user: AuthUser,
+  shareId: string,
+): Promise<WorkspaceConversationShareRow | null> {
+  const shareRow = await readActiveShareRecord(database, shareId);
+
+  if (!shareRow) {
+    return null;
+  }
+
+  const memberGroupIds = await listMemberGroupIds(database, user.id);
+  const effectiveGroupIds =
+    memberGroupIds.length > 0 ? memberGroupIds : resolveDefaultMemberGroupIds(user.email);
+
+  return effectiveGroupIds.includes(shareRow.group_id) ? shareRow : null;
+}
+
 async function listNotificationsForUser(
   database: DatabaseClient,
   user: AuthUser,
@@ -3140,6 +3191,199 @@ async function createCommentForUser(
   };
 }
 
+async function createSharedCommentForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceSharedCommentCreateInput,
+): Promise<WorkspaceCommentCreateResult> {
+  const share = await readActiveShareForCollaborator(database, user, input.shareId);
+
+  if (!share) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace share could not be found.",
+    };
+  }
+
+  if (share.access === "read_only") {
+    return {
+      ok: false,
+      statusCode: 403,
+      code: "WORKSPACE_FORBIDDEN",
+      message:
+        "The current user can review the shared conversation, but cannot add comments.",
+    };
+  }
+
+  const content = normalizeWorkspaceCommentContent(input.request.content);
+  const targetId = input.request.targetId.trim();
+  const mentions = input.mentions ?? [];
+
+  if (!content || targetId.length === 0) {
+    return {
+      ok: false,
+      statusCode: 400,
+      code: "WORKSPACE_INVALID_PAYLOAD",
+      message:
+        "Workspace comments require a non-empty target id and comment content.",
+    };
+  }
+
+  if (input.request.targetType === "message") {
+    const conversation = await readConversationById(database, share.conversation_id);
+    const row = conversation?.messages.find((message) => message.id === targetId) ?? null;
+
+    if (!row) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "WORKSPACE_NOT_FOUND",
+        message: "The target workspace message could not be found.",
+      };
+    }
+  } else if (input.request.targetType === "run") {
+    const [row] = await database<{ id: string }[]>`
+      select id
+      from runs
+      where id = ${targetId}
+        and conversation_id = ${share.conversation_id}
+      limit 1
+    `;
+
+    if (!row) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "WORKSPACE_NOT_FOUND",
+        message: "The target workspace run could not be found.",
+      };
+    }
+  } else {
+    const [row] = await database<{ id: string }[]>`
+      select id
+      from workspace_artifacts
+      where id = ${targetId}
+        and conversation_id = ${share.conversation_id}
+      limit 1
+    `;
+
+    if (!row) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "WORKSPACE_NOT_FOUND",
+        message: "The target workspace artifact could not be found.",
+      };
+    }
+  }
+
+  const commentId = `comment_${randomUUID()}`;
+  const createdAt = new Date().toISOString();
+
+  await database.begin(async (transaction) => {
+    const sql = transaction as unknown as DatabaseClient;
+
+    await sql`
+      insert into workspace_comments (
+        id,
+        tenant_id,
+        user_id,
+        conversation_id,
+        target_type,
+        target_id,
+        content,
+        mentions,
+        author_display_name,
+        created_at,
+        updated_at
+      )
+      values (
+        ${commentId},
+        ${user.tenantId},
+        ${user.id},
+        ${share.conversation_id},
+        ${input.request.targetType},
+        ${targetId},
+        ${content},
+        ${mentions}::jsonb,
+        ${user.displayName ?? null},
+        ${createdAt}::timestamptz,
+        ${createdAt}::timestamptz
+      )
+    `;
+
+    for (const mention of mentions) {
+      if (mention.userId === user.id) {
+        continue;
+      }
+
+      await sql`
+        insert into workspace_notifications (
+          id,
+          tenant_id,
+          user_id,
+          actor_user_id,
+          type,
+          status,
+          conversation_id,
+          comment_id,
+          target_type,
+          target_id,
+          actor_display_name,
+          preview,
+          created_at,
+          read_at
+        )
+        values (
+          ${`notification_${randomUUID()}`},
+          ${user.tenantId},
+          ${mention.userId},
+          ${user.id},
+          'comment_mention',
+          'unread',
+          ${share.conversation_id},
+          ${commentId},
+          ${input.request.targetType},
+          ${targetId},
+          ${user.displayName ?? null},
+          ${buildWorkspaceCommentPreview(content)},
+          ${createdAt}::timestamptz,
+          null
+        )
+      `;
+    }
+  });
+
+  const thread = await readCommentThreadForTarget(database, {
+    conversationId: share.conversation_id,
+    targetType: input.request.targetType,
+    targetId,
+  });
+  const comment = thread[thread.length - 1];
+
+  if (!comment) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace comment thread could not be found.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      conversationId: share.conversation_id,
+      targetType: input.request.targetType,
+      targetId,
+      comment,
+      thread,
+    },
+  };
+}
+
 async function listPendingActionsForUser(
   database: DatabaseClient,
   user: AuthUser,
@@ -3390,23 +3634,9 @@ async function readSharedArtifactForUser(
   user: AuthUser,
   input: WorkspaceSharedArtifactLookupInput,
 ): Promise<WorkspaceArtifactResult> {
-  const [shareRow] = await database<WorkspaceConversationShareRow[]>`
-    select
-      s.id,
-      s.conversation_id,
-      s.status,
-      s.created_at,
-      s.revoked_at,
-      g.id as group_id,
-      g.name as group_name,
-      g.description as group_description
-    from workspace_conversation_shares s
-    inner join groups g on g.id = s.shared_group_id
-    where s.id = ${input.shareId}
-    limit 1
-  `;
+  const shareRow = await readActiveShareRecord(database, input.shareId);
 
-  if (!shareRow || shareRow.status !== "active") {
+  if (!shareRow) {
     return {
       ok: false,
       statusCode: 404,
@@ -3622,6 +3852,7 @@ async function listConversationSharesForUser(
       s.id,
       s.conversation_id,
       s.status,
+      s.access,
       s.created_at,
       s.revoked_at,
       g.id as group_id,
@@ -3697,13 +3928,13 @@ async function createConversationShareForUser(
       ${user.id},
       ${input.groupId},
       'active',
-      'read_only',
+      ${input.access}::conversation_share_access,
       now(),
       null
     )
     on conflict (conversation_id, shared_group_id) do update
     set status = 'active',
-        access = 'read_only',
+        access = ${input.access}::conversation_share_access,
         revoked_at = null
   `;
 
@@ -3712,6 +3943,7 @@ async function createConversationShareForUser(
       s.id,
       s.conversation_id,
       s.status,
+      s.access,
       s.created_at,
       s.revoked_at,
       g.id as group_id,
@@ -3758,6 +3990,7 @@ async function revokeConversationShareForUser(
       s.id,
       s.conversation_id,
       s.status,
+      s.access,
       s.created_at,
       s.revoked_at,
       g.id as group_id,
@@ -3787,23 +4020,9 @@ async function getSharedConversationForUser(
   user: AuthUser,
   shareId: string,
 ): Promise<WorkspaceSharedConversationResult> {
-  const [shareRow] = await database<WorkspaceConversationShareRow[]>`
-    select
-      s.id,
-      s.conversation_id,
-      s.status,
-      s.created_at,
-      s.revoked_at,
-      g.id as group_id,
-      g.name as group_name,
-      g.description as group_description
-    from workspace_conversation_shares s
-    inner join groups g on g.id = s.shared_group_id
-    where s.id = ${shareId}
-    limit 1
-  `;
+  const shareRow = await readActiveShareRecord(database, shareId);
 
-  if (!shareRow || shareRow.status !== "active") {
+  if (!shareRow) {
     return {
       ok: false,
       statusCode: 404,
@@ -3844,6 +4063,84 @@ async function getSharedConversationForUser(
       share: toWorkspaceConversationShare(shareRow),
       conversation,
     },
+  };
+}
+
+async function updateSharedConversationForUser(
+  database: DatabaseClient,
+  user: AuthUser,
+  input: WorkspaceSharedConversationUpdateInput,
+): Promise<WorkspaceConversationResult> {
+  const share = await readActiveShareForCollaborator(database, user, input.shareId);
+
+  if (!share) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace share could not be found.",
+    };
+  }
+
+  if (share.access !== "editor") {
+    return {
+      ok: false,
+      statusCode: 403,
+      code: "WORKSPACE_FORBIDDEN",
+      message:
+        "The current user can review the shared conversation, but cannot edit conversation metadata.",
+    };
+  }
+
+  if (input.status === "deleted") {
+    return {
+      ok: false,
+      statusCode: 403,
+      code: "WORKSPACE_FORBIDDEN",
+      message: "Shared editors cannot delete workspace conversations.",
+    };
+  }
+
+  const nextUpdatedAt = new Date().toISOString();
+  const nextTitle = input.title ?? null;
+  const nextStatus = input.status ?? null;
+  const nextPinned = input.pinned ?? null;
+
+  const rows = await database<{ id: string }[]>`
+    update conversations
+    set title = coalesce(${nextTitle}::varchar, title),
+        status = coalesce(${nextStatus}::conversation_status, status),
+        pinned = coalesce(${nextPinned}::boolean, pinned),
+        updated_at = ${nextUpdatedAt}::timestamptz
+    where id = ${share.conversation_id}
+    returning id
+  `;
+
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace conversation could not be found.",
+    };
+  }
+
+  const conversation = await readConversationById(database, share.conversation_id, {
+    includeDeleted: true,
+  });
+
+  if (!conversation) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "WORKSPACE_NOT_FOUND",
+      message: "The target workspace conversation could not be found.",
+    };
+  }
+
+  return {
+    ok: true,
+    data: conversation,
   };
 }
 
@@ -4813,6 +5110,12 @@ export function createPersistentWorkspaceService(
     ): Promise<WorkspaceCommentCreateResult> {
       return createCommentForUser(database, user, input);
     },
+    async createSharedCommentForUser(
+      user,
+      input,
+    ): Promise<WorkspaceCommentCreateResult> {
+      return createSharedCommentForUser(database, user, input);
+    },
     async canUserAccessConversationForCollaboration(user, conversationId) {
       return canUserAccessConversationForCollaboration(database, user, conversationId);
     },
@@ -4888,6 +5191,12 @@ export function createPersistentWorkspaceService(
       input,
     ): Promise<WorkspaceConversationShareResult> {
       return createConversationShareForUser(database, user, input);
+    },
+    async updateSharedConversationForUser(
+      user,
+      input,
+    ): Promise<WorkspaceConversationResult> {
+      return updateSharedConversationForUser(database, user, input);
     },
     async revokeConversationShareForUser(
       user,

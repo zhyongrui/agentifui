@@ -122,7 +122,10 @@ export type WorkspaceConversationFeedbackSummary = {
   negativeCount: number;
 };
 export type WorkspaceConversationShareStatus = "active" | "revoked";
-export type WorkspaceConversationShareAccess = "read_only";
+export type WorkspaceConversationShareAccess =
+  | "read_only"
+  | "commenter"
+  | "editor";
 export type WorkspaceConversationPresenceSurface =
   | "conversation"
   | "shared_conversation";
@@ -704,6 +707,7 @@ export type WorkspaceConversationShare = {
 
 export type WorkspaceConversationShareCreateRequest = {
   groupId: string;
+  access?: WorkspaceConversationShareAccess;
 };
 
 export type WorkspaceConversationShareResponse = {

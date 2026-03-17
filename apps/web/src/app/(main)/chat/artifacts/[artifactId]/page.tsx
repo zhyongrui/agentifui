@@ -13,6 +13,7 @@ import {
 } from "../../../../../components/workspace-artifacts";
 import {
   createWorkspaceComment,
+  createWorkspaceSharedComment,
   downloadWorkspaceArtifact,
   fetchWorkspaceArtifact,
 } from "../../../../../lib/apps-client";
@@ -48,6 +49,8 @@ export default function ArtifactPreviewPage() {
   const conversationId = readSearchParam(searchParams.get("conversationId"));
   const runId = readSearchParam(searchParams.get("runId"));
   const shareId = readSearchParam(searchParams.get("shareId"));
+  const shareAccess = readSearchParam(searchParams.get("shareAccess"));
+  const canCommentFromShare = shareAccess === "commenter" || shareAccess === "editor";
   const copy =
     locale === "zh-CN"
       ? {
@@ -58,7 +61,7 @@ export default function ArtifactPreviewPage() {
           backToConversation: "返回会话",
           chatHistory: "对话历史",
           loading: "正在加载产物预览...",
-          leadShared: "当前预览来自只读共享会话边界。",
+          leadShared: "当前预览来自共享会话边界。",
           leadOwner: "当前预览来自所有者可见的工作台产物边界。",
           sharedPreview: "共享预览",
           artifactPreview: "产物预览",
@@ -78,7 +81,7 @@ export default function ArtifactPreviewPage() {
           addComment: "添加评论",
           addingComment: "提交中...",
           noComments: "还没有评论，先记录一下复核意见。",
-          commentMentionHint: "可用 @邮箱 提及已共享访问该会话的协作者。",
+          commentMentionHint: "可用 @邮箱 提及已具备此共享会话访问权的协作者。",
           previewLead: '预览直接使用持久化产物载荷，而不是转录摘要，因此表格、JSON、文本、Markdown 和链接输出都可以复用同一路由渲染。',
           backToShared: "返回共享会话",
           backToApps: "返回应用工作台",
@@ -91,7 +94,7 @@ export default function ArtifactPreviewPage() {
           backToConversation: "Back to conversation",
           chatHistory: "Chat history",
           loading: "Loading artifact preview...",
-          leadShared: "This preview is being opened through a read-only shared conversation boundary.",
+          leadShared: "This preview is being opened through a shared conversation boundary.",
           leadOwner: "This preview is being opened through the owner-scoped workspace artifact boundary.",
           sharedPreview: "Shared preview",
           artifactPreview: "Artifact preview",
@@ -112,7 +115,7 @@ export default function ArtifactPreviewPage() {
           addingComment: "Saving...",
           noComments: "No comments yet.",
           commentMentionHint:
-            "Use @email to mention collaborators who already have access to the shared conversation.",
+            "Use @email to mention collaborators who already have access to this shared conversation.",
           previewLead: 'The preview uses the persisted artifact payload, not the transcript summary, so tables, JSON, text, markdown, and link outputs can all render from the same workspace route.',
           backToShared: "Back to shared conversation",
           backToApps: "Back to Apps workspace",
@@ -209,7 +212,11 @@ export default function ArtifactPreviewPage() {
   }
 
   async function handleCreateComment(content: string) {
-    if (!session || !artifactId || !conversationId || isCommentSubmitting) {
+    if (
+      !session ||
+      !artifactId ||
+      ((!conversationId && !shareId) || isCommentSubmitting)
+    ) {
       return;
     }
 
@@ -217,15 +224,17 @@ export default function ArtifactPreviewPage() {
     setCommentError(null);
 
     try {
-      const result = await createWorkspaceComment(
-        session.sessionToken,
-        conversationId,
-        {
-          targetType: "artifact",
-          targetId: artifactId,
-          content,
-        },
-      );
+      const result = shareId
+        ? await createWorkspaceSharedComment(session.sessionToken, shareId, {
+            targetType: "artifact",
+            targetId: artifactId,
+            content,
+          })
+        : await createWorkspaceComment(session.sessionToken, conversationId!, {
+            targetType: "artifact",
+            targetId: artifactId,
+            content,
+          });
 
       if (!result.ok) {
         if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
@@ -371,8 +380,8 @@ export default function ArtifactPreviewPage() {
           submittingLabel={copy.addingComment}
           isSubmitting={isCommentSubmitting}
           submitError={commentError}
-          readOnly={Boolean(shareId)}
-          onSubmit={shareId ? undefined : handleCreateComment}
+          readOnly={shareId ? !canCommentFromShare : false}
+          onSubmit={shareId && !canCommentFromShare ? undefined : handleCreateComment}
         />
       </section>
 

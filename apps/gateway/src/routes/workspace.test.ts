@@ -1941,6 +1941,309 @@ describe("workspace routes", () => {
     }
   });
 
+  it("enforces shared commenter and editor access modes", async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const { app } = await createTestApp(authService, {}, { auditService });
+
+    authService.register({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+      displayName: "Owner",
+    });
+    authService.register({
+      email: "reviewer@example.com",
+      password: "Secure123",
+      displayName: "Reviewer",
+    });
+
+    const ownerLogin = authService.login({
+      email: "owner@iflabx.com",
+      password: "Secure123",
+    });
+    const reviewerLogin = authService.login({
+      email: "reviewer@example.com",
+      password: "Secure123",
+    });
+
+    expect(ownerLogin.ok).toBe(true);
+    expect(reviewerLogin.ok).toBe(true);
+
+    if (!ownerLogin.ok || !reviewerLogin.ok) {
+      throw new Error("expected shared-access logins to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+
+      const conversationId = (launch.json() as WorkspaceAppLaunchResponse).data.conversationId;
+
+      if (!conversationId) {
+        throw new Error("expected launch payload to include a conversation id");
+      }
+
+      const completion = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          conversation_id: conversationId,
+          messages: [
+            {
+              role: "user",
+              content: "Prepare a reviewer handoff for the shared transcript.",
+            },
+          ],
+        },
+      });
+
+      expect(completion.statusCode).toBe(200);
+
+      const conversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(conversation.statusCode).toBe(200);
+
+      const assistantMessage = (conversation.json() as WorkspaceConversationResponse).data.messages.find(
+        (message) => message.role === "assistant",
+      );
+
+      if (!assistantMessage) {
+        throw new Error("expected seeded assistant message");
+      }
+
+      const readOnlyShareResponse = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          groupId: "grp_research",
+          access: "read_only",
+        },
+      });
+
+      expect(readOnlyShareResponse.statusCode).toBe(200);
+
+      const readOnlyShare = (readOnlyShareResponse.json() as WorkspaceConversationShareResponse).data;
+
+      expect(readOnlyShare.access).toBe("read_only");
+
+      const blockedComment = await app.inject({
+        method: "POST",
+        url: `/workspace/shares/${readOnlyShare.id}/comments`,
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+        payload: {
+          targetType: "message",
+          targetId: assistantMessage.id,
+          content: "I should not be able to comment yet.",
+        },
+      });
+
+      expect(blockedComment.statusCode).toBe(403);
+      expect(blockedComment.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_FORBIDDEN",
+        },
+      });
+
+      const commenterShareResponse = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          groupId: "grp_research",
+          access: "commenter",
+        },
+      });
+
+      expect(commenterShareResponse.statusCode).toBe(200);
+
+      const commenterShare = (commenterShareResponse.json() as WorkspaceConversationShareResponse).data;
+
+      expect(commenterShare.id).toBe(readOnlyShare.id);
+      expect(commenterShare.access).toBe("commenter");
+
+      const commenterView = await app.inject({
+        method: "GET",
+        url: `/workspace/shares/${commenterShare.id}`,
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(commenterView.statusCode).toBe(200);
+      expect((commenterView.json() as WorkspaceSharedConversationResponse).data.share.access).toBe(
+        "commenter",
+      );
+
+      const sharedComment = await app.inject({
+        method: "POST",
+        url: `/workspace/shares/${commenterShare.id}/comments`,
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+        payload: {
+          targetType: "message",
+          targetId: assistantMessage.id,
+          content: "Shared comment from the reviewer. @owner@iflabx.com please confirm.",
+        },
+      });
+
+      expect(sharedComment.statusCode).toBe(200);
+      expect(sharedComment.json()).toMatchObject({
+        ok: true,
+        data: {
+          conversationId,
+          targetType: "message",
+          targetId: assistantMessage.id,
+          comment: expect.objectContaining({
+            mentions: [
+              expect.objectContaining({
+                email: "owner@iflabx.com",
+              }),
+            ],
+          }),
+        },
+      });
+
+      const blockedMetadataUpdate = await app.inject({
+        method: "PUT",
+        url: `/workspace/shares/${commenterShare.id}/conversation`,
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+        payload: {
+          title: "Reviewer should not edit this yet",
+        },
+      });
+
+      expect(blockedMetadataUpdate.statusCode).toBe(403);
+
+      const editorShareResponse = await app.inject({
+        method: "POST",
+        url: `/workspace/conversations/${conversationId}/shares`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+        payload: {
+          groupId: "grp_research",
+          access: "editor",
+        },
+      });
+
+      expect(editorShareResponse.statusCode).toBe(200);
+
+      const editorShare = (editorShareResponse.json() as WorkspaceConversationShareResponse).data;
+
+      expect(editorShare.id).toBe(readOnlyShare.id);
+      expect(editorShare.access).toBe("editor");
+
+      const sharedMetadataUpdate = await app.inject({
+        method: "PUT",
+        url: `/workspace/shares/${editorShare.id}/conversation`,
+        headers: {
+          authorization: `Bearer ${reviewerLogin.data.sessionToken}`,
+        },
+        payload: {
+          title: "Reviewer updated title",
+          status: "archived",
+          pinned: true,
+        },
+      });
+
+      expect(sharedMetadataUpdate.statusCode).toBe(200);
+      expect(sharedMetadataUpdate.json()).toMatchObject({
+        ok: true,
+        data: {
+          id: conversationId,
+          title: "Reviewer updated title",
+          status: "archived",
+          pinned: true,
+        },
+      });
+
+      const refreshedConversation = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${ownerLogin.data.sessionToken}`,
+        },
+      });
+
+      expect(refreshedConversation.statusCode).toBe(200);
+      expect((refreshedConversation.json() as WorkspaceConversationResponse).data).toMatchObject({
+        title: "Reviewer updated title",
+        status: "archived",
+        pinned: true,
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            id: assistantMessage.id,
+            comments: expect.arrayContaining([
+              expect.objectContaining({
+                content: "Shared comment from the reviewer. @owner@iflabx.com please confirm.",
+              }),
+            ]),
+          }),
+        ]),
+      });
+
+      const auditEvents = await auditService.listEvents({
+        tenantId: testEnv.defaultTenantId,
+      });
+
+      expect(auditEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.comment.created",
+            entityType: "conversation_comment",
+            payload: expect.objectContaining({
+              accessScope: "shared_commenter",
+              shareId: readOnlyShare.id,
+            }),
+          }),
+          expect.objectContaining({
+            action: "workspace.conversation.updated",
+            entityType: "conversation",
+            payload: expect.objectContaining({
+              accessScope: "shared_editor",
+              shareId: readOnlyShare.id,
+              title: "Reviewer updated title",
+            }),
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it("tracks shared conversation presence sessions for shared viewers", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);

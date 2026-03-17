@@ -1,6 +1,10 @@
 "use client";
 
-import type { WorkspaceConversationPresence } from "@agentifui/shared/apps";
+import type {
+  WorkspaceConversationPresence,
+  WorkspaceConversationShareAccess,
+  WorkspaceConversationStatus,
+} from "@agentifui/shared/apps";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -14,8 +18,10 @@ import { WorkspaceArtifactLinkList } from "../../../../../components/workspace-a
 import { WorkspaceCitationList } from "../../../../../components/workspace-sources";
 import { WorkspaceToolCallSummaryList } from "../../../../../components/workspace-tool-summary";
 import {
+  createWorkspaceSharedComment,
   fetchWorkspaceSharedConversation,
   fetchWorkspaceSharedConversationPresence,
+  updateWorkspaceSharedConversation,
   updateWorkspaceSharedConversationPresence,
 } from "../../../../../lib/apps-client";
 import { clearAuthSession } from "../../../../../lib/auth-session";
@@ -68,6 +74,33 @@ function describePresenceSurface(
   return surface === "shared_conversation" ? "Shared view" : "Owner view";
 }
 
+function describeShareAccess(
+  locale: string,
+  access: WorkspaceConversationShareAccess,
+) {
+  if (locale === "zh-CN") {
+    if (access === "commenter") {
+      return "可评论";
+    }
+
+    if (access === "editor") {
+      return "可编辑";
+    }
+
+    return "只读";
+  }
+
+  if (access === "commenter") {
+    return "Commenter";
+  }
+
+  if (access === "editor") {
+    return "Editor";
+  }
+
+  return "Read-only";
+}
+
 export default function SharedConversationPage() {
   const params = useParams<{ shareId: string }>();
   const router = useRouter();
@@ -82,6 +115,13 @@ export default function SharedConversationPage() {
   );
   const [lastLiveSyncAt, setLastLiveSyncAt] = useState<string | null>(null);
   const [presenceSessionId, setPresenceSessionId] = useState<string | null>(null);
+  const [commentErrorByTargetId, setCommentErrorByTargetId] = useState<Record<string, string | null>>({});
+  const [submittingCommentTargetId, setSubmittingCommentTargetId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftStatus, setDraftStatus] = useState<WorkspaceConversationStatus>("active");
+  const [draftPinned, setDraftPinned] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [isMetadataSubmitting, setIsMetadataSubmitting] = useState(false);
   const shareId =
     typeof params?.shareId === "string" ? params.shareId.trim() : "";
   const copy =
@@ -93,19 +133,34 @@ export default function SharedConversationPage() {
           loading: "正在加载共享会话...",
           back: "返回应用工作台",
           lead:
-            "这是一个只读共享工作台会话。你可以查看转录、附件和持久化产物，但不能在这里发送新消息。",
+            "这是一个共享工作台会话。你可以查看转录、附件和持久化产物；权限更高的协作者还可以评论或调整会话元数据。",
           shareLabel: "共享",
           groupLabel: "群组",
+          accessLabel: "权限",
           sharedConversation: "共享会话",
-          sharedLead: (groupName: string) => `这段转录当前以只读方式共享给 ${groupName}。`,
+          sharedLead: (groupName: string, accessLabel: string) =>
+            `这段转录当前以${accessLabel}方式共享给 ${groupName}。`,
           workspaceUser: "工作台用户",
           toolCalls: "工具调用",
           suggested: "建议的下一步提问",
           comments: "共享评论",
           noComments: "当前没有共享评论。",
+          addComment: "添加评论",
+          addingComment: "提交中...",
+          commentInput: "评论内容",
+          commentHint: "可用 @邮箱 提及已具备此会话访问权的协作者。",
           safety: "共享安全提示",
           citations: "共享引用",
           artifacts: "共享产物",
+          metadataTitle: "共享协作设置",
+          metadataLead: "编辑者可以在共享视图里调整标题、置顶和归档状态。",
+          conversationTitle: "会话标题",
+          conversationStatus: "会话状态",
+          pinned: "置顶会话",
+          saveMetadata: "保存会话设置",
+          savingMetadata: "保存中...",
+          active: "活跃",
+          archived: "已归档",
           liveSync: "协作视图",
           viewers: "位查看者",
           activeViewers: "位在线查看者",
@@ -121,20 +176,36 @@ export default function SharedConversationPage() {
           loading: "Loading shared conversation...",
           back: "Back to Apps workspace",
           lead:
-            "This is a read-only shared workspace conversation. You can inspect the transcript, attachments, and persisted artifacts, but you cannot send new messages from this surface.",
+            "This is a shared workspace conversation. You can inspect the transcript, attachments, and persisted artifacts, and higher-permission collaborators can comment or edit metadata.",
           shareLabel: "Share",
           groupLabel: "Group",
+          accessLabel: "Access",
           sharedConversation: "Shared conversation",
-          sharedLead: (groupName: string) =>
-            `This transcript is currently shared read-only with ${groupName}.`,
+          sharedLead: (groupName: string, accessLabel: string) =>
+            `This transcript is currently shared with ${groupName} as ${accessLabel}.`,
           workspaceUser: "Workspace user",
           toolCalls: "Tool calls",
           suggested: "Suggested next prompts",
           comments: "Shared comments",
           noComments: "No shared comments yet.",
+          addComment: "Add comment",
+          addingComment: "Saving...",
+          commentInput: "Comment",
+          commentHint:
+            "Use @email to mention collaborators who already have access to this conversation.",
           safety: "Shared safety signals",
           citations: "Shared citations",
           artifacts: "Shared artifacts",
+          metadataTitle: "Shared collaboration settings",
+          metadataLead:
+            "Editors can adjust the conversation title, pin state, and archive status directly from this surface.",
+          conversationTitle: "Conversation title",
+          conversationStatus: "Conversation status",
+          pinned: "Pin conversation",
+          saveMetadata: "Save conversation settings",
+          savingMetadata: "Saving...",
+          active: "Active",
+          archived: "Archived",
           liveSync: "Live view",
           viewers: "viewers",
           activeViewers: "active viewers",
@@ -190,6 +261,16 @@ export default function SharedConversationPage() {
       cancelled = true;
     };
   }, [router, session, shareId]);
+
+  useEffect(() => {
+    if (!payload || !payload.ok) {
+      return;
+    }
+
+    setDraftTitle(payload.data.conversation.title);
+    setDraftStatus(payload.data.conversation.status);
+    setDraftPinned(payload.data.conversation.pinned);
+  }, [payload]);
 
   useEffect(() => {
     if (!shareId) {
@@ -285,6 +366,115 @@ export default function SharedConversationPage() {
     };
   }, [presenceSessionId, router, session, shareId]);
 
+  async function handleCreateSharedComment(targetId: string, content: string) {
+    if (!session || !payload || !payload.ok || submittingCommentTargetId) {
+      return;
+    }
+
+    setSubmittingCommentTargetId(targetId);
+    setCommentErrorByTargetId((current) => ({
+      ...current,
+      [targetId]: null,
+    }));
+
+    try {
+      const result = await createWorkspaceSharedComment(session.sessionToken, shareId, {
+        targetType: "message",
+        targetId,
+        content,
+      });
+
+      if (!result.ok) {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+          clearAuthSession(window.sessionStorage);
+          router.replace("/login");
+          return;
+        }
+
+        setCommentErrorByTargetId((current) => ({
+          ...current,
+          [targetId]: result.error.message,
+        }));
+        return;
+      }
+
+      setPayload((current) => {
+        if (!current || !current.ok) {
+          return current;
+        }
+
+        return {
+          ...current,
+          data: {
+            ...current.data,
+            conversation: {
+              ...current.data.conversation,
+              messages: current.data.conversation.messages.map((message) =>
+                message.id === targetId
+                  ? {
+                      ...message,
+                      comments: result.data.thread,
+                    }
+                  : message,
+              ),
+            },
+          },
+        };
+      });
+    } catch {
+      setCommentErrorByTargetId((current) => ({
+        ...current,
+        [targetId]: copy.loadFailed,
+      }));
+    } finally {
+      setSubmittingCommentTargetId(null);
+    }
+  }
+
+  async function handleSaveSharedConversationSettings() {
+    if (!session || !payload || !payload.ok || isMetadataSubmitting) {
+      return;
+    }
+
+    setMetadataError(null);
+    setIsMetadataSubmitting(true);
+
+    try {
+      const result = await updateWorkspaceSharedConversation(session.sessionToken, shareId, {
+        title: draftTitle,
+        status: draftStatus,
+        pinned: draftPinned,
+      });
+
+      if (!result.ok) {
+        if (result.error.code === "WORKSPACE_UNAUTHORIZED") {
+          clearAuthSession(window.sessionStorage);
+          router.replace("/login");
+          return;
+        }
+
+        setMetadataError(result.error.message);
+        return;
+      }
+
+      setPayload((current) =>
+        current && current.ok
+          ? {
+              ...current,
+              data: {
+                ...current.data,
+                conversation: result.data,
+              },
+            }
+          : current,
+      );
+    } catch {
+      setMetadataError(copy.loadFailed);
+    } finally {
+      setIsMetadataSubmitting(false);
+    }
+  }
+
   if (isLoading) {
     return <p className="lead">{copy.checking}</p>;
   }
@@ -311,6 +501,13 @@ export default function SharedConversationPage() {
   const localizedApp = localizeWorkspaceApp(conversation.app, locale);
   const presenceSummary = summarizeWorkspacePresence(presence);
   const visibleViewers = presence?.viewers ?? [];
+  const shareAccessLabel = describeShareAccess(locale, share.access);
+  const canComment = share.access !== "read_only";
+  const canEditConversation = share.access === "editor";
+  const metadataChanged =
+    draftTitle !== conversation.title ||
+    draftStatus !== conversation.status ||
+    draftPinned !== conversation.pinned;
 
   return (
     <div className="chat-surface stack">
@@ -325,6 +522,7 @@ export default function SharedConversationPage() {
         <div className="workspace-badges">
           <span className="workspace-badge">{copy.shareLabel} {share.id}</span>
           <span className="workspace-badge">{copy.groupLabel} {share.group.name}</span>
+          <span className="workspace-badge">{copy.accessLabel} {shareAccessLabel}</span>
           <span className="workspace-badge">{share.status}</span>
           <span className="workspace-badge">
             {copy.liveSync} · {presenceSummary.total} {copy.viewers}
@@ -344,7 +542,7 @@ export default function SharedConversationPage() {
         <div className="chat-panel-header">
           <div>
             <h2>{copy.sharedConversation}</h2>
-            <p>{copy.sharedLead(share.group.name)}</p>
+            <p>{copy.sharedLead(share.group.name, shareAccessLabel)}</p>
           </div>
         </div>
 
@@ -374,6 +572,56 @@ export default function SharedConversationPage() {
             <p className="chat-presence-empty">{copy.noViewers}</p>
           )}
         </div>
+
+        {canEditConversation ? (
+          <section className="workspace-comment-thread">
+            <div className="workspace-comment-thread-header">
+              <h3>{copy.metadataTitle}</h3>
+              <span>{shareAccessLabel}</span>
+            </div>
+            <p className="workspace-comment-helper">{copy.metadataLead}</p>
+            <div className="share-panel-create">
+              <label className="field">
+                {copy.conversationTitle}
+                <input
+                  type="text"
+                  value={draftTitle}
+                  onChange={(event) => setDraftTitle(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                {copy.conversationStatus}
+                <select
+                  value={draftStatus}
+                  onChange={(event) =>
+                    setDraftStatus(event.target.value as WorkspaceConversationStatus)
+                  }
+                >
+                  <option value="active">{copy.active}</option>
+                  <option value="archived">{copy.archived}</option>
+                </select>
+              </label>
+              <label className="field">
+                <input
+                  type="checkbox"
+                  checked={draftPinned}
+                  onChange={(event) => setDraftPinned(event.target.checked)}
+                />
+                {' '}
+                {copy.pinned}
+              </label>
+              {metadataError ? <div className="notice error">{metadataError}</div> : null}
+              <button
+                className="primary"
+                type="button"
+                onClick={() => void handleSaveSharedConversationSettings()}
+                disabled={draftTitle.trim().length === 0 || !metadataChanged || isMetadataSubmitting}
+              >
+                {isMetadataSubmitting ? copy.savingMetadata : copy.saveMetadata}
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         <div className="chat-placeholder">
           {conversation.messages.map((message) => (
@@ -452,6 +700,7 @@ export default function SharedConversationPage() {
                     artifacts={message.artifacts}
                     conversationId={conversation.id}
                     shareId={share.id}
+                    shareAccess={share.access}
                   />
                 </div>
               ) : null}
@@ -460,10 +709,20 @@ export default function SharedConversationPage() {
                 comments={message.comments ?? []}
                 locale={locale}
                 emptyText={copy.noComments}
-                textareaLabel={copy.comments}
-                submitLabel={copy.comments}
-                submittingLabel={copy.comments}
-                readOnly
+                helperText={canComment ? copy.commentHint : undefined}
+                textareaLabel={copy.commentInput}
+                submitLabel={copy.addComment}
+                submittingLabel={copy.addingComment}
+                isSubmitting={submittingCommentTargetId === message.id}
+                submitError={commentErrorByTargetId[message.id] ?? null}
+                readOnly={!canComment}
+                onSubmit={
+                  canComment
+                    ? async (content) => {
+                        await handleCreateSharedComment(message.id, content);
+                      }
+                    : undefined
+                }
               />
             </article>
           ))}

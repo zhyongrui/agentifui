@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createWorkspaceComment,
+  createWorkspaceConversationShare,
+  createWorkspaceSharedComment,
   downloadWorkspaceArtifact,
   fetchWorkspaceConversation,
   fetchWorkspaceConversationPresence,
@@ -17,6 +19,7 @@ import {
   launchWorkspaceApp,
   markWorkspaceNotificationRead,
   updateWorkspaceConversationPresence,
+  updateWorkspaceSharedConversation,
   updateWorkspaceSharedConversationPresence,
   updateWorkspaceConversation,
   updateWorkspaceConversationMessageFeedback,
@@ -709,6 +712,197 @@ describe('apps client', () => {
             state: 'idle',
           },
         ],
+      },
+    });
+  });
+
+  it('creates conversation shares with an explicit access mode through the gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'share-123',
+            conversationId: 'conv-456',
+            status: 'active',
+            access: 'editor',
+            shareUrl: '/chat/shared/share-123',
+            createdAt: '2026-03-17T10:00:00.000Z',
+            revokedAt: null,
+            group: {
+              id: 'grp_research',
+              name: 'Research Lab',
+              description: 'Research',
+            },
+          },
+        }),
+      })
+    );
+
+    const result = await createWorkspaceConversationShare('session-123', 'conv-456', {
+      groupId: 'grp_research',
+      access: 'editor',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/conversations/conv-456/shares', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        groupId: 'grp_research',
+        access: 'editor',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        access: 'editor',
+      },
+    });
+  });
+
+  it('creates shared comments through the share-scoped gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            conversationId: 'conv-456',
+            targetType: 'message',
+            targetId: 'msg-789',
+            comment: {
+              id: 'comment-1',
+              content: 'Shared review note',
+              mentions: [],
+              authorDisplayName: 'Reviewer',
+              createdAt: '2026-03-17T10:05:00.000Z',
+              updatedAt: '2026-03-17T10:05:00.000Z',
+            },
+            thread: [
+              {
+                id: 'comment-1',
+                content: 'Shared review note',
+                mentions: [],
+                authorDisplayName: 'Reviewer',
+                createdAt: '2026-03-17T10:05:00.000Z',
+                updatedAt: '2026-03-17T10:05:00.000Z',
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    const result = await createWorkspaceSharedComment('session-123', 'share-123', {
+      targetType: 'message',
+      targetId: 'msg-789',
+      content: 'Shared review note',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/shares/share-123/comments', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        targetType: 'message',
+        targetId: 'msg-789',
+        content: 'Shared review note',
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        targetId: 'msg-789',
+      },
+    });
+  });
+
+  it('updates shared conversation metadata through the share-scoped gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'conv-456',
+            title: 'Reviewer updated title',
+            status: 'archived',
+            pinned: true,
+            createdAt: '2026-03-17T10:00:00.000Z',
+            updatedAt: '2026-03-17T10:10:00.000Z',
+            app: {
+              id: 'app_policy_watch',
+              slug: 'policy-watch',
+              name: 'Policy Watch',
+              summary: 'summary',
+              kind: 'agent',
+              status: 'ready',
+              shortCode: 'PW',
+            },
+            activeGroup: {
+              id: 'grp_research',
+              name: 'Research Lab',
+              description: 'Research',
+            },
+            run: {
+              id: 'run-1',
+              type: 'agent',
+              status: 'succeeded',
+              triggeredFrom: 'app_launch',
+              traceId: 'trace-1',
+              startedAt: '2026-03-17T10:00:00.000Z',
+              finishedAt: '2026-03-17T10:00:01.000Z',
+              elapsedMs: 1000,
+              usage: {
+                promptTokens: 1,
+                completionTokens: 1,
+                totalTokens: 2,
+              },
+              timeline: [],
+              comments: [],
+              artifacts: [],
+              citations: [],
+              toolExecutions: [],
+            },
+            messages: [],
+          },
+        }),
+      })
+    );
+
+    const result = await updateWorkspaceSharedConversation('session-123', 'share-123', {
+      title: 'Reviewer updated title',
+      status: 'archived',
+      pinned: true,
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/shares/share-123/conversation', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: 'Reviewer updated title',
+        status: 'archived',
+        pinned: true,
+      }),
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        title: 'Reviewer updated title',
+        status: 'archived',
+        pinned: true,
       },
     });
   });

@@ -7,11 +7,12 @@ type WorkspaceArtifactPreviewContext = {
   conversationId?: string | null;
   runId?: string | null;
   shareId?: string | null;
+  shareAccess?: string | null;
 };
 
 function appendContextParam(
   params: URLSearchParams,
-  key: "conversationId" | "runId" | "shareId",
+  key: "conversationId" | "runId" | "shareId" | "shareAccess",
   value: string | null | undefined,
 ) {
   if (typeof value !== "string") {
@@ -34,6 +35,7 @@ export function buildWorkspaceArtifactPreviewHref(
   appendContextParam(params, "conversationId", context.conversationId);
   appendContextParam(params, "runId", context.runId);
   appendContextParam(params, "shareId", context.shareId);
+  appendContextParam(params, "shareAccess", context.shareAccess);
 
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
 
@@ -69,11 +71,13 @@ export function WorkspaceArtifactLinkList({
   conversationId,
   runId,
   shareId,
+  shareAccess,
 }: {
   artifacts: WorkspaceArtifactSummary[];
   conversationId?: string | null;
   runId?: string | null;
   shareId?: string | null;
+  shareAccess?: string | null;
 }) {
   return (
     <div className="artifact-link-list">
@@ -85,6 +89,7 @@ export function WorkspaceArtifactLinkList({
             conversationId,
             runId,
             shareId,
+            shareAccess,
           })}
         >
           <div className="artifact-link-card-header">
