@@ -169,6 +169,16 @@ type Messages = {
     warnings: string;
     adjustments: string;
     records: string;
+    breakdowns: string;
+    appBreakdown: string;
+    groupBreakdown: string;
+    providerBreakdown: string;
+    noBreakdowns: string;
+    breakdownLaunches: string;
+    breakdownRuns: string;
+    breakdownRetrievals: string;
+    breakdownStorage: string;
+    breakdownExports: string;
     noWarnings: string;
     noAdjustments: string;
     noRecords: string;
@@ -464,6 +474,16 @@ const messages: Record<AppLocale, Messages> = {
       warnings: '警告',
       adjustments: '调整',
       records: '记录',
+      breakdowns: '成本拆分',
+      appBreakdown: '按应用',
+      groupBreakdown: '按群组',
+      providerBreakdown: '按运行时',
+      noBreakdowns: '暂无拆分记录',
+      breakdownLaunches: '启动',
+      breakdownRuns: '运行',
+      breakdownRetrievals: '检索',
+      breakdownStorage: '存储',
+      breakdownExports: '导出',
       noWarnings: '暂无计费警告',
       noAdjustments: '暂无调整记录',
       noRecords: '暂无计费记录',
@@ -760,6 +780,16 @@ const messages: Record<AppLocale, Messages> = {
       warnings: 'Warnings',
       adjustments: 'Adjustments',
       records: 'Records',
+      breakdowns: 'Cost breakdowns',
+      appBreakdown: 'By app',
+      groupBreakdown: 'By group',
+      providerBreakdown: 'By runtime',
+      noBreakdowns: 'No breakdown rows yet.',
+      breakdownLaunches: 'Launches',
+      breakdownRuns: 'Runs',
+      breakdownRetrievals: 'Retrieval',
+      breakdownStorage: 'Storage',
+      breakdownExports: 'Exports',
       noWarnings: 'No billing warnings.',
       noAdjustments: 'No billing adjustments recorded.',
       noRecords: 'No billing records available.',

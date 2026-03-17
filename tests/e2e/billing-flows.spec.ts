@@ -20,6 +20,7 @@ const BILLING_LINK = eitherLocale("计费", "Billing");
 const APPS_WORKSPACE_NAME = eitherLocale("应用工作台", "Apps workspace");
 const SAVE_PLAN_BUTTON = eitherLocale("保存计划", "Save plan");
 const MONTHLY_LIMIT_LABEL = eitherLocale("月度额度", "Monthly credits");
+const GRACE_BUFFER_LABEL = eitherLocale("宽限额度", "Grace buffer");
 const SERVICE_COPILOT_APP = eitherLocale("服务副驾", "Service Copilot");
 const HARD_STOP_NOTICE = /^(当前租户已触发计费硬停，新启动会被阻止|Billing hard stop is active\. New launches remain blocked\.)/;
 
@@ -85,6 +86,7 @@ test("billing overrides surface hard-stop warnings in the workspace", async ({ p
 
   const billingCard = page.locator("article.admin-card").first();
   await billingCard.getByLabel(MONTHLY_LIMIT_LABEL).fill("1");
+  await billingCard.getByLabel(GRACE_BUFFER_LABEL).fill("0");
   await Promise.all([
     waitForGatewayRequest(page, "PUT", "/admin/billing/tenants/"),
     billingCard.getByRole("button", { name: SAVE_PLAN_BUTTON }).click(),

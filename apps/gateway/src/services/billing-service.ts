@@ -5,6 +5,7 @@ import type { AdminService } from './admin-service.js';
 import { calculateCompletionQuotaCost } from './workspace-quota.js';
 import type {
   AdminBillingAdjustment,
+  AdminBillingBreakdownEntry,
   AdminBillingAdjustmentCreateRequest,
   AdminBillingPlanUpdateRequest,
   AdminBillingResponse,
@@ -25,9 +26,127 @@ export type BillingService = {
 };
 
 const DEFAULT_FLAGS: AdminTenantBillingPlan['featureFlags'] = ['workflow_authoring', 'provider_routing', 'connector_sync', 'artifact_exports'];
+const CREDIT_TO_USD = 0.02;
+const STORAGE_BYTES_PER_CREDIT = 25 * 1024 * 1024;
 
 export function buildDefaultBillingPlan(tenantId: string): AdminTenantBillingPlan {
   return { id: `billplan_${tenantId}`, tenantId, name: 'Growth', currency: 'USD', monthlyCreditLimit: 1000, softLimitPercent: 80, hardStopEnabled: true, graceCreditBuffer: 125, storageLimitBytes: 250 * 1024 * 1024, monthlyExportLimit: 200, featureFlags: DEFAULT_FLAGS, status: 'active', updatedAt: new Date().toISOString() };
+}
+
+function calculateStorageCredits(totalBytes: number) {
+  if (!Number.isFinite(totalBytes) || totalBytes <= 0) {
+    return 0;
+  }
+
+  return Math.max(1, Math.ceil(totalBytes / STORAGE_BYTES_PER_CREDIT));
+}
+
+function toEstimatedUsd(credits: number) {
+  return Number((credits * CREDIT_TO_USD).toFixed(2));
+}
+
+function summarizeAdjustmentImpact(adjustments: AdminBillingAdjustment[]) {
+  return adjustments.reduce(
+    (totals, adjustment) => {
+      if (adjustment.kind === 'meter_correction') {
+        totals.meterCorrectionDelta += adjustment.creditDelta;
+      } else {
+        totals.limitDelta += adjustment.creditDelta;
+      }
+
+      return totals;
+    },
+    { limitDelta: 0, meterCorrectionDelta: 0 }
+  );
+}
+
+function resolveProviderForApp(appId: string) {
+  if (appId === 'app_runbook_mentor') {
+    return {
+      providerId: 'local_structured',
+      providerLabel: 'Local Structured Provider',
+    };
+  }
+
+  return {
+    providerId: 'local_fast',
+    providerLabel: 'Local Fast Provider',
+  };
+}
+
+function summarizeAppBreakdowns(summary: UsageTenant): AdminBillingBreakdownEntry[] {
+  return summary.appBreakdown
+    .map(app => {
+    const retrievalCount = app.kind === 'analysis' || app.kind === 'governance' ? app.runCount : 0;
+    const credits =
+      app.launchCount +
+      calculateCompletionQuotaCost(app.totalTokens) +
+      retrievalCount +
+      calculateStorageCredits(app.totalStorageBytes);
+
+    return {
+      scope: 'app' as const,
+      key: app.appId,
+      label: app.appName,
+      credits,
+      estimatedUsd: toEstimatedUsd(credits),
+      launchCount: app.launchCount,
+      runCount: app.runCount,
+      retrievalCount,
+      storageBytes: app.totalStorageBytes,
+      exportCount: 0,
+    };
+    })
+    .sort((left, right) => right.credits - left.credits);
+}
+
+function summarizeGroupBreakdowns(summary: UsageTenant): AdminBillingBreakdownEntry[] {
+  return summary.quotaUsage
+    .filter(item => item.scope === 'group')
+    .map(item => ({
+      scope: 'group' as const,
+      key: item.scopeId,
+      label: item.scopeLabel,
+      credits: item.actualUsed,
+      estimatedUsd: toEstimatedUsd(item.actualUsed),
+      launchCount: 0,
+      runCount: 0,
+      retrievalCount: 0,
+      storageBytes: 0,
+      exportCount: 0,
+    }))
+    .sort((left, right) => right.credits - left.credits);
+}
+
+function summarizeProviderBreakdowns(apps: AdminBillingBreakdownEntry[]): AdminBillingBreakdownEntry[] {
+  const providerMap = new Map<string, AdminBillingBreakdownEntry>();
+
+  for (const app of apps) {
+    const provider = resolveProviderForApp(app.key);
+      const current = providerMap.get(provider.providerId) ?? {
+      scope: 'provider' as const,
+      key: provider.providerId,
+      label: provider.providerLabel,
+      credits: 0,
+      estimatedUsd: 0,
+      launchCount: 0,
+      runCount: 0,
+      retrievalCount: 0,
+      storageBytes: 0,
+      exportCount: 0,
+    };
+
+    current.credits += app.credits;
+    current.launchCount += app.launchCount;
+    current.runCount += app.runCount;
+    current.retrievalCount += app.retrievalCount;
+    current.storageBytes += app.storageBytes;
+    current.exportCount += app.exportCount;
+    current.estimatedUsd = toEstimatedUsd(current.credits);
+    providerMap.set(provider.providerId, current);
+  }
+
+  return Array.from(providerMap.values()).sort((left, right) => right.credits - left.credits);
 }
 
 function summarizeTenant(summary: UsageTenant, plan: AdminTenantBillingPlan, adjustments: AdminBillingAdjustment[], exportCount: number): AdminBillingTenantSummary {
@@ -36,20 +155,31 @@ function summarizeTenant(summary: UsageTenant, plan: AdminTenantBillingPlan, adj
     ['launch', summary.launchCount, 'launches', summary.launchCount],
     ['completion', summary.runCount, 'runs', calculateCompletionQuotaCost(summary.totalTokens)],
     ['retrieval', retrievalCount, 'retrieval_runs', retrievalCount],
-    ['storage', summary.totalStorageBytes, 'bytes', summary.totalStorageBytes > 0 ? Math.max(1, Math.ceil(summary.totalStorageBytes / (25 * 1024 * 1024))) : 0],
+    ['storage', summary.totalStorageBytes, 'bytes', calculateStorageCredits(summary.totalStorageBytes)],
     ['export', exportCount, 'exports', exportCount],
   ] as const;
-  const actions = actionRows.map(([action, quantity, unit, credits]) => ({ action, quantity, unit, credits, estimatedUsd: Number((credits * 0.02).toFixed(2)) }));
-  const effectiveCreditLimit = plan.monthlyCreditLimit + adjustments.reduce((total, item) => total + item.creditDelta, 0);
-  const actualCreditsUsed = actions.reduce((total, item) => total + item.credits, 0);
-  const status = plan.hardStopEnabled && actualCreditsUsed >= effectiveCreditLimit ? 'hard_stop' : actualCreditsUsed > plan.monthlyCreditLimit ? 'grace' : 'active';
+  const actions = actionRows.map(([action, quantity, unit, credits]) => ({ action, quantity, unit, credits, estimatedUsd: toEstimatedUsd(credits) }));
+  const appBreakdowns = summarizeAppBreakdowns(summary);
+  const groupBreakdowns = summarizeGroupBreakdowns(summary);
+  const providerBreakdowns = summarizeProviderBreakdowns(appBreakdowns);
+  const adjustmentImpact = summarizeAdjustmentImpact(adjustments);
+  const adjustedMonthlyLimit = Math.max(0, plan.monthlyCreditLimit + adjustmentImpact.limitDelta);
+  const effectiveCreditLimit = adjustedMonthlyLimit + Math.max(0, plan.graceCreditBuffer);
+  const grossCreditsUsed = actions.reduce((total, item) => total + item.credits, 0);
+  const actualCreditsUsed = Math.max(0, grossCreditsUsed - adjustmentImpact.meterCorrectionDelta);
+  const status =
+    plan.hardStopEnabled && actualCreditsUsed >= effectiveCreditLimit
+      ? 'hard_stop'
+      : actualCreditsUsed > adjustedMonthlyLimit
+        ? 'grace'
+        : 'active';
   const warnings: AdminBillingTenantSummary['warnings'] = [];
-  if (actualCreditsUsed >= Math.floor(plan.monthlyCreditLimit * (plan.softLimitPercent / 100))) warnings.push({ code: 'soft_limit_reached', severity: actualCreditsUsed >= effectiveCreditLimit ? 'critical' : 'warning', summary: 'Billing soft limit reached.', detail: `Used ${actualCreditsUsed} / ${effectiveCreditLimit} credits.` });
-  if (status === 'grace') warnings.push({ code: 'grace_active', severity: 'warning', summary: 'Tenant is consuming grace credits.', detail: `Grace buffer: ${plan.graceCreditBuffer} credits.` });
+  if (actualCreditsUsed >= Math.floor(adjustedMonthlyLimit * (plan.softLimitPercent / 100))) warnings.push({ code: 'soft_limit_reached', severity: actualCreditsUsed >= effectiveCreditLimit ? 'critical' : 'warning', summary: 'Billing soft limit reached.', detail: `Used ${actualCreditsUsed} / ${effectiveCreditLimit} credits.` });
+  if (status === 'grace') warnings.push({ code: 'grace_active', severity: 'warning', summary: 'Tenant is consuming grace credits.', detail: `Plan credits ${adjustedMonthlyLimit} · grace buffer ${plan.graceCreditBuffer}.` });
   if (status === 'hard_stop') warnings.push({ code: 'hard_limit_reached', severity: 'critical', summary: 'Billing hard limit reached.', detail: 'New launches should remain blocked until the plan is adjusted.' });
   if (summary.totalStorageBytes >= plan.storageLimitBytes) warnings.push({ code: 'storage_limit_reached', severity: 'critical', summary: 'Storage limit reached.', detail: null });
   if (exportCount >= plan.monthlyExportLimit) warnings.push({ code: 'export_limit_reached', severity: 'warning', summary: 'Monthly export limit reached.', detail: null });
-  return { tenantId: summary.tenantId, tenantName: summary.tenantName, plan: { ...plan, status }, actualCreditsUsed, effectiveCreditLimit, remainingCredits: effectiveCreditLimit - actualCreditsUsed, totalEstimatedUsd: Number(actions.reduce((total, item) => total + item.estimatedUsd, 0).toFixed(2)), storageBytesUsed: summary.totalStorageBytes, exportCount, actions, adjustments, recentRecords: actions.map(item => ({ id: `billrec_${summary.tenantId}_${item.action}`, tenantId: summary.tenantId, action: item.action, referenceType: 'aggregate', referenceId: null, quantity: item.quantity, unit: item.unit, credits: item.credits, estimatedUsd: item.estimatedUsd, occurredAt: new Date().toISOString(), maskedContext: { action: item.action, summaryWindow: 'rolling_30d' } })), warnings };
+  return { tenantId: summary.tenantId, tenantName: summary.tenantName, plan: { ...plan, status }, actualCreditsUsed, effectiveCreditLimit, remainingCredits: effectiveCreditLimit - actualCreditsUsed, totalEstimatedUsd: toEstimatedUsd(actualCreditsUsed), storageBytesUsed: summary.totalStorageBytes, exportCount, actions, adjustments, recentRecords: actions.map(item => ({ id: `billrec_${summary.tenantId}_${item.action}`, tenantId: summary.tenantId, action: item.action, referenceType: 'aggregate', referenceId: null, quantity: item.quantity, unit: item.unit, credits: item.credits, estimatedUsd: item.estimatedUsd, occurredAt: new Date().toISOString(), maskedContext: { action: item.action, summaryWindow: 'rolling_30d' } })), warnings, breakdowns: { apps: appBreakdowns, groups: groupBreakdowns, providers: providerBreakdowns } };
 }
 
 export function createBillingService(adminService: AdminService): BillingService {

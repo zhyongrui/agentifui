@@ -31,8 +31,120 @@ function toCsvCell(value: string | number | null) {
 }
 
 function buildCsv(bundle: AdminBillingExportJsonBundle) {
-  const header = ['tenant_id', 'tenant_name', 'plan_name', 'status', 'actual_credits_used', 'effective_credit_limit', 'remaining_credits', 'total_estimated_usd', 'storage_bytes_used', 'export_count', 'warnings'];
-  const rows = bundle.tenants.map(tenant => [tenant.tenantId, tenant.tenantName, tenant.plan.name, tenant.plan.status, tenant.actualCreditsUsed, tenant.effectiveCreditLimit, tenant.remainingCredits, tenant.totalEstimatedUsd, tenant.storageBytesUsed, tenant.exportCount, tenant.warnings.map(item => item.code).join('; ')].map(toCsvCell).join(','));
+  const header = [
+    'row_type',
+    'tenant_id',
+    'tenant_name',
+    'plan_name',
+    'status',
+    'breakdown_scope',
+    'breakdown_key',
+    'breakdown_label',
+    'action',
+    'adjustment_kind',
+    'quantity',
+    'credits',
+    'estimated_usd',
+    'launch_count',
+    'run_count',
+    'retrieval_count',
+    'storage_bytes',
+    'export_count',
+    'detail',
+  ];
+  const rows = bundle.tenants.flatMap(tenant => {
+    const summaryRow = [
+      'tenant_summary',
+      tenant.tenantId,
+      tenant.tenantName,
+      tenant.plan.name,
+      tenant.plan.status,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      tenant.actualCreditsUsed,
+      tenant.totalEstimatedUsd,
+      null,
+      null,
+      null,
+      tenant.storageBytesUsed,
+      tenant.exportCount,
+      tenant.warnings.map(item => item.code).join('; '),
+    ];
+    const actionRows = tenant.actions.map(action => [
+      'action',
+      tenant.tenantId,
+      tenant.tenantName,
+      tenant.plan.name,
+      tenant.plan.status,
+      null,
+      null,
+      null,
+      action.action,
+      null,
+      action.quantity,
+      action.credits,
+      action.estimatedUsd,
+      null,
+      null,
+      null,
+      null,
+      null,
+      action.unit,
+    ]);
+    const adjustmentRows = tenant.adjustments.map(adjustment => [
+      'adjustment',
+      tenant.tenantId,
+      tenant.tenantName,
+      tenant.plan.name,
+      tenant.plan.status,
+      null,
+      null,
+      null,
+      null,
+      adjustment.kind,
+      null,
+      adjustment.creditDelta,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      adjustment.reason,
+    ]);
+    const breakdownRows = [
+      ...tenant.breakdowns.apps,
+      ...tenant.breakdowns.groups,
+      ...tenant.breakdowns.providers,
+    ].map(entry => [
+      'breakdown',
+      tenant.tenantId,
+      tenant.tenantName,
+      tenant.plan.name,
+      tenant.plan.status,
+      entry.scope,
+      entry.key,
+      entry.label,
+      null,
+      null,
+      null,
+      entry.credits,
+      entry.estimatedUsd,
+      entry.launchCount,
+      entry.runCount,
+      entry.retrievalCount,
+      entry.storageBytes,
+      entry.exportCount,
+      null,
+    ]);
+
+    return [summaryRow, ...actionRows, ...adjustmentRows, ...breakdownRows]
+      .map(row => row.map(value => toCsvCell(value)).join(','));
+  });
   return [header.map(toCsvCell).join(','), ...rows].join('\n');
 }
 

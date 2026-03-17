@@ -571,6 +571,7 @@ describe('admin routes', () => {
               adjustments: [],
               recentRecords: [],
               warnings: [],
+              breakdowns: { apps: [], groups: [], providers: [] },
             },
           ],
           totals: {

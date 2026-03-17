@@ -3,6 +3,7 @@
 import type {
   AdminBillingAdjustmentCreateRequest,
   AdminBillingAdjustmentKind,
+  AdminBillingBreakdownEntry,
   AdminBillingTenantSummary,
   AdminBillingPlanUpdateRequest,
 } from '@agentifui/shared/admin';
@@ -73,6 +74,43 @@ function downloadBlob(blob: Blob, filename: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function BillingBreakdownSection({
+  entries,
+  title,
+  copy,
+}: {
+  entries: AdminBillingBreakdownEntry[];
+  title: string;
+  copy: ReturnType<typeof useI18n>['messages']['adminBilling'];
+}) {
+  return (
+    <div className="stack">
+      <strong>{title}</strong>
+      {entries.length === 0 ? (
+        <span className="tag tag-muted">{copy.noBreakdowns}</span>
+      ) : (
+        <div className="detail-list">
+          {entries.map(entry => (
+            <div className="detail-row" key={`${entry.scope}:${entry.key}`}>
+              <div>
+                <strong>{entry.label}</strong>
+                <p className="lead" style={{ margin: 0 }}>
+                  {entry.credits} credits · ${entry.estimatedUsd.toFixed(2)}
+                </p>
+                <p className="lead" style={{ margin: 0 }}>
+                  {copy.breakdownLaunches} {entry.launchCount} · {copy.breakdownRuns} {entry.runCount} ·{' '}
+                  {copy.breakdownRetrievals} {entry.retrievalCount} · {copy.breakdownStorage}{' '}
+                  {entry.storageBytes} · {copy.breakdownExports} {entry.exportCount}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function AdminBillingPage() {
@@ -370,6 +408,25 @@ export default function AdminBillingPage() {
                         </span>
                       ))}
                     </div>
+                  </div>
+
+                  <div className="stack">
+                    <strong>{billingCopy.breakdowns}</strong>
+                    <BillingBreakdownSection
+                      entries={tenant.breakdowns.apps}
+                      title={billingCopy.appBreakdown}
+                      copy={billingCopy}
+                    />
+                    <BillingBreakdownSection
+                      entries={tenant.breakdowns.groups}
+                      title={billingCopy.groupBreakdown}
+                      copy={billingCopy}
+                    />
+                    <BillingBreakdownSection
+                      entries={tenant.breakdowns.providers}
+                      title={billingCopy.providerBreakdown}
+                      copy={billingCopy}
+                    />
                   </div>
 
                   <form className="stack" onSubmit={event => void handleSavePlan(event, tenant)}>

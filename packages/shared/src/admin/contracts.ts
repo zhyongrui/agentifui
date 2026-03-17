@@ -399,6 +399,19 @@ export type AdminBillingWarning = {
   detail: string | null;
 };
 
+export type AdminBillingBreakdownEntry = {
+  scope: 'app' | 'group' | 'provider';
+  key: string;
+  label: string;
+  credits: number;
+  estimatedUsd: number;
+  launchCount: number;
+  runCount: number;
+  retrievalCount: number;
+  storageBytes: number;
+  exportCount: number;
+};
+
 export type AdminBillingTenantSummary = {
   tenantId: string;
   tenantName: string;
@@ -413,6 +426,11 @@ export type AdminBillingTenantSummary = {
   adjustments: AdminBillingAdjustment[];
   recentRecords: AdminBillingUsageRecord[];
   warnings: AdminBillingWarning[];
+  breakdowns: {
+    apps: AdminBillingBreakdownEntry[];
+    groups: AdminBillingBreakdownEntry[];
+    providers: AdminBillingBreakdownEntry[];
+  };
 };
 
 export type AdminBillingTotals = {
