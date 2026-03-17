@@ -1,0 +1,190 @@
+{
+  "fixtureId": "tenant-control-approval",
+  "appId": "app_tenant_control",
+  "workstream": "tool-approval",
+  "prompt": "Review the current tenant access changes and summarize impacted subjects.",
+  "stepCount": 2,
+  "conversation": {
+    "title": "Tenant Control",
+    "status": "active",
+    "appName": "Tenant Control",
+    "messageCount": 5,
+    "messages": [
+      {
+        "role": "user",
+        "status": "completed",
+        "content": "Review the current tenant access changes and summarize impacted subjects.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "assistant",
+        "status": "completed",
+        "content": "Requested 1 tool call.\nTools: tenant.access.review.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [
+          {
+            "name": "tenant.access.review",
+            "arguments": {
+              "subjectType": "group"
+            }
+          }
+        ],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "assistant",
+        "status": "completed",
+        "content": "Tenant Control is now reachable through the AgentifUI gateway.\n\nRequest: Review the current tenant access changes and summarize impacted subjects.\n\nTool approval required: tenant.access.review.\n\nContext: attributed group Product Studio, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [
+          "Summarize the key takeaways about \"Review the current tenant access changes and summarize impacted subjects\".",
+          "List the next checks I should run for \"Review the current tenant access changes and summarize impacted subjects\".",
+          "Draft a short stakeholder update about \"Review the current tenant access changes and summarize impacted subjects\"."
+        ],
+        "artifacts": [
+          {
+            "title": "Review the current tenant access changes and...",
+            "kind": "markdown",
+            "summary": "Tenant Control is now reachable through the AgentifUI gateway. Request: Review the current tenant access changes and..."
+          }
+        ],
+        "citations": [
+          {
+            "label": "S1",
+            "title": "Tenant Control workspace context",
+            "snippet": "Attributed group Product Studio. Latest request: Review the current tenant access changes and summarize impacted subjects."
+          },
+          {
+            "label": "S2",
+            "title": "Tenant Control app summary",
+            "snippet": "租户管理员使用的授权与配置控制台入口。"
+          }
+        ],
+        "safetySignals": []
+      },
+      {
+        "role": "tool",
+        "status": "completed",
+        "content": "Tool `tenant.access.review` executed after approval.\nReviewed by Eval Tenant Admin.\nPolicy tag: tenant_access_review.\nArguments:\n```json\n{\n  \"subjectType\": \"group\"\n}\n```\nReviewer note: Approved during replay harness validation.",
+        "toolCallId": "call_<tool>_<id>",
+        "toolName": "tenant.access.review",
+        "toolCalls": [],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "assistant",
+        "status": "completed",
+        "content": "Tenant Control completed tenant.access.review after approval.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      }
+    ]
+  },
+  "run": {
+    "appId": "app_tenant_control",
+    "status": "succeeded",
+    "triggeredFrom": "app_launch",
+    "outputsAssistantText": "Tenant Control completed tenant.access.review after approval.",
+    "failure": null,
+    "runtime": {
+      "id": "placeholder",
+      "label": "Placeholder Runtime",
+      "status": "available",
+      "capabilities": {
+        "streaming": true,
+        "citations": true,
+        "artifacts": true,
+        "safety": true,
+        "pendingActions": true,
+        "files": true
+      }
+    },
+    "versions": {
+      "fixtureVersion": "2026-03-17.eval-fixture.v1",
+      "promptVersion": "tenant-control.approval.v1",
+      "runtimeVersion": "placeholder@2026-03-17"
+    },
+    "usage": {
+      "promptTokens": 19,
+      "completionTokens": 95,
+      "totalTokens": 114
+    },
+    "pendingActions": [
+      {
+        "kind": "approval",
+        "title": "Approve tenant.access.review",
+        "status": "approved",
+        "actionLabels": [
+          "Approve tool",
+          "Reject tool"
+        ]
+      }
+    ],
+    "artifacts": [
+      {
+        "title": "Review the current tenant access changes and...",
+        "kind": "markdown",
+        "summary": "Tenant Control is now reachable through the AgentifUI gateway. Request: Review the current tenant access changes and...",
+        "content": "Tenant Control is now reachable through the AgentifUI gateway.\n\nRequest: Review the current tenant access changes and summarize impacted subjects.\n\nTool approval required: tenant.access.review.\n\nContext: attributed group Product Studio, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary."
+      }
+    ],
+    "citations": [
+      {
+        "label": "S1",
+        "title": "Tenant Control workspace context",
+        "snippet": "Attributed group Product Studio. Latest request: Review the current tenant access changes and summarize impacted subjects."
+      },
+      {
+        "label": "S2",
+        "title": "Tenant Control app summary",
+        "snippet": "租户管理员使用的授权与配置控制台入口。"
+      }
+    ],
+    "safetySignals": [],
+    "sourceBlocks": [
+      {
+        "kind": "workspace_context",
+        "title": "Tenant Control workspace context",
+        "snippet": "Attributed group Product Studio. Latest request: Review the current tenant access changes and summarize impacted subjects."
+      },
+      {
+        "kind": "app_reference",
+        "title": "Tenant Control app summary",
+        "snippet": "租户管理员使用的授权与配置控制台入口。"
+      }
+    ],
+    "toolExecutions": [
+      {
+        "toolName": "tenant.access.review",
+        "attempt": 1,
+        "status": "succeeded",
+        "latencyMs": 0,
+        "failureCode": null,
+        "idempotencyKey": "tool_idem_<hash>",
+        "timeoutMs": "200",
+        "maxAttempts": "1",
+        "resultPreview": "Tool `tenant.access.review` executed after approval.\nReviewed by Eval Tenant Admin.\nPolicy tag: tenant_access_review.\nArguments:\n```json\n{\n  \"subjectType\": \"group\"\n}\n```\nReviewer note: Approved during replay harness validation."
+      }
+    ]
+  }
+}

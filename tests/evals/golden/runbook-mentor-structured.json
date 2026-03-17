@@ -1,0 +1,125 @@
+{
+  "fixtureId": "runbook-mentor-structured",
+  "appId": "app_runbook_mentor",
+  "workstream": "structured-runtime",
+  "prompt": "Create a short runbook for verifying a release canary before full rollout.",
+  "stepCount": 1,
+  "conversation": {
+    "title": "Runbook Mentor",
+    "status": "active",
+    "appName": "Runbook Mentor",
+    "messageCount": 2,
+    "messages": [
+      {
+        "role": "user",
+        "status": "completed",
+        "content": "Create a short runbook for verifying a release canary before full rollout.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "assistant",
+        "status": "completed",
+        "content": "Runbook Mentor translated the request into a structured execution outline.\n\nRequest: Create a short runbook for verifying a release canary before full rollout.\n\n\n\n\n\nContext: attributed group Product Studio, trace <trace_id>.\n\nPlan:\n\n1. Confirm prerequisites and owners.\n\n2. Execute the SOP in ordered stages.\n\n3. Record follow-up checks and evidence before handoff.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [
+          "Summarize the key takeaways about \"Create a short runbook for verifying a release canary before full rollou\".",
+          "List the next checks I should run for \"Create a short runbook for verifying a release canary before full rollou\".",
+          "Draft a short stakeholder update about \"Create a short runbook for verifying a release canary before full rollou\"."
+        ],
+        "artifacts": [
+          {
+            "title": "Create a short runbook for verifying a releas...",
+            "kind": "markdown",
+            "summary": "Runbook Mentor translated the request into a structured execution outline. Request: Create a short runbook for verify..."
+          }
+        ],
+        "citations": [
+          {
+            "label": "S1",
+            "title": "Runbook Mentor workspace context",
+            "snippet": "Attributed group Product Studio. Latest request: Create a short runbook for verifying a release canary before full rollout."
+          },
+          {
+            "label": "S2",
+            "title": "Runbook Mentor app summary",
+            "snippet": "把 SOP 转成可执行步骤，帮助团队完成标准化交付。"
+          }
+        ],
+        "safetySignals": []
+      }
+    ]
+  },
+  "run": {
+    "appId": "app_runbook_mentor",
+    "status": "succeeded",
+    "triggeredFrom": "app_launch",
+    "outputsAssistantText": "Runbook Mentor translated the request into a structured execution outline.\n\nRequest: Create a short runbook for verifying a release canary before full rollout.\n\n\n\n\n\nContext: attributed group Product Studio, trace <trace_id>.\n\nPlan:\n\n1. Confirm prerequisites and owners.\n\n2. Execute the SOP in ordered stages.\n\n3. Record follow-up checks and evidence before handoff.",
+    "failure": null,
+    "runtime": {
+      "id": "placeholder_structured",
+      "label": "Structured Placeholder Runtime",
+      "status": "available",
+      "capabilities": {
+        "streaming": true,
+        "citations": true,
+        "artifacts": true,
+        "safety": true,
+        "pendingActions": true,
+        "files": true
+      }
+    },
+    "versions": {
+      "fixtureVersion": "2026-03-17.eval-fixture.v1",
+      "promptVersion": "runbook-mentor.prompt.v1",
+      "runtimeVersion": "placeholder_structured@2026-03-17"
+    },
+    "usage": {
+      "promptTokens": 19,
+      "completionTokens": 97,
+      "totalTokens": 116
+    },
+    "pendingActions": [],
+    "artifacts": [
+      {
+        "title": "Create a short runbook for verifying a releas...",
+        "kind": "markdown",
+        "summary": "Runbook Mentor translated the request into a structured execution outline. Request: Create a short runbook for verify...",
+        "content": "Runbook Mentor translated the request into a structured execution outline.\n\nRequest: Create a short runbook for verifying a release canary before full rollout.\n\n\n\n\n\nContext: attributed group Product Studio, trace <trace_id>.\n\nPlan:\n\n1. Confirm prerequisites and owners.\n\n2. Execute the SOP in ordered stages.\n\n3. Record follow-up checks and evidence before handoff."
+      }
+    ],
+    "citations": [
+      {
+        "label": "S1",
+        "title": "Runbook Mentor workspace context",
+        "snippet": "Attributed group Product Studio. Latest request: Create a short runbook for verifying a release canary before full rollout."
+      },
+      {
+        "label": "S2",
+        "title": "Runbook Mentor app summary",
+        "snippet": "把 SOP 转成可执行步骤，帮助团队完成标准化交付。"
+      }
+    ],
+    "safetySignals": [],
+    "sourceBlocks": [
+      {
+        "kind": "workspace_context",
+        "title": "Runbook Mentor workspace context",
+        "snippet": "Attributed group Product Studio. Latest request: Create a short runbook for verifying a release canary before full rollout."
+      },
+      {
+        "kind": "app_reference",
+        "title": "Runbook Mentor app summary",
+        "snippet": "把 SOP 转成可执行步骤，帮助团队完成标准化交付。"
+      }
+    ],
+    "toolExecutions": []
+  }
+}

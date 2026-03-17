@@ -1,0 +1,178 @@
+{
+  "fixtureId": "tenant-control-timeout-incident",
+  "appId": "app_tenant_control",
+  "workstream": "incident-replay",
+  "prompt": "Return the latest tenant usage numbers for this workspace.",
+  "stepCount": 1,
+  "conversation": {
+    "title": "Tenant Control",
+    "status": "active",
+    "appName": "Tenant Control",
+    "messageCount": 4,
+    "messages": [
+      {
+        "role": "user",
+        "status": "completed",
+        "content": "Return the latest tenant usage numbers for this workspace.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "assistant",
+        "status": "completed",
+        "content": "Requested 1 tool call.\nTools: tenant.usage.read.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [
+          {
+            "name": "tenant.usage.read",
+            "arguments": {
+              "scope": "tenant"
+            }
+          }
+        ],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "tool",
+        "status": "completed",
+        "content": "Tool `tenant.usage.read` timed out after 180 ms on attempt 1.",
+        "toolCallId": "call_<tool>_<id>",
+        "toolName": "tenant.usage.read",
+        "toolCalls": [],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "assistant",
+        "status": "completed",
+        "content": "Tenant Control is now reachable through the AgentifUI gateway.\n\nRequest: Return the latest tenant usage numbers for this workspace.\n\nTools used: tenant.usage.read.\n\nContext: attributed group Product Studio, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [
+          "Summarize the key takeaways about \"Return the latest tenant usage numbers for this workspace.\".",
+          "List the next checks I should run for \"Return the latest tenant usage numbers for this workspace.\".",
+          "Draft a short stakeholder update about \"Return the latest tenant usage numbers for this workspace.\"."
+        ],
+        "artifacts": [
+          {
+            "title": "Return the latest tenant usage numbers for th...",
+            "kind": "markdown",
+            "summary": "Tenant Control is now reachable through the AgentifUI gateway. Request: Return the latest tenant usage numbers for th..."
+          }
+        ],
+        "citations": [
+          {
+            "label": "S1",
+            "title": "Tenant Control workspace context",
+            "snippet": "Attributed group Product Studio. Latest request: Return the latest tenant usage numbers for this workspace."
+          },
+          {
+            "label": "S2",
+            "title": "Tenant Control app summary",
+            "snippet": "租户管理员使用的授权与配置控制台入口。"
+          }
+        ],
+        "safetySignals": []
+      }
+    ]
+  },
+  "run": {
+    "appId": "app_tenant_control",
+    "status": "succeeded",
+    "triggeredFrom": "app_launch",
+    "outputsAssistantText": "Tenant Control is now reachable through the AgentifUI gateway.\n\nRequest: Return the latest tenant usage numbers for this workspace.\n\nTools used: tenant.usage.read.\n\nContext: attributed group Product Studio, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
+    "failure": null,
+    "runtime": {
+      "id": "placeholder",
+      "label": "Placeholder Runtime",
+      "status": "available",
+      "capabilities": {
+        "streaming": true,
+        "citations": true,
+        "artifacts": true,
+        "safety": true,
+        "pendingActions": true,
+        "files": true
+      }
+    },
+    "versions": {
+      "fixtureVersion": "2026-03-17.eval-fixture.v1",
+      "promptVersion": "tenant-control.timeout.v1",
+      "runtimeVersion": "placeholder@2026-03-17"
+    },
+    "usage": {
+      "promptTokens": 15,
+      "completionTokens": 88,
+      "totalTokens": 103
+    },
+    "pendingActions": [
+      {
+        "kind": "approval",
+        "title": "Approve tenant access change",
+        "status": "pending",
+        "actionLabels": [
+          "Approve change",
+          "Reject change"
+        ]
+      }
+    ],
+    "artifacts": [
+      {
+        "title": "Return the latest tenant usage numbers for th...",
+        "kind": "markdown",
+        "summary": "Tenant Control is now reachable through the AgentifUI gateway. Request: Return the latest tenant usage numbers for th...",
+        "content": "Tenant Control is now reachable through the AgentifUI gateway.\n\nRequest: Return the latest tenant usage numbers for this workspace.\n\nTools used: tenant.usage.read.\n\nContext: attributed group Product Studio, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary."
+      }
+    ],
+    "citations": [
+      {
+        "label": "S1",
+        "title": "Tenant Control workspace context",
+        "snippet": "Attributed group Product Studio. Latest request: Return the latest tenant usage numbers for this workspace."
+      },
+      {
+        "label": "S2",
+        "title": "Tenant Control app summary",
+        "snippet": "租户管理员使用的授权与配置控制台入口。"
+      }
+    ],
+    "safetySignals": [],
+    "sourceBlocks": [
+      {
+        "kind": "workspace_context",
+        "title": "Tenant Control workspace context",
+        "snippet": "Attributed group Product Studio. Latest request: Return the latest tenant usage numbers for this workspace."
+      },
+      {
+        "kind": "app_reference",
+        "title": "Tenant Control app summary",
+        "snippet": "租户管理员使用的授权与配置控制台入口。"
+      }
+    ],
+    "toolExecutions": [
+      {
+        "toolName": "tenant.usage.read",
+        "attempt": 1,
+        "status": "failed",
+        "latencyMs": 180,
+        "failureCode": "tool_timeout",
+        "idempotencyKey": "tool_idem_<hash>",
+        "timeoutMs": "180",
+        "maxAttempts": "1",
+        "resultPreview": "Tool `tenant.usage.read` timed out after 180 ms on attempt 1."
+      }
+    ]
+  }
+}

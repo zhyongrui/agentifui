@@ -1,0 +1,155 @@
+{
+  "fixtureId": "policy-watch-retrieval",
+  "appId": "app_policy_watch",
+  "workstream": "knowledge-retrieval",
+  "prompt": "Summarize the latest dorm policy updates with supporting evidence.",
+  "stepCount": 1,
+  "conversation": {
+    "title": "Policy Watch",
+    "status": "active",
+    "appName": "Policy Watch",
+    "messageCount": 2,
+    "messages": [
+      {
+        "role": "user",
+        "status": "completed",
+        "content": "Summarize the latest dorm policy updates with supporting evidence.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "assistant",
+        "status": "completed",
+        "content": "Policy Watch is now reachable through the AgentifUI gateway.\n\nRequest: Summarize the latest dorm policy updates with supporting evidence.\n\nContext: attributed group Research Lab, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [
+          "Summarize the key takeaways about \"Summarize the latest dorm policy updates with supporting evidence.\".",
+          "List the next checks I should run for \"Summarize the latest dorm policy updates with supporting evidence.\".",
+          "Draft a short stakeholder update about \"Summarize the latest dorm policy updates with supporting evidence.\"."
+        ],
+        "artifacts": [
+          {
+            "title": "Summarize the latest dorm policy updates with...",
+            "kind": "markdown",
+            "summary": "Policy Watch is now reachable through the AgentifUI gateway. Request: Summarize the latest dorm policy updates with s..."
+          }
+        ],
+        "citations": [
+          {
+            "label": "S1",
+            "title": "Policy Watch workspace context",
+            "snippet": "Attributed group Research Lab. Latest request: Summarize the latest dorm policy updates with supporting evidence."
+          },
+          {
+            "label": "S2",
+            "title": "Policy Watch app summary",
+            "snippet": "跟踪政策变化、合规要求和影响说明。"
+          },
+          {
+            "label": "S3",
+            "title": "Dormitory quiet hours policy",
+            "snippet": "## Exceptions Approved lab access may extend access after lights-out when logged in advance."
+          },
+          {
+            "label": "S4",
+            "title": "Dormitory quiet hours policy",
+            "snippet": "# Dorm policy Quiet hours begin at 23:00 on weekdays."
+          }
+        ],
+        "safetySignals": []
+      }
+    ]
+  },
+  "run": {
+    "appId": "app_policy_watch",
+    "status": "succeeded",
+    "triggeredFrom": "app_launch",
+    "outputsAssistantText": "Policy Watch is now reachable through the AgentifUI gateway.\n\nRequest: Summarize the latest dorm policy updates with supporting evidence.\n\nContext: attributed group Research Lab, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
+    "failure": null,
+    "runtime": {
+      "id": "placeholder",
+      "label": "Placeholder Runtime",
+      "status": "available",
+      "capabilities": {
+        "streaming": true,
+        "citations": true,
+        "artifacts": true,
+        "safety": true,
+        "pendingActions": true,
+        "files": true
+      }
+    },
+    "versions": {
+      "fixtureVersion": "2026-03-17.eval-fixture.v1",
+      "promptVersion": "policy-watch.retrieval.v1",
+      "runtimeVersion": "placeholder@2026-03-17"
+    },
+    "usage": {
+      "promptTokens": 17,
+      "completionTokens": 81,
+      "totalTokens": 98
+    },
+    "pendingActions": [],
+    "artifacts": [
+      {
+        "title": "Summarize the latest dorm policy updates with...",
+        "kind": "markdown",
+        "summary": "Policy Watch is now reachable through the AgentifUI gateway. Request: Summarize the latest dorm policy updates with s...",
+        "content": "Policy Watch is now reachable through the AgentifUI gateway.\n\nRequest: Summarize the latest dorm policy updates with supporting evidence.\n\nContext: attributed group Research Lab, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary."
+      }
+    ],
+    "citations": [
+      {
+        "label": "S1",
+        "title": "Policy Watch workspace context",
+        "snippet": "Attributed group Research Lab. Latest request: Summarize the latest dorm policy updates with supporting evidence."
+      },
+      {
+        "label": "S2",
+        "title": "Policy Watch app summary",
+        "snippet": "跟踪政策变化、合规要求和影响说明。"
+      },
+      {
+        "label": "S3",
+        "title": "Dormitory quiet hours policy",
+        "snippet": "## Exceptions Approved lab access may extend access after lights-out when logged in advance."
+      },
+      {
+        "label": "S4",
+        "title": "Dormitory quiet hours policy",
+        "snippet": "# Dorm policy Quiet hours begin at 23:00 on weekdays."
+      }
+    ],
+    "safetySignals": [],
+    "sourceBlocks": [
+      {
+        "kind": "workspace_context",
+        "title": "Policy Watch workspace context",
+        "snippet": "Attributed group Research Lab. Latest request: Summarize the latest dorm policy updates with supporting evidence."
+      },
+      {
+        "kind": "app_reference",
+        "title": "Policy Watch app summary",
+        "snippet": "跟踪政策变化、合规要求和影响说明。"
+      },
+      {
+        "kind": "knowledge",
+        "title": "Dormitory quiet hours policy",
+        "snippet": "## Exceptions Approved lab access may extend access after lights-out when logged in advance."
+      },
+      {
+        "kind": "knowledge",
+        "title": "Dormitory quiet hours policy",
+        "snippet": "# Dorm policy Quiet hours begin at 23:00 on weekdays."
+      }
+    ],
+    "toolExecutions": []
+  }
+}

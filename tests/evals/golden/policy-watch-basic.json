@@ -1,0 +1,125 @@
+{
+  "fixtureId": "policy-watch-basic",
+  "appId": "app_policy_watch",
+  "workstream": "core-chat",
+  "prompt": "总结一下宿舍熄灯政策的重点。",
+  "stepCount": 1,
+  "conversation": {
+    "title": "Policy Watch",
+    "status": "active",
+    "appName": "Policy Watch",
+    "messageCount": 2,
+    "messages": [
+      {
+        "role": "user",
+        "status": "completed",
+        "content": "总结一下宿舍熄灯政策的重点。",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [],
+        "artifacts": [],
+        "citations": [],
+        "safetySignals": []
+      },
+      {
+        "role": "assistant",
+        "status": "completed",
+        "content": "Policy Watch is now reachable through the AgentifUI gateway.\n\nRequest: 总结一下宿舍熄灯政策的重点。\n\nContext: attributed group Research Lab, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
+        "toolCallId": null,
+        "toolName": null,
+        "toolCalls": [],
+        "suggestedPrompts": [
+          "Summarize the key takeaways about \"总结一下宿舍熄灯政策的重点。\".",
+          "List the next checks I should run for \"总结一下宿舍熄灯政策的重点。\".",
+          "Draft a short stakeholder update about \"总结一下宿舍熄灯政策的重点。\"."
+        ],
+        "artifacts": [
+          {
+            "title": "总结一下宿舍熄灯政策的重点。",
+            "kind": "markdown",
+            "summary": "Policy Watch is now reachable through the AgentifUI gateway. Request: 总结一下宿舍熄灯政策的重点。 Context: attributed group Resear..."
+          }
+        ],
+        "citations": [
+          {
+            "label": "S1",
+            "title": "Policy Watch workspace context",
+            "snippet": "Attributed group Research Lab. Latest request: 总结一下宿舍熄灯政策的重点。"
+          },
+          {
+            "label": "S2",
+            "title": "Policy Watch app summary",
+            "snippet": "跟踪政策变化、合规要求和影响说明。"
+          }
+        ],
+        "safetySignals": []
+      }
+    ]
+  },
+  "run": {
+    "appId": "app_policy_watch",
+    "status": "succeeded",
+    "triggeredFrom": "app_launch",
+    "outputsAssistantText": "Policy Watch is now reachable through the AgentifUI gateway.\n\nRequest: 总结一下宿舍熄灯政策的重点。\n\nContext: attributed group Research Lab, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary.",
+    "failure": null,
+    "runtime": {
+      "id": "placeholder",
+      "label": "Placeholder Runtime",
+      "status": "available",
+      "capabilities": {
+        "streaming": true,
+        "citations": true,
+        "artifacts": true,
+        "safety": true,
+        "pendingActions": true,
+        "files": true
+      }
+    },
+    "versions": {
+      "fixtureVersion": "2026-03-17.eval-fixture.v1",
+      "promptVersion": "policy-watch.prompt.v1",
+      "runtimeVersion": "placeholder@2026-03-17"
+    },
+    "usage": {
+      "promptTokens": 4,
+      "completionTokens": 68,
+      "totalTokens": 72
+    },
+    "pendingActions": [],
+    "artifacts": [
+      {
+        "title": "总结一下宿舍熄灯政策的重点。",
+        "kind": "markdown",
+        "summary": "Policy Watch is now reachable through the AgentifUI gateway. Request: 总结一下宿舍熄灯政策的重点。 Context: attributed group Resear...",
+        "content": "Policy Watch is now reachable through the AgentifUI gateway.\n\nRequest: 总结一下宿舍熄灯政策的重点。\n\nContext: attributed group Research Lab, trace <trace_id>.\n\nThis is the Phase 1 protocol response path that R7 wires onto the persisted conversation/run boundary."
+      }
+    ],
+    "citations": [
+      {
+        "label": "S1",
+        "title": "Policy Watch workspace context",
+        "snippet": "Attributed group Research Lab. Latest request: 总结一下宿舍熄灯政策的重点。"
+      },
+      {
+        "label": "S2",
+        "title": "Policy Watch app summary",
+        "snippet": "跟踪政策变化、合规要求和影响说明。"
+      }
+    ],
+    "safetySignals": [],
+    "sourceBlocks": [
+      {
+        "kind": "workspace_context",
+        "title": "Policy Watch workspace context",
+        "snippet": "Attributed group Research Lab. Latest request: 总结一下宿舍熄灯政策的重点。"
+      },
+      {
+        "kind": "app_reference",
+        "title": "Policy Watch app summary",
+        "snippet": "跟踪政策变化、合规要求和影响说明。"
+      }
+    ],
+    "toolExecutions": []
+  }
+}
