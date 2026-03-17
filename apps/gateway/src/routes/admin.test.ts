@@ -1,5 +1,6 @@
 import type {
   AdminAppGrantCreateRequest,
+  AdminBillingResponse,
   AdminAppSummary,
   AdminAppUserGrant,
   AdminAuditActionCount,
@@ -529,6 +530,187 @@ describe('admin routes', () => {
           email: 'admin@iflabx.com',
         }),
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns billing summaries, writes plan changes, and exports billing data for admin viewers', async () => {
+    const authService = createTestAuthService();
+    const adminService = createAdminService();
+    const billingService = {
+      async listBillingForUser() {
+        return {
+          generatedAt: '2026-03-17T00:00:00.000Z',
+          tenants: [
+            {
+              tenantId: 'tenant-dev',
+              tenantName: 'Tenant Dev',
+              plan: {
+                id: 'billplan_tenant-dev',
+                tenantId: 'tenant-dev',
+                name: 'Growth',
+                currency: 'USD' as const,
+                monthlyCreditLimit: 1000,
+                softLimitPercent: 80,
+                hardStopEnabled: true,
+                graceCreditBuffer: 100,
+                storageLimitBytes: 4096,
+                monthlyExportLimit: 20,
+                featureFlags: ['provider_routing' as const],
+                status: 'active' as const,
+                updatedAt: '2026-03-17T00:00:00.000Z',
+              },
+              actualCreditsUsed: 420,
+              effectiveCreditLimit: 1000,
+              remainingCredits: 580,
+              totalEstimatedUsd: 8.4,
+              storageBytesUsed: 2048,
+              exportCount: 2,
+              actions: [],
+              adjustments: [],
+              recentRecords: [],
+              warnings: [],
+            },
+          ],
+          totals: {
+            tenantCount: 1,
+            recordCount: 0,
+            totalCredits: 420,
+            totalEstimatedUsd: 8.4,
+            hardStopTenantCount: 0,
+          },
+        };
+      },
+      async getWorkspaceBillingForUser() {
+        throw new Error('not used');
+      },
+      async updateTenantPlanForUser() {
+        return {
+          ok: true as const,
+          data: {
+            tenantId: 'tenant-dev',
+            plan: {
+              id: 'billplan_tenant-dev',
+              tenantId: 'tenant-dev',
+              name: 'Growth',
+              currency: 'USD' as const,
+              monthlyCreditLimit: 1200,
+              softLimitPercent: 80,
+              hardStopEnabled: true,
+              graceCreditBuffer: 100,
+              storageLimitBytes: 4096,
+              monthlyExportLimit: 20,
+              featureFlags: ['provider_routing' as const],
+              status: 'active' as const,
+              updatedAt: '2026-03-17T00:00:00.000Z',
+            },
+          },
+        };
+      },
+      async createTenantAdjustmentForUser() {
+        return {
+          ok: true as const,
+          data: {
+            tenantId: 'tenant-dev',
+            plan: {
+              id: 'billplan_tenant-dev',
+              tenantId: 'tenant-dev',
+              name: 'Growth',
+              currency: 'USD' as const,
+              monthlyCreditLimit: 1200,
+              softLimitPercent: 80,
+              hardStopEnabled: true,
+              graceCreditBuffer: 100,
+              storageLimitBytes: 4096,
+              monthlyExportLimit: 20,
+              featureFlags: ['provider_routing' as const],
+              status: 'active' as const,
+              updatedAt: '2026-03-17T00:00:00.000Z',
+            },
+            adjustment: {
+              id: 'billadj_1',
+              tenantId: 'tenant-dev',
+              kind: 'credit_grant' as const,
+              creditDelta: 50,
+              expiresAt: null,
+              reason: null,
+              createdAt: '2026-03-17T00:00:00.000Z',
+              createdByUserId: 'user-admin',
+            },
+          },
+        };
+      },
+      async recordExportUsageForUser() {},
+    };
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+      billingService,
+      auditService: createAuditService(),
+    });
+
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    try {
+      const listResponse = await app.inject({
+        method: 'GET',
+        url: '/admin/billing',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+      const updateResponse = await app.inject({
+        method: 'PUT',
+        url: '/admin/billing/tenants/tenant-dev/plan',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          monthlyCreditLimit: 1200,
+        },
+      });
+      const exportResponse = await app.inject({
+        method: 'GET',
+        url: '/admin/billing/export?format=csv',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(listResponse.statusCode).toBe(200);
+      expect((listResponse.json() as AdminBillingResponse).data.totals).toMatchObject({
+        tenantCount: 1,
+        totalCredits: 420,
+      });
+      expect(updateResponse.statusCode).toBe(200);
+      expect(updateResponse.json()).toMatchObject({
+        ok: true,
+        data: {
+          plan: {
+            monthlyCreditLimit: 1200,
+          },
+        },
+      });
+      expect(exportResponse.statusCode).toBe(200);
+      expect(exportResponse.headers['x-agentifui-export-format']).toBe('csv');
+      expect(exportResponse.headers['x-agentifui-export-count']).toBe('1');
     } finally {
       await app.close();
     }

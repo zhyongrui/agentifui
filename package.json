@@ -24,6 +24,7 @@
     "backup:export": "node scripts/backup-export.mjs",
     "backup:restore": "node scripts/backup-restore.mjs",
     "ops:fixture-version": "node scripts/report-fixture-version.mjs",
+    "ops:billing-reconcile": "node scripts/report-billing-reconciliation.mjs",
     "ops:integrity": "node scripts/check-data-integrity.mjs",
     "ops:json-audit": "node scripts/report-json-normalization.mjs",
     "ops:restore-routes": "node scripts/verify-restore-routes.mjs",

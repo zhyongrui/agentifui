@@ -34,6 +34,7 @@ import type {
   WorkspacePreferencesResponse,
   WorkspacePreferencesUpdateRequest,
   WorkspaceArtifactResponse,
+  WorkspaceBillingResponse,
   WorkspaceRunBranchCreateRequest,
   WorkspaceRunBranchCreateResponse,
   WorkspaceSharedConversationResponse,
@@ -233,6 +234,15 @@ export async function fetchWorkspaceSourceStatus(
   sessionToken: string
 ): Promise<WorkspaceSourceStatusResponse | WorkspaceErrorResponse> {
   return fetchWorkspaceJson<WorkspaceSourceStatusResponse>('/workspace/source-status', {
+    method: 'GET',
+    sessionToken,
+  });
+}
+
+export async function fetchWorkspaceBilling(
+  sessionToken: string
+): Promise<WorkspaceBillingResponse | WorkspaceErrorResponse> {
+  return fetchWorkspaceJson<WorkspaceBillingResponse>('/workspace/billing', {
     method: 'GET',
     sessionToken,
   });

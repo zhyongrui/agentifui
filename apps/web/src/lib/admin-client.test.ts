@@ -6,13 +6,16 @@ import {
   createAdminTenant,
   createAdminWorkflow,
   createAdminAppGrant,
+  createAdminBillingAdjustment,
   createAdminSource,
   dryRunAdminWorkflow,
   exportAdminAudit,
+  exportAdminBilling,
   exportAdminWorkflow,
   exportAdminUsage,
   fetchAdminApps,
   fetchAdminAudit,
+  fetchAdminBilling,
   fetchAdminWorkflows,
   fetchAdminContext,
   fetchAdminGroups,
@@ -28,6 +31,7 @@ import {
   reviewAdminAccessRequest,
   reviewAdminDomainClaim,
   revokeAdminAppGrant,
+  updateAdminBillingPlan,
   updateAdminWorkflow,
   updateAdminWorkflowPermissions,
   updateAdminBreakGlassSession,
@@ -254,6 +258,170 @@ describe('admin client', () => {
       ok: true,
       data: {
         events: [],
+      },
+    });
+  });
+
+  it('loads billing summaries, updates plans, creates adjustments, and exports billing data', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-17T00:00:00.000Z',
+            tenants: [],
+            totals: {
+              tenantCount: 0,
+              recordCount: 0,
+              totalCredits: 0,
+              totalEstimatedUsd: 0,
+              hardStopTenantCount: 0,
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            tenantId: 'tenant-dev',
+            plan: {
+              id: 'billplan_tenant-dev',
+              tenantId: 'tenant-dev',
+              name: 'Growth',
+              currency: 'USD',
+              monthlyCreditLimit: 1200,
+              softLimitPercent: 80,
+              hardStopEnabled: true,
+              graceCreditBuffer: 100,
+              storageLimitBytes: 1024,
+              monthlyExportLimit: 40,
+              featureFlags: [],
+              status: 'active',
+              updatedAt: '2026-03-17T00:00:00.000Z',
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            tenantId: 'tenant-dev',
+            plan: {
+              id: 'billplan_tenant-dev',
+              tenantId: 'tenant-dev',
+              name: 'Growth',
+              currency: 'USD',
+              monthlyCreditLimit: 1200,
+              softLimitPercent: 80,
+              hardStopEnabled: true,
+              graceCreditBuffer: 100,
+              storageLimitBytes: 1024,
+              monthlyExportLimit: 40,
+              featureFlags: [],
+              status: 'active',
+              updatedAt: '2026-03-17T00:00:00.000Z',
+            },
+            adjustment: {
+              id: 'billadj_1',
+              tenantId: 'tenant-dev',
+              kind: 'credit_grant',
+              creditDelta: 50,
+              expiresAt: null,
+              reason: null,
+              createdByUserId: 'user-admin',
+              createdAt: '2026-03-17T00:00:00.000Z',
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        headers: new Headers({
+          'content-type': 'text/csv; charset=utf-8',
+          'x-agentifui-export-format': 'csv',
+          'x-agentifui-export-filename': 'billing.csv',
+          'x-agentifui-exported-at': '2026-03-17T00:00:00.000Z',
+          'x-agentifui-export-count': '1',
+        }),
+        blob: async () => new Blob(['tenant_id\ntenant-dev'], { type: 'text/csv' }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const billingResult = await fetchAdminBilling('session-123', { search: 'tenant' });
+    const planResult = await updateAdminBillingPlan('session-123', 'tenant-dev', {
+      monthlyCreditLimit: 1200,
+    });
+    const adjustmentResult = await createAdminBillingAdjustment('session-123', 'tenant-dev', {
+      kind: 'credit_grant',
+      creditDelta: 50,
+    });
+    const exportResult = await exportAdminBilling('session-123', 'csv', {
+      tenantId: 'tenant-dev',
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/gateway/admin/billing?search=tenant', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/gateway/admin/billing/tenants/tenant-dev/plan', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        monthlyCreditLimit: 1200,
+      }),
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/gateway/admin/billing/tenants/tenant-dev/adjustments', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer session-123',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        kind: 'credit_grant',
+        creditDelta: 50,
+      }),
+      cache: 'no-store',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/gateway/admin/billing/export?tenantId=tenant-dev&format=csv', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(billingResult).toMatchObject({
+      ok: true,
+      data: {
+        tenants: [],
+      },
+    });
+    expect(planResult).toMatchObject({
+      ok: true,
+      data: {
+        tenantId: 'tenant-dev',
+      },
+    });
+    expect(adjustmentResult).toMatchObject({
+      ok: true,
+      data: {
+        adjustment: {
+          id: 'billadj_1',
+        },
+      },
+    });
+    expect(exportResult).toMatchObject({
+      metadata: {
+        filename: 'billing.csv',
+        tenantCount: 1,
       },
     });
   });

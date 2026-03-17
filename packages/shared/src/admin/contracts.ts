@@ -317,6 +317,172 @@ export type AdminUsageExportJsonBundle = {
   totals: AdminUsageTotals;
 };
 
+export type AdminBillableAction =
+  | 'launch'
+  | 'completion'
+  | 'retrieval'
+  | 'storage'
+  | 'export';
+
+export type AdminBillingPlanStatus = 'active' | 'grace' | 'hard_stop';
+
+export type AdminBillingFeatureFlag =
+  | 'workflow_authoring'
+  | 'provider_routing'
+  | 'connector_sync'
+  | 'artifact_exports'
+  | 'policy_simulation';
+
+export type AdminTenantBillingPlan = {
+  id: string;
+  tenantId: string;
+  name: string;
+  currency: 'USD';
+  monthlyCreditLimit: number;
+  softLimitPercent: number;
+  hardStopEnabled: boolean;
+  graceCreditBuffer: number;
+  storageLimitBytes: number;
+  monthlyExportLimit: number;
+  featureFlags: AdminBillingFeatureFlag[];
+  status: AdminBillingPlanStatus;
+  updatedAt: string;
+};
+
+export type AdminBillingAdjustmentKind =
+  | 'credit_grant'
+  | 'temporary_limit_raise'
+  | 'meter_correction';
+
+export type AdminBillingAdjustment = {
+  id: string;
+  tenantId: string;
+  kind: AdminBillingAdjustmentKind;
+  creditDelta: number;
+  expiresAt: string | null;
+  reason: string | null;
+  createdAt: string;
+  createdByUserId: string | null;
+};
+
+export type AdminBillingActionSummary = {
+  action: AdminBillableAction;
+  quantity: number;
+  unit: string;
+  credits: number;
+  estimatedUsd: number;
+};
+
+export type AdminBillingUsageRecord = {
+  id: string;
+  tenantId: string;
+  action: AdminBillableAction;
+  referenceType: 'aggregate' | 'launch' | 'run' | 'artifact' | 'admin_export';
+  referenceId: string | null;
+  quantity: number;
+  unit: string;
+  credits: number;
+  estimatedUsd: number;
+  occurredAt: string;
+  maskedContext: Record<string, string | null>;
+};
+
+export type AdminBillingWarning = {
+  code:
+    | 'soft_limit_reached'
+    | 'hard_limit_reached'
+    | 'grace_active'
+    | 'storage_limit_reached'
+    | 'export_limit_reached';
+  severity: 'warning' | 'critical';
+  summary: string;
+  detail: string | null;
+};
+
+export type AdminBillingTenantSummary = {
+  tenantId: string;
+  tenantName: string;
+  plan: AdminTenantBillingPlan;
+  actualCreditsUsed: number;
+  effectiveCreditLimit: number;
+  remainingCredits: number;
+  totalEstimatedUsd: number;
+  storageBytesUsed: number;
+  exportCount: number;
+  actions: AdminBillingActionSummary[];
+  adjustments: AdminBillingAdjustment[];
+  recentRecords: AdminBillingUsageRecord[];
+  warnings: AdminBillingWarning[];
+};
+
+export type AdminBillingTotals = {
+  tenantCount: number;
+  recordCount: number;
+  totalCredits: number;
+  totalEstimatedUsd: number;
+  hardStopTenantCount: number;
+};
+
+export type AdminBillingResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    tenants: AdminBillingTenantSummary[];
+    totals: AdminBillingTotals;
+  };
+};
+
+export type AdminBillingPlanUpdateRequest = {
+  monthlyCreditLimit?: number;
+  softLimitPercent?: number;
+  hardStopEnabled?: boolean;
+  graceCreditBuffer?: number;
+  storageLimitBytes?: number;
+  monthlyExportLimit?: number;
+  featureFlags?: AdminBillingFeatureFlag[];
+  name?: string;
+};
+
+export type AdminBillingPlanUpdateResponse = {
+  ok: true;
+  data: {
+    tenantId: string;
+    plan: AdminTenantBillingPlan;
+  };
+};
+
+export type AdminBillingAdjustmentCreateRequest = {
+  kind: AdminBillingAdjustmentKind;
+  creditDelta: number;
+  expiresAt?: string | null;
+  reason?: string | null;
+};
+
+export type AdminBillingAdjustmentCreateResponse = {
+  ok: true;
+  data: {
+    tenantId: string;
+    adjustment: AdminBillingAdjustment;
+    plan: AdminTenantBillingPlan;
+  };
+};
+
+export type AdminBillingExportFormat = 'csv' | 'json';
+
+export type AdminBillingExportMetadata = {
+  format: AdminBillingExportFormat;
+  filename: string;
+  exportedAt: string;
+  tenantCount: number;
+};
+
+export type AdminBillingExportJsonBundle = {
+  metadata: AdminBillingExportMetadata;
+  generatedAt: string;
+  tenants: AdminBillingTenantSummary[];
+  totals: AdminBillingTotals;
+};
+
 export type AdminAppGrantCreateRequest = {
   subjectUserEmail: string;
   effect: AdminAppGrantEffect;
@@ -522,6 +688,10 @@ export type AdminBreakGlassSession = {
 export type AdminPolicyPackRuntimeMode = 'standard' | 'strict' | 'degraded';
 export type AdminPolicyPackSharingMode = 'read_only' | 'commenter' | 'editor';
 export type AdminPolicyPackArtifactDownloadMode = 'shared_readers' | 'owner_only';
+export type AdminPolicyPackExportMode = 'allowed' | 'approval_required' | 'blocked';
+export type AdminPolicyPackRetentionMode = 'standard' | 'strict' | 'legal_hold';
+export type AdminPolicyPackExceptionScope = 'tenant' | 'group' | 'app' | 'runtime';
+export type AdminPolicyPackSimulationScope = 'chat' | 'sharing' | 'artifact_download' | 'export';
 
 export type AdminTenantGovernanceScimPlanning = {
   enabled: boolean;
@@ -533,6 +703,174 @@ export type AdminTenantGovernancePolicyPack = {
   runtimeMode: AdminPolicyPackRuntimeMode;
   sharingMode: AdminPolicyPackSharingMode;
   artifactDownloadMode: AdminPolicyPackArtifactDownloadMode;
+  exportMode: AdminPolicyPackExportMode;
+  retentionMode: AdminPolicyPackRetentionMode;
+};
+
+export type AdminPolicyDetectorType =
+  | 'secret'
+  | 'pii'
+  | 'regulated_term'
+  | 'exfiltration_pattern';
+
+export type AdminPolicyDetectorMatch = {
+  detector: AdminPolicyDetectorType;
+  label: string;
+  severity: 'warning' | 'critical';
+  valuePreview: string;
+};
+
+export type AdminPolicyEvaluationTrace = {
+  id: string;
+  tenantId: string;
+  scope: AdminPolicyPackSimulationScope;
+  outcome: 'allowed' | 'flagged' | 'blocked';
+  reasons: string[];
+  detectorMatches: AdminPolicyDetectorMatch[];
+  exceptionIds: string[];
+  occurredAt: string;
+};
+
+export type AdminPolicyException = {
+  id: string;
+  tenantId: string;
+  scope: AdminPolicyPackExceptionScope;
+  scopeId: string | null;
+  detector: AdminPolicyDetectorType;
+  label: string;
+  expiresAt: string | null;
+  createdAt: string;
+  createdByUserId: string | null;
+  reviewHistory: Array<{
+    occurredAt: string;
+    actorUserId: string | null;
+    note: string | null;
+  }>;
+};
+
+export type AdminPolicyOverviewResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    governance: AdminTenantGovernanceSettings | null;
+    exceptions: AdminPolicyException[];
+    recentEvaluations: AdminPolicyEvaluationTrace[];
+  };
+};
+
+export type AdminPolicySimulationRequest = {
+  tenantId?: string | null;
+  scope: AdminPolicyPackSimulationScope;
+  content: string;
+  groupId?: string | null;
+  appId?: string | null;
+  runtimeId?: string | null;
+};
+
+export type AdminPolicySimulationResponse = {
+  ok: true;
+  data: {
+    evaluation: AdminPolicyEvaluationTrace;
+  };
+};
+
+export type AdminPolicyExceptionCreateRequest = {
+  tenantId?: string | null;
+  scope: AdminPolicyPackExceptionScope;
+  scopeId?: string | null;
+  detector: AdminPolicyDetectorType;
+  label: string;
+  expiresAt?: string | null;
+  note?: string | null;
+};
+
+export type AdminPolicyExceptionCreateResponse = {
+  ok: true;
+  data: {
+    exception: AdminPolicyException;
+  };
+};
+
+export type AdminPolicyExceptionReviewRequest = {
+  note?: string | null;
+  expiresAt?: string | null;
+};
+
+export type AdminPolicyExceptionReviewResponse = {
+  ok: true;
+  data: {
+    exception: AdminPolicyException;
+  };
+};
+
+export type AdminObservabilityRouteSummary = {
+  method: string;
+  route: string;
+  statusCode: number;
+  count: number;
+  avgDurationMs: number;
+  maxDurationMs: number;
+};
+
+export type AdminObservabilitySli = {
+  key: 'auth_latency' | 'launch_latency' | 'chat_latency' | 'run_success_rate';
+  label: string;
+  target: string;
+  observed: string;
+  status: 'healthy' | 'warning' | 'critical';
+};
+
+export type AdminObservabilityAlert = {
+  id: string;
+  severity: 'warning' | 'critical';
+  summary: string;
+  detail: string | null;
+  runbookHref: string | null;
+};
+
+export type AdminIncidentTimelineEntry = {
+  id: string;
+  traceId: string | null;
+  runId: string | null;
+  source: 'audit' | 'runtime' | 'annotation';
+  summary: string;
+  occurredAt: string;
+};
+
+export type AdminObservabilityAnnotation = {
+  id: string;
+  tenantId: string | null;
+  traceId: string | null;
+  runId: string | null;
+  note: string;
+  createdAt: string;
+  createdByUserId: string | null;
+};
+
+export type AdminObservabilityResponse = {
+  ok: true;
+  data: {
+    generatedAt: string;
+    sli: AdminObservabilitySli[];
+    routes: AdminObservabilityRouteSummary[];
+    alerts: AdminObservabilityAlert[];
+    incidentTimeline: AdminIncidentTimelineEntry[];
+    annotations: AdminObservabilityAnnotation[];
+  };
+};
+
+export type AdminObservabilityAnnotationCreateRequest = {
+  tenantId?: string | null;
+  traceId?: string | null;
+  runId?: string | null;
+  note: string;
+};
+
+export type AdminObservabilityAnnotationCreateResponse = {
+  ok: true;
+  data: {
+    annotation: AdminObservabilityAnnotation;
+  };
 };
 
 export type AdminTenantGovernanceSettings = {

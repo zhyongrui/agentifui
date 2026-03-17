@@ -52,6 +52,8 @@ export type QuotaUsage = {
 
 export type QuotaSeverity = "healthy" | "warning" | "critical" | "blocked";
 
+export type WorkspaceBillingSeverity = "healthy" | "warning" | "critical" | "blocked";
+
 export type WorkspaceSections = {
   recent: WorkspaceApp[];
   favorites: WorkspaceApp[];
@@ -106,6 +108,54 @@ export type WorkspacePreferencesUpdateRequest = {
 export type WorkspacePreferencesResponse = {
   ok: true;
   data: WorkspacePreferences;
+};
+
+export type WorkspaceBillingAction =
+  | "launch"
+  | "completion"
+  | "retrieval"
+  | "storage"
+  | "export";
+
+export type WorkspaceBillingWarning = {
+  code:
+    | "soft_limit_reached"
+    | "hard_limit_reached"
+    | "grace_active"
+    | "storage_limit_reached"
+    | "export_limit_reached";
+  severity: WorkspaceBillingSeverity;
+  summary: string;
+  detail: string | null;
+};
+
+export type WorkspaceBillingActionSummary = {
+  action: WorkspaceBillingAction;
+  quantity: number;
+  unit: string;
+  credits: number;
+  estimatedUsd: number;
+};
+
+export type WorkspaceBillingSummary = {
+  generatedAt: string;
+  tenantId: string;
+  planName: string;
+  status: "active" | "grace" | "hard_stop";
+  actualCreditsUsed: number;
+  effectiveCreditLimit: number;
+  remainingCredits: number;
+  storageBytesUsed: number;
+  storageLimitBytes: number;
+  exportCount: number;
+  monthlyExportLimit: number;
+  warnings: WorkspaceBillingWarning[];
+  actions: WorkspaceBillingActionSummary[];
+};
+
+export type WorkspaceBillingResponse = {
+  ok: true;
+  data: WorkspaceBillingSummary;
 };
 
 export type WorkspaceAppLaunchRequest = {
@@ -992,7 +1042,9 @@ export type WorkspaceErrorCode =
   | "WORKSPACE_NOT_FOUND"
   | "WORKSPACE_LAUNCH_BLOCKED"
   | "WORKSPACE_UPLOAD_BLOCKED"
-  | "WORKSPACE_ACTION_CONFLICT";
+  | "WORKSPACE_ACTION_CONFLICT"
+  | "WORKSPACE_BILLING_BLOCKED"
+  | "WORKSPACE_POLICY_BLOCKED";
 
 export type WorkspaceErrorResponse = {
   ok: false;

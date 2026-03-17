@@ -523,6 +523,8 @@ function buildDefaultGovernance(tenantId: string): AdminTenantGovernanceSettings
       runtimeMode: 'standard',
       sharingMode: 'editor',
       artifactDownloadMode: 'shared_readers',
+      exportMode: 'allowed',
+      retentionMode: 'standard',
     },
   };
 }

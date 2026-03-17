@@ -18,6 +18,7 @@ import {
   fetchWorkspaceConversationRuns,
   fetchWorkspaceArtifact,
   fetchWorkspaceCatalog,
+  fetchWorkspaceBilling,
   fetchWorkspaceRun,
   launchWorkspaceApp,
   markWorkspaceNotificationRead,
@@ -192,6 +193,56 @@ describe('apps client', () => {
         recentAppIds: ['app_market_brief'],
         defaultActiveGroupId: 'grp_security',
         updatedAt: '2026-03-12T10:00:00.000Z',
+      },
+    });
+  });
+
+  it('loads workspace billing warnings through the same-origin gateway proxy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-17T00:00:00.000Z',
+            tenantId: 'tenant-dev',
+            planName: 'Growth',
+            status: 'grace',
+            actualCreditsUsed: 980,
+            effectiveCreditLimit: 1100,
+            remainingCredits: 120,
+            storageBytesUsed: 2048,
+            storageLimitBytes: 4096,
+            exportCount: 4,
+            monthlyExportLimit: 20,
+            warnings: [
+              {
+                code: 'soft_limit_reached',
+                severity: 'warning',
+                summary: 'near limit',
+                detail: null,
+              },
+            ],
+            actions: [],
+          },
+        }),
+      })
+    );
+
+    const result = await fetchWorkspaceBilling('session-123');
+
+    expect(fetch).toHaveBeenCalledWith('/api/gateway/workspace/billing', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer session-123',
+      },
+      cache: 'no-store',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        status: 'grace',
+        remainingCredits: 120,
       },
     });
   });

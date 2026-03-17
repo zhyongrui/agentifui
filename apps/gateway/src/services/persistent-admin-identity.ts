@@ -137,6 +137,8 @@ function buildDefaultGovernance(tenantId: string): AdminTenantGovernanceSettings
       runtimeMode: 'standard',
       sharingMode: 'editor',
       artifactDownloadMode: 'shared_readers',
+      exportMode: 'allowed',
+      retentionMode: 'standard',
     },
   };
 }
@@ -208,6 +210,18 @@ function normalizeGovernanceSettings(
         policyPackRecord.artifactDownloadMode === 'shared_readers'
           ? policyPackRecord.artifactDownloadMode
           : defaultValue.policyPack.artifactDownloadMode,
+      exportMode:
+        policyPackRecord.exportMode === 'approval_required' ||
+        policyPackRecord.exportMode === 'blocked' ||
+        policyPackRecord.exportMode === 'allowed'
+          ? policyPackRecord.exportMode
+          : defaultValue.policyPack.exportMode,
+      retentionMode:
+        policyPackRecord.retentionMode === 'strict' ||
+        policyPackRecord.retentionMode === 'legal_hold' ||
+        policyPackRecord.retentionMode === 'standard'
+          ? policyPackRecord.retentionMode
+          : defaultValue.policyPack.retentionMode,
     },
   };
 }

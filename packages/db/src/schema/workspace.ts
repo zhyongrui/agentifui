@@ -120,6 +120,28 @@ export const workflowPermissionRoleEnum = pgEnum('workflow_permission_role', [
   'publisher',
   'runner',
 ]);
+export const billingPlanStatusEnum = pgEnum('billing_plan_status', [
+  'active',
+  'grace',
+  'hard_stop',
+]);
+export const billingAdjustmentKindEnum = pgEnum('billing_adjustment_kind', [
+  'credit_grant',
+  'temporary_limit_raise',
+  'meter_correction',
+]);
+export const policyExceptionScopeEnum = pgEnum('policy_exception_scope', [
+  'tenant',
+  'group',
+  'app',
+  'runtime',
+]);
+export const policyDetectorTypeEnum = pgEnum('policy_detector_type', [
+  'secret',
+  'pii',
+  'regulated_term',
+  'exfiltration_pattern',
+]);
 
 export const workspaceApps = pgTable(
   'workspace_apps',
@@ -680,6 +702,139 @@ export const workflowDefinitionPermissions = pgTable(
     workflowDefinitionPermissionsTenantIndex: index(
       'workflow_definition_permissions_tenant_idx'
     ).on(table.tenantId),
+  })
+);
+
+export const tenantBillingPlans = pgTable(
+  'tenant_billing_plans',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 120 }).notNull(),
+    currency: varchar('currency', { length: 8 }).notNull().default('USD'),
+    monthlyCreditLimit: integer('monthly_credit_limit').notNull().default(1000),
+    softLimitPercent: integer('soft_limit_percent').notNull().default(80),
+    hardStopEnabled: boolean('hard_stop_enabled').notNull().default(true),
+    graceCreditBuffer: integer('grace_credit_buffer').notNull().default(100),
+    storageLimitBytes: integer('storage_limit_bytes').notNull().default(104857600),
+    monthlyExportLimit: integer('monthly_export_limit').notNull().default(100),
+    featureFlags: jsonb('feature_flags').$type<string[]>().notNull().default([]),
+    status: billingPlanStatusEnum('status').notNull().default('active'),
+    updatedByUserId: varchar('updated_by_user_id', { length: 120 }).references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    tenantBillingPlansTenantUnique: uniqueIndex('tenant_billing_plans_tenant_unique').on(table.tenantId),
+    tenantBillingPlansTenantIndex: index('tenant_billing_plans_tenant_idx').on(table.tenantId),
+  })
+);
+
+export const tenantBillingAdjustments = pgTable(
+  'tenant_billing_adjustments',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    kind: billingAdjustmentKindEnum('kind').notNull(),
+    creditDelta: integer('credit_delta').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    reason: text('reason'),
+    createdByUserId: varchar('created_by_user_id', { length: 120 }).references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    tenantBillingAdjustmentsTenantIndex: index('tenant_billing_adjustments_tenant_idx').on(table.tenantId),
+    tenantBillingAdjustmentsExpiryIndex: index('tenant_billing_adjustments_expiry_idx').on(
+      table.tenantId,
+      table.expiresAt
+    ),
+  })
+);
+
+export const tenantPolicyExceptions = pgTable(
+  'tenant_policy_exceptions',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    scope: policyExceptionScopeEnum('scope').notNull(),
+    scopeId: varchar('scope_id', { length: 120 }),
+    detector: policyDetectorTypeEnum('detector').notNull(),
+    label: varchar('label', { length: 255 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    reviewHistory: jsonb('review_history').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    createdByUserId: varchar('created_by_user_id', { length: 120 }).references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    tenantPolicyExceptionsTenantIndex: index('tenant_policy_exceptions_tenant_idx').on(table.tenantId),
+    tenantPolicyExceptionsScopeIndex: index('tenant_policy_exceptions_scope_idx').on(
+      table.tenantId,
+      table.scope,
+      table.scopeId
+    ),
+  })
+);
+
+export const tenantPolicyEvaluations = pgTable(
+  'tenant_policy_evaluations',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 })
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    scope: varchar('scope', { length: 32 }).notNull(),
+    outcome: varchar('outcome', { length: 32 }).notNull(),
+    reasons: jsonb('reasons').$type<string[]>().notNull().default([]),
+    detectorMatches: jsonb('detector_matches').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    exceptionIds: jsonb('exception_ids').$type<string[]>().notNull().default([]),
+    traceId: varchar('trace_id', { length: 64 }),
+    runId: varchar('run_id', { length: 120 }),
+    conversationId: varchar('conversation_id', { length: 120 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    tenantPolicyEvaluationsTenantIndex: index('tenant_policy_evaluations_tenant_idx').on(table.tenantId),
+    tenantPolicyEvaluationsTraceIndex: index('tenant_policy_evaluations_trace_idx').on(
+      table.traceId,
+      table.createdAt
+    ),
+  })
+);
+
+export const operatorAnnotations = pgTable(
+  'operator_annotations',
+  {
+    id: varchar('id', { length: 120 }).primaryKey(),
+    tenantId: varchar('tenant_id', { length: 120 }).references(() => tenants.id, {
+      onDelete: 'cascade',
+    }),
+    traceId: varchar('trace_id', { length: 64 }),
+    runId: varchar('run_id', { length: 120 }),
+    note: text('note').notNull(),
+    createdByUserId: varchar('created_by_user_id', { length: 120 }).references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    operatorAnnotationsTenantIndex: index('operator_annotations_tenant_idx').on(table.tenantId),
+    operatorAnnotationsTraceIndex: index('operator_annotations_trace_idx').on(
+      table.traceId,
+      table.createdAt
+    ),
+    operatorAnnotationsRunIndex: index('operator_annotations_run_idx').on(table.runId, table.createdAt),
   })
 );
 

@@ -626,6 +626,93 @@ describe("workspace routes", () => {
     }
   });
 
+  it("blocks workspace launches when tenant billing enters hard stop", async () => {
+    const authService = createTestAuthService();
+    const { app } = await createTestApp(authService, {}, {
+      billingService: {
+        async listBillingForUser() {
+          throw new Error("not used");
+        },
+        async getWorkspaceBillingForUser() {
+          return {
+            generatedAt: "2026-03-17T00:00:00.000Z",
+            tenantId: "tenant-dev",
+            planName: "Growth",
+            status: "hard_stop" as const,
+            actualCreditsUsed: 1200,
+            effectiveCreditLimit: 1000,
+            remainingCredits: -200,
+            storageBytesUsed: 0,
+            storageLimitBytes: 4096,
+            exportCount: 0,
+            monthlyExportLimit: 20,
+            warnings: [
+              {
+                code: "hard_limit_reached" as const,
+                severity: "blocked" as const,
+                summary: "hard stop",
+                detail: null,
+              },
+            ],
+            actions: [],
+          };
+        },
+        async updateTenantPlanForUser() {
+          throw new Error("not used");
+        },
+        async createTenantAdjustmentForUser() {
+          throw new Error("not used");
+        },
+        async recordExportUsageForUser() {},
+      },
+    });
+
+    authService.register({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+      displayName: "Developer",
+    });
+
+    const login = authService.login({
+      email: "developer@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_market_brief",
+          activeGroupId: "grp_product",
+        },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_BILLING_BLOCKED",
+          details: {
+            status: "hard_stop",
+            effectiveCreditLimit: 1000,
+          },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("tracks conversation presence sessions for multiple viewers", async () => {
     const authService = createTestAuthService();
     const { app } = await createTestApp(authService);

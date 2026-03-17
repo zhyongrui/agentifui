@@ -5,7 +5,7 @@ export type AppLocale = (typeof supportedLocales)[number];
 export const defaultLocale: AppLocale = 'zh-CN';
 export const localeStorageKey = 'agentifui.locale';
 export const translationScopes = {
-  admin: ['admin.identity', 'admin.audit', 'admin.sources', 'admin.tenants'],
+  admin: ['admin.identity', 'admin.audit', 'admin.sources', 'admin.tenants', 'admin.billing'],
   auth: ['auth.login', 'auth.register', 'auth.pending', 'auth.mfa'],
   shared: ['chat.shared', 'chat.artifact_preview'],
   workspace: ['apps.workspace', 'chat.history', 'chat.conversation'],
@@ -30,6 +30,7 @@ type Messages = {
     users: string;
     groups: string;
     apps: string;
+    billing: string;
     connectors: string;
     sources: string;
     workflows: string;
@@ -109,6 +110,14 @@ type Messages = {
     quotaSeverityCritical: string;
     quotaSeverityBlocked: string;
     quotaSeverityNormal: string;
+    billingWarningTitle: string;
+    billingSoftLimit: string;
+    billingGrace: string;
+    billingHardStop: string;
+    billingRemainingPrefix: string;
+    billingRemainingSuffix: string;
+    billingExportsPrefix: string;
+    billingExportsSuffix: string;
     quotaSwitchNoticePrefix: string;
     quotaSwitchNoticeSuffix: string;
     notAuthorized: string;
@@ -133,6 +142,57 @@ type Messages = {
     reviewInboxCommentTargetRun: string;
     reviewInboxCommentTargetArtifact: string;
     commentMentionHint: string;
+  };
+  adminBilling: {
+    loading: string;
+    title: string;
+    lead: string;
+    totalTenants: string;
+    hardStopTenants: string;
+    estimatedUsd: string;
+    snapshot: string;
+    search: string;
+    searchPlaceholder: string;
+    planName: string;
+    status: string;
+    monthlyLimit: string;
+    softLimitPercent: string;
+    graceBuffer: string;
+    storageLimit: string;
+    monthlyExports: string;
+    hardStopEnabled: string;
+    featureFlags: string;
+    creditsUsed: string;
+    remainingCredits: string;
+    storageUsage: string;
+    exportsUsed: string;
+    warnings: string;
+    adjustments: string;
+    records: string;
+    noWarnings: string;
+    noAdjustments: string;
+    noRecords: string;
+    savePlan: string;
+    savingPlan: string;
+    addAdjustment: string;
+    addingAdjustment: string;
+    exportJson: string;
+    exportCsv: string;
+    updateFailed: string;
+    adjustmentFailed: string;
+    exportFailed: string;
+    planSaved: (tenantName: string) => string;
+    adjustmentSaved: (tenantName: string, amount: number) => string;
+    reason: string;
+    reasonPlaceholder: string;
+    adjustmentDelta: string;
+    adjustmentKind: string;
+    creditGrant: string;
+    temporaryLimitRaise: string;
+    meterCorrection: string;
+    enabled: string;
+    disabled: string;
+    never: string;
   };
   adminApps: {
     loading: string;
@@ -264,6 +324,7 @@ const messages: Record<AppLocale, Messages> = {
       users: '用户',
       groups: '群组',
       apps: '应用',
+      billing: '计费',
       connectors: '连接器',
       sources: '知识源',
       workflows: '工作流',
@@ -344,6 +405,14 @@ const messages: Record<AppLocale, Messages> = {
       quotaSeverityCritical: '已达到 90% 阈值',
       quotaSeverityBlocked: '已达到上限',
       quotaSeverityNormal: '额度正常',
+      billingWarningTitle: '计费状态',
+      billingSoftLimit: '已接近月度额度上限',
+      billingGrace: '当前正在消耗宽限额度',
+      billingHardStop: '当前租户已触发计费硬停，新启动会被阻止',
+      billingRemainingPrefix: '剩余额度',
+      billingRemainingSuffix: 'credits',
+      billingExportsPrefix: '导出',
+      billingExportsSuffix: '次 / 月',
       quotaSwitchNoticePrefix: '工作群组已切换到 ',
       quotaSwitchNoticeSuffix: '，可以重新发起应用启动。',
       notAuthorized: '当前账号没有这个应用的访问授权。',
@@ -368,6 +437,57 @@ const messages: Record<AppLocale, Messages> = {
       reviewInboxCommentTargetRun: '运行评论',
       reviewInboxCommentTargetArtifact: '产物评论',
       commentMentionHint: '可用 @邮箱 提及已共享访问该会话的协作者。',
+    },
+    adminBilling: {
+      loading: '正在加载计费视图...',
+      title: '计费',
+      lead: '按租户查看 launch、completion、retrieval、storage 和 export 的计费汇总，并调整计划与临时额度。',
+      totalTenants: '租户数',
+      hardStopTenants: '硬停租户',
+      estimatedUsd: '预估美元',
+      snapshot: '快照时间',
+      search: '搜索',
+      searchPlaceholder: '按租户名称搜索',
+      planName: '计划',
+      status: '状态',
+      monthlyLimit: '月度额度',
+      softLimitPercent: '软阈值',
+      graceBuffer: '宽限额度',
+      storageLimit: '存储上限',
+      monthlyExports: '月导出上限',
+      hardStopEnabled: '硬停',
+      featureFlags: '功能标记',
+      creditsUsed: '已用额度',
+      remainingCredits: '剩余额度',
+      storageUsage: '存储使用',
+      exportsUsed: '导出使用',
+      warnings: '警告',
+      adjustments: '调整',
+      records: '记录',
+      noWarnings: '暂无计费警告',
+      noAdjustments: '暂无调整记录',
+      noRecords: '暂无计费记录',
+      savePlan: '保存计划',
+      savingPlan: '保存中...',
+      addAdjustment: '添加调整',
+      addingAdjustment: '添加中...',
+      exportJson: '导出 JSON',
+      exportCsv: '导出 CSV',
+      updateFailed: '保存计费计划失败，请重试。',
+      adjustmentFailed: '添加计费调整失败，请重试。',
+      exportFailed: '导出计费数据失败，请重试。',
+      planSaved: tenantName => `${tenantName} 的计费计划已更新。`,
+      adjustmentSaved: (tenantName, amount) => `${tenantName} 已添加 ${amount} credits 调整。`,
+      reason: '原因',
+      reasonPlaceholder: '可选：说明本次调整原因',
+      adjustmentDelta: '调整额度',
+      adjustmentKind: '调整类型',
+      creditGrant: '赠送额度',
+      temporaryLimitRaise: '临时提额',
+      meterCorrection: '计量修正',
+      enabled: '开启',
+      disabled: '关闭',
+      never: '从未',
     },
     adminApps: {
       loading: '正在加载管理端应用...',
@@ -497,6 +617,7 @@ const messages: Record<AppLocale, Messages> = {
       users: 'Users',
       groups: 'Groups',
       apps: 'Apps',
+      billing: 'Billing',
       connectors: 'Connectors',
       sources: 'Sources',
       workflows: 'Workflows',
@@ -577,6 +698,14 @@ const messages: Record<AppLocale, Messages> = {
       quotaSeverityCritical: '90% threshold reached',
       quotaSeverityBlocked: 'Limit reached',
       quotaSeverityNormal: 'Within range',
+      billingWarningTitle: 'Billing status',
+      billingSoftLimit: 'Monthly credit usage is near the soft limit.',
+      billingGrace: 'This tenant is currently consuming grace credits.',
+      billingHardStop: 'Billing hard stop is active. New launches remain blocked.',
+      billingRemainingPrefix: 'Remaining',
+      billingRemainingSuffix: 'credits',
+      billingExportsPrefix: 'Exports',
+      billingExportsSuffix: 'per month',
       quotaSwitchNoticePrefix: 'Working group switched to ',
       quotaSwitchNoticeSuffix: '. You can retry the app launch now.',
       notAuthorized: 'This account is not authorized to access the app.',
@@ -604,6 +733,57 @@ const messages: Record<AppLocale, Messages> = {
       reviewInboxCommentTargetArtifact: 'Artifact comment',
       commentMentionHint:
         'Use @email to mention collaborators who already have access to the shared conversation.',
+    },
+    adminBilling: {
+      loading: 'Loading billing overview...',
+      title: 'Billing',
+      lead: 'Review tenant billing for launches, completions, retrieval, storage, and exports, then adjust plans and temporary credits.',
+      totalTenants: 'Tenants',
+      hardStopTenants: 'Hard-stop tenants',
+      estimatedUsd: 'Estimated USD',
+      snapshot: 'Snapshot',
+      search: 'Search',
+      searchPlaceholder: 'Search by tenant name',
+      planName: 'Plan',
+      status: 'Status',
+      monthlyLimit: 'Monthly credits',
+      softLimitPercent: 'Soft limit',
+      graceBuffer: 'Grace buffer',
+      storageLimit: 'Storage limit',
+      monthlyExports: 'Monthly exports',
+      hardStopEnabled: 'Hard stop',
+      featureFlags: 'Feature flags',
+      creditsUsed: 'Credits used',
+      remainingCredits: 'Remaining credits',
+      storageUsage: 'Storage usage',
+      exportsUsed: 'Export usage',
+      warnings: 'Warnings',
+      adjustments: 'Adjustments',
+      records: 'Records',
+      noWarnings: 'No billing warnings.',
+      noAdjustments: 'No billing adjustments recorded.',
+      noRecords: 'No billing records available.',
+      savePlan: 'Save plan',
+      savingPlan: 'Saving...',
+      addAdjustment: 'Add adjustment',
+      addingAdjustment: 'Adding...',
+      exportJson: 'Export JSON',
+      exportCsv: 'Export CSV',
+      updateFailed: 'Saving the billing plan failed. Please retry.',
+      adjustmentFailed: 'Saving the billing adjustment failed. Please retry.',
+      exportFailed: 'Exporting billing data failed. Please retry.',
+      planSaved: tenantName => `${tenantName} billing plan updated.`,
+      adjustmentSaved: (tenantName, amount) => `${tenantName} received a ${amount} credit adjustment.`,
+      reason: 'Reason',
+      reasonPlaceholder: 'Optional context for this adjustment',
+      adjustmentDelta: 'Credit delta',
+      adjustmentKind: 'Adjustment kind',
+      creditGrant: 'Credit grant',
+      temporaryLimitRaise: 'Temporary limit raise',
+      meterCorrection: 'Meter correction',
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+      never: 'Never',
     },
     adminApps: {
       loading: 'Loading admin apps...',

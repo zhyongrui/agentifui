@@ -16,11 +16,13 @@ import { registerChatRoutes } from './routes/chat.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerAdminConnectorRoutes } from './routes/admin-connectors.js';
 import { registerAdminConnectorOpsRoutes } from './routes/admin-connectors-ops.js';
+import { registerAdminBillingRoutes } from './routes/admin-billing.js';
 import { registerAdminIdentityRoutes } from './routes/admin-identity.js';
 import { registerAdminSourceRoutes } from './routes/admin-sources.js';
 import { registerAdminWorkflowRoutes } from './routes/admin-workflows.js';
 import { registerRootRoutes } from './routes/root.js';
 import { registerWorkspaceRunControlRoutes } from './routes/workspace-run-control.js';
+import { registerWorkspaceBillingRoutes } from './routes/workspace-billing.js';
 import { registerWorkspaceSourceStatusRoutes } from './routes/workspace-source-status.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { createAdminService, type AdminService } from './services/admin-service.js';
@@ -55,9 +57,14 @@ import {
   type ConnectorService,
 } from './services/connector-service.js';
 import {
+  createBillingService,
+  type BillingService,
+} from './services/billing-service.js';
+import {
   createWorkflowDefinitionService,
   type WorkflowDefinitionService,
 } from './services/workflow-definition-service.js';
+import { createPersistentBillingService } from './services/persistent-billing-service.js';
 import { createLocalWorkspaceFileStorage } from './services/workspace-file-storage.js';
 import {
   createWorkspaceService,
@@ -81,6 +88,7 @@ type BuildAppOptions = {
   adminService?: AdminService;
   knowledgeService?: KnowledgeService;
   connectorService?: ConnectorService;
+  billingService?: BillingService;
   workflowDefinitionService?: WorkflowDefinitionService;
   workspaceService?: WorkspaceService;
   runtimeService?: WorkspaceRuntimeService;
@@ -165,6 +173,9 @@ export async function buildApp(
   const connectorService =
     options.connectorService ??
     (database ? createPersistentConnectorService(database) : createConnectorService());
+  const billingService =
+    options.billingService ??
+    (database ? createPersistentBillingService(database, adminService) : createBillingService(adminService));
   const workspaceService =
     options.workspaceService ??
     (database
@@ -261,6 +272,7 @@ export async function buildApp(
     toolRegistryService,
   );
   await registerAdminIdentityRoutes(app, authService, adminService, auditService);
+  await registerAdminBillingRoutes(app, authService, adminService, billingService, auditService);
   await registerAdminSourceRoutes(app, authService, adminService, knowledgeService, auditService);
   await registerAdminWorkflowRoutes(
     app,
@@ -290,6 +302,7 @@ export async function buildApp(
     auditService,
     runtimeService,
     adminService,
+    billingService,
   );
   await registerWorkspaceRunControlRoutes(
     app,
@@ -297,6 +310,7 @@ export async function buildApp(
     workspaceService,
     auditService,
   );
+  await registerWorkspaceBillingRoutes(app, authService, billingService);
   await registerWorkspaceSourceStatusRoutes(
     app,
     authService,

@@ -9,6 +9,7 @@ import {
   type QuotaServiceState,
   type QuotaUsage,
   type WorkspaceApp,
+  type WorkspaceBillingSummary,
   type WorkspaceCatalog,
   type WorkspaceGroup,
   type WorkspaceNotification,
@@ -23,6 +24,7 @@ import {
   toggleFavoriteApp,
 } from '../../../lib/apps-workspace';
 import {
+  fetchWorkspaceBilling,
   fetchWorkspaceNotifications,
   fetchWorkspaceSourceStatus,
   fetchWorkspaceCatalog,
@@ -73,6 +75,36 @@ function getQuotaSeverityLabel(
   }
 
   return copy.quotaSeverityNormal;
+}
+
+function getBillingNoticeTone(
+  billing: WorkspaceBillingSummary
+): Notice['tone'] {
+  if (billing.status === 'hard_stop') {
+    return 'error';
+  }
+
+  if (billing.status === 'grace' || billing.warnings.length > 0) {
+    return 'info';
+  }
+
+  return 'success';
+}
+
+function getBillingNoticeMessage(
+  billing: WorkspaceBillingSummary,
+  copy: ReturnType<typeof useI18n>['messages']['apps']
+) {
+  const prefix =
+    billing.status === 'hard_stop'
+      ? copy.billingHardStop
+      : billing.status === 'grace'
+        ? copy.billingGrace
+        : billing.warnings.length > 0
+          ? copy.billingSoftLimit
+          : copy.billingWarningTitle;
+
+  return `${prefix} · ${copy.billingRemainingPrefix} ${billing.remainingCredits} ${copy.billingRemainingSuffix} · ${copy.billingExportsPrefix} ${billing.exportCount}/${billing.monthlyExportLimit} ${copy.billingExportsSuffix}`;
 }
 
 function getLaunchDescription(
@@ -357,6 +389,7 @@ export default function AppsPage() {
   const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
   const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
   const [sourceStatusItems, setSourceStatusItems] = useState<WorkspaceSourceStatusItem[]>([]);
+  const [workspaceBilling, setWorkspaceBilling] = useState<WorkspaceBillingSummary | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [activeGroupId, setActiveGroupId] = useState('');
@@ -390,6 +423,7 @@ export default function AppsPage() {
       setNotifications([]);
       setMarkingNotificationId(null);
       setSourceStatusItems([]);
+      setWorkspaceBilling(null);
       return;
     }
 
@@ -403,8 +437,9 @@ export default function AppsPage() {
       fetchWorkspaceCatalog(session.sessionToken),
       fetchWorkspaceNotifications(session.sessionToken),
       fetchWorkspaceSourceStatus(session.sessionToken),
+      fetchWorkspaceBilling(session.sessionToken),
     ])
-      .then(([catalogResult, notificationsResult, sourceStatusResult]) => {
+      .then(([catalogResult, notificationsResult, sourceStatusResult, billingResult]) => {
         if (isCancelled) {
           return;
         }
@@ -460,6 +495,8 @@ export default function AppsPage() {
         } else {
           setSourceStatusItems([]);
         }
+
+        setWorkspaceBilling(billingResult.ok ? billingResult.data : null);
       })
       .catch(() => {
         if (isCancelled) {
@@ -469,6 +506,7 @@ export default function AppsPage() {
         setWorkspace(null);
         setNotifications([]);
         setSourceStatusItems([]);
+        setWorkspaceBilling(null);
         setWorkspaceError(appsCopy.workspaceLoadFailed);
       })
       .finally(() => {
@@ -738,6 +776,12 @@ export default function AppsPage() {
 
       {workspaceState.quotaServiceState === 'degraded' ? (
         <div className="notice info">{appsCopy.quotaDegraded}</div>
+      ) : null}
+
+      {workspaceBilling && (workspaceBilling.status !== 'active' || workspaceBilling.warnings.length > 0) ? (
+        <div className={`notice ${getBillingNoticeTone(workspaceBilling)}`}>
+          {getBillingNoticeMessage(workspaceBilling, appsCopy)}
+        </div>
       ) : null}
 
       {notice ? <div className={`notice ${notice.tone}`}>{notice.message}</div> : null}

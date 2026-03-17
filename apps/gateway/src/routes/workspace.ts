@@ -47,6 +47,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AdminService } from '../services/admin-service.js';
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
+import type { BillingService } from '../services/billing-service.js';
 import type { WorkspaceRuntimeService } from '../services/workspace-runtime.js';
 import {
   dedupeWorkspaceCommentMentions,
@@ -489,7 +490,8 @@ export async function registerWorkspaceRoutes(
   workspaceService: WorkspaceService,
   auditService: AuditService,
   runtimeService: WorkspaceRuntimeService,
-  adminService: AdminService
+  adminService: AdminService,
+  billingService: BillingService
 ) {
   async function readTenantGovernance(user: AuthUser) {
     const overview = await adminService.getIdentityOverviewForUser(user, {
@@ -614,6 +616,38 @@ export async function registerWorkspaceRoutes(
       return buildErrorResponse(
         'WORKSPACE_INVALID_PAYLOAD',
         'Workspace app launch requires an app id and active group id.'
+      );
+    }
+
+    const billing = await billingService.getWorkspaceBillingForUser(access.user);
+
+    if (billing.status === 'hard_stop') {
+      await auditService.recordEvent({
+        tenantId: access.user.tenantId,
+        actorUserId: access.user.id,
+        action: 'workspace.billing.launch_blocked',
+        entityType: 'tenant',
+        entityId: access.user.tenantId,
+        ipAddress: request.ip,
+        payload: {
+          appId,
+          activeGroupId,
+          status: billing.status,
+          warnings: billing.warnings,
+          actualCreditsUsed: billing.actualCreditsUsed,
+          effectiveCreditLimit: billing.effectiveCreditLimit,
+        },
+      });
+      reply.code(403);
+      return buildErrorResponse(
+        'WORKSPACE_BILLING_BLOCKED',
+        'Workspace launches are temporarily blocked because the tenant billing hard limit has been reached.',
+        {
+          status: billing.status,
+          warnings: billing.warnings,
+          actualCreditsUsed: billing.actualCreditsUsed,
+          effectiveCreditLimit: billing.effectiveCreditLimit,
+        }
       );
     }
 
