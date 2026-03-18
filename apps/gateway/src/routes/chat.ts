@@ -43,6 +43,7 @@ import { Readable } from "node:stream";
 import type { AuditService } from "../services/audit-service.js";
 import type { AuthService } from "../services/auth-service.js";
 import type { KnowledgeService } from "../services/knowledge-service.js";
+import type { PolicyService } from "../services/policy-service.js";
 import { buildPlaceholderHitlSteps } from "../services/workspace-hitl.js";
 import {
   hasCriticalSafetySignal,
@@ -2050,6 +2051,7 @@ export async function registerChatRoutes(
   workspaceService: WorkspaceService,
   auditService: AuditService,
   knowledgeService: KnowledgeService,
+  policyService: PolicyService,
   runtimeService: WorkspaceRuntimeService,
   toolRegistryService: ToolRegistryService,
 ) {
@@ -2309,7 +2311,17 @@ export async function registerChatRoutes(
     const traceId = conversation.run.traceId || fallbackTraceId;
     const startedAt = Date.now();
     const latestPrompt = summarizeRuntimePrompt(body.messages);
-    const retrieval = await knowledgeService.buildRetrievalForUser(
+    const retrievalPolicy = await policyService.evaluateForUser(access.user, {
+      tenantId: access.user.tenantId,
+      scope: "retrieval",
+      content: latestPrompt,
+      groupId: conversation.activeGroup.id,
+      appId,
+      traceId,
+      runId: conversation.run.id,
+      conversationId: conversation.id,
+    });
+    const retrievalResult = await knowledgeService.buildRetrievalForUser(
       access.user,
       {
         appId,
@@ -2318,6 +2330,37 @@ export async function registerChatRoutes(
         latestPrompt,
       },
     );
+    const retrieval =
+      retrievalPolicy.outcome === "blocked"
+        ? {
+            ...retrievalResult,
+            matches: [],
+          }
+        : retrievalResult;
+
+    if (retrievalPolicy.outcome !== "allowed") {
+      await auditService.recordEvent({
+        tenantId: access.user.tenantId,
+        actorUserId: access.user.id,
+        action:
+          retrievalPolicy.outcome === "blocked"
+            ? "workspace.policy.blocked"
+            : "workspace.policy.flagged",
+        entityType: "policy_evaluation",
+        entityId: retrievalPolicy.id,
+        ipAddress: request.ip,
+        payload: {
+          scope: "retrieval",
+          traceId,
+          runId: conversation.run.id,
+          conversationId: conversation.id,
+          appId,
+          activeGroupId: conversation.activeGroup.id,
+          detectorMatches: retrievalPolicy.detectorMatches,
+          reasons: retrievalPolicy.reasons,
+        },
+      });
+    }
     const runtimeInput =
       body.inputs && typeof body.inputs === "object"
         ? (body.inputs as Record<string, unknown>)
@@ -2373,6 +2416,9 @@ export async function registerChatRoutes(
           variables: body.inputs ?? {},
           files: body.files ?? [],
           attachments: attachmentResult.attachments,
+          policy: {
+            retrieval: retrievalPolicy,
+          },
           retrieval,
         },
         totalSteps: 1,

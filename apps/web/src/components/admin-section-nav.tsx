@@ -64,6 +64,10 @@ export function AdminSectionNav() {
       label: messages.adminNav.billing,
     },
     {
+      href: '/admin/policy',
+      label: messages.adminNav.policy,
+    },
+    {
       href: '/admin/connectors',
       label: messages.adminNav.connectors,
     },

@@ -111,8 +111,11 @@ function createAdminIdentityService(canReadPlatformAdmin = false) {
         },
         policyPack: {
           runtimeMode: 'standard',
+          retrievalMode: 'allowed',
           sharingMode: 'editor',
           artifactDownloadMode: 'shared_readers',
+          exportMode: 'allowed',
+          retentionMode: 'standard',
         },
       },
     }),
@@ -240,8 +243,11 @@ function createAdminIdentityService(canReadPlatformAdmin = false) {
           },
           policyPack: {
             runtimeMode: 'strict',
+            retrievalMode: 'flagged',
             sharingMode: 'commenter',
             artifactDownloadMode: 'owner_only',
+            exportMode: 'approval_required',
+            retentionMode: 'legal_hold',
           },
         },
       },

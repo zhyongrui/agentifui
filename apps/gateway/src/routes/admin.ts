@@ -34,6 +34,7 @@ import type { ToolExecutionPolicy } from '@agentifui/shared';
 import type { AdminService } from '../services/admin-service.js';
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
+import type { PolicyService } from '../services/policy-service.js';
 import { resolveEnabledToolNames, type ToolRegistryService } from '../services/tool-registry-service.js';
 
 function buildErrorResponse(
@@ -120,6 +121,8 @@ function isAuditEntityType(value: unknown): value is AuthAuditEntityType {
   return (
     value === 'conversation' ||
     value === 'knowledge_source' ||
+    value === 'policy_evaluation' ||
+    value === 'policy_exception' ||
     value === 'run' ||
     value === 'session' ||
     value === 'tenant' ||
@@ -191,6 +194,40 @@ function buildUsageExportMetadata(
     filename: `admin-usage-${exportedAt.replace(/[:.]/g, '-')}.${format}`,
     exportedAt,
     tenantCount,
+  };
+}
+
+async function enforceAdminExportPolicy(
+  policyService: PolicyService,
+  user: AuthUser,
+  input: {
+    content: string;
+    tenantId?: string | null;
+  }
+) {
+  const evaluation = await policyService.evaluateForUser(user, {
+    tenantId: input.tenantId ?? user.tenantId,
+    scope: 'export',
+    content: input.content,
+  });
+
+  if (evaluation.outcome === 'allowed') {
+    return {
+      ok: true as const,
+      evaluation,
+    };
+  }
+
+  return {
+    ok: false as const,
+    evaluation,
+    response: buildErrorResponse(
+      'ADMIN_FORBIDDEN',
+      evaluation.reasons[0] ?? 'Exports are blocked by the current tenant policy pack.',
+      {
+        evaluation,
+      }
+    ),
   };
 }
 
@@ -716,7 +753,8 @@ export async function registerAdminRoutes(
   authService: AuthService,
   adminService: AdminService,
   auditService: AuditService,
-  toolRegistryService: ToolRegistryService
+  toolRegistryService: ToolRegistryService,
+  policyService: PolicyService
 ) {
   app.post('/admin/tenants', async (request, reply) => {
     const session = await requirePlatformAdminSession(
@@ -1121,6 +1159,21 @@ export async function registerAdminRoutes(
       );
     }
 
+    const exportPolicy = await enforceAdminExportPolicy(policyService, access.user, {
+      tenantId: tenantIdFilter || access.user.tenantId,
+      content: JSON.stringify({
+        resource: '/admin/usage/export',
+        format,
+        tenantId: tenantIdFilter || null,
+        search,
+      }),
+    });
+
+    if (!exportPolicy.ok) {
+      reply.code(403);
+      return exportPolicy.response;
+    }
+
     const usage = await adminService.listUsageForUser(access.user);
     const tenants = usage.tenants.filter((tenant) => {
       if (tenantIdFilter && tenant.tenantId !== tenantIdFilter) {
@@ -1294,6 +1347,20 @@ export async function registerAdminRoutes(
         'ADMIN_FORBIDDEN',
         'Tenant admins can only export audit events for their own tenant.'
       );
+    }
+
+    const exportPolicy = await enforceAdminExportPolicy(policyService, session.user, {
+      tenantId: parsedFilters.filters.tenantId || session.user.tenantId,
+      content: JSON.stringify({
+        resource: '/admin/audit/export',
+        format,
+        filters: parsedFilters.filters,
+      }),
+    });
+
+    if (!exportPolicy.ok) {
+      reply.code(403);
+      return exportPolicy.response;
     }
 
     const exportFilters: AdminAuditFilters = {

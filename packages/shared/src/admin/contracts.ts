@@ -708,8 +708,14 @@ export type AdminPolicyPackSharingMode = 'read_only' | 'commenter' | 'editor';
 export type AdminPolicyPackArtifactDownloadMode = 'shared_readers' | 'owner_only';
 export type AdminPolicyPackExportMode = 'allowed' | 'approval_required' | 'blocked';
 export type AdminPolicyPackRetentionMode = 'standard' | 'strict' | 'legal_hold';
+export type AdminPolicyPackRetrievalMode = 'allowed' | 'flagged' | 'blocked';
 export type AdminPolicyPackExceptionScope = 'tenant' | 'group' | 'app' | 'runtime';
-export type AdminPolicyPackSimulationScope = 'chat' | 'sharing' | 'artifact_download' | 'export';
+export type AdminPolicyPackSimulationScope =
+  | 'chat'
+  | 'retrieval'
+  | 'sharing'
+  | 'artifact_download'
+  | 'export';
 
 export type AdminTenantGovernanceScimPlanning = {
   enabled: boolean;
@@ -719,6 +725,7 @@ export type AdminTenantGovernanceScimPlanning = {
 
 export type AdminTenantGovernancePolicyPack = {
   runtimeMode: AdminPolicyPackRuntimeMode;
+  retrievalMode: AdminPolicyPackRetrievalMode;
   sharingMode: AdminPolicyPackSharingMode;
   artifactDownloadMode: AdminPolicyPackArtifactDownloadMode;
   exportMode: AdminPolicyPackExportMode;

@@ -43,8 +43,11 @@ export default function AdminIdentityPage() {
     scimOwnerEmail: '',
     scimNotes: '',
     runtimeMode: 'standard' as 'degraded' | 'standard' | 'strict',
+    retrievalMode: 'allowed' as 'allowed' | 'blocked' | 'flagged',
     sharingMode: 'editor' as 'commenter' | 'editor' | 'read_only',
     artifactDownloadMode: 'shared_readers' as 'owner_only' | 'shared_readers',
+    exportMode: 'allowed' as 'allowed' | 'approval_required' | 'blocked',
+    retentionMode: 'standard' as 'legal_hold' | 'standard' | 'strict',
   });
 
   const copy =
@@ -86,8 +89,11 @@ export default function AdminIdentityPage() {
           scimOwner: 'SCIM 负责人邮箱',
           scimNotes: 'SCIM 备注',
           runtimeMode: '运行时策略',
+          retrievalMode: '检索策略',
           sharingMode: '共享策略',
           artifactMode: '产物下载策略',
+          exportMode: '导出策略',
+          retentionModePolicy: '保留策略包',
           mfaTitle: 'MFA 恢复',
           mfaLead: '为租户内已开启 MFA 的用户执行恢复/重置。',
           resetMfa: '重置 MFA',
@@ -106,11 +112,20 @@ export default function AdminIdentityPage() {
           policyStandard: '标准',
           policyStrict: '严格',
           policyDegraded: '降级',
+          retrievalAllowed: '允许',
+          retrievalFlagged: '匹配时标记',
+          retrievalBlocked: '匹配时阻断',
           sharingReadOnly: '只读',
           sharingCommenter: '评论者',
           sharingEditor: '编辑者',
           artifactShared: '共享读者可下载',
           artifactOwner: '仅所有者可下载',
+          exportAllowed: '允许导出',
+          exportApprovalRequired: '需要审批',
+          exportBlocked: '禁止导出',
+          retentionStandard: '标准保留',
+          retentionStrict: '严格保留',
+          retentionLegalHold: '法律保留',
         }
       : {
           loading: 'Loading identity and governance...',
@@ -149,8 +164,11 @@ export default function AdminIdentityPage() {
           scimOwner: 'SCIM owner email',
           scimNotes: 'SCIM notes',
           runtimeMode: 'Runtime mode',
+          retrievalMode: 'Retrieval mode',
           sharingMode: 'Sharing mode',
           artifactMode: 'Artifact downloads',
+          exportMode: 'Export mode',
+          retentionModePolicy: 'Retention policy',
           mfaTitle: 'MFA recovery',
           mfaLead: 'Reset MFA for users who are currently enrolled.',
           resetMfa: 'Reset MFA',
@@ -169,11 +187,20 @@ export default function AdminIdentityPage() {
           policyStandard: 'Standard',
           policyStrict: 'Strict',
           policyDegraded: 'Degraded',
+          retrievalAllowed: 'Allowed',
+          retrievalFlagged: 'Flag on match',
+          retrievalBlocked: 'Block on match',
           sharingReadOnly: 'Read only',
           sharingCommenter: 'Commenter',
           sharingEditor: 'Editor',
           artifactShared: 'Shared readers can download',
           artifactOwner: 'Owner only',
+          exportAllowed: 'Allowed',
+          exportApprovalRequired: 'Approval required',
+          exportBlocked: 'Blocked',
+          retentionStandard: 'Standard retention',
+          retentionStrict: 'Strict retention',
+          retentionLegalHold: 'Legal hold',
         };
 
   const loadIdentity = useCallback(
@@ -201,8 +228,11 @@ export default function AdminIdentityPage() {
       scimOwnerEmail: data.governance.scimPlanning.ownerEmail ?? '',
       scimNotes: data.governance.scimPlanning.notes ?? '',
       runtimeMode: data.governance.policyPack.runtimeMode,
+      retrievalMode: data.governance.policyPack.retrievalMode,
       sharingMode: data.governance.policyPack.sharingMode,
       artifactDownloadMode: data.governance.policyPack.artifactDownloadMode,
+      exportMode: data.governance.policyPack.exportMode,
+      retentionMode: data.governance.policyPack.retentionMode,
     });
   }, [data?.governance]);
 
@@ -657,8 +687,11 @@ export default function AdminIdentityPage() {
                     },
                     policyPack: {
                       runtimeMode: governanceDraft.runtimeMode,
+                      retrievalMode: governanceDraft.retrievalMode,
                       sharingMode: governanceDraft.sharingMode,
                       artifactDownloadMode: governanceDraft.artifactDownloadMode,
+                      exportMode: governanceDraft.exportMode,
+                      retentionMode: governanceDraft.retentionMode,
                     },
                   });
 
@@ -715,6 +748,22 @@ export default function AdminIdentityPage() {
                     <option value="degraded">{copy.policyDegraded}</option>
                   </select>
                 </label>
+                <label className="field">
+                  <span>{copy.retrievalMode}</span>
+                  <select
+                    value={governanceDraft.retrievalMode}
+                    onChange={event => {
+                      setGovernanceDraft(currentValue => ({
+                        ...currentValue,
+                        retrievalMode: event.target.value as 'allowed' | 'blocked' | 'flagged',
+                      }));
+                    }}
+                  >
+                    <option value="allowed">{copy.retrievalAllowed}</option>
+                    <option value="flagged">{copy.retrievalFlagged}</option>
+                    <option value="blocked">{copy.retrievalBlocked}</option>
+                  </select>
+                </label>
               </div>
               <div className="workspace-toolbar">
                 <label className="field">
@@ -748,6 +797,40 @@ export default function AdminIdentityPage() {
                     <option value="owner_only">{copy.artifactOwner}</option>
                   </select>
                 </label>
+                <label className="field">
+                  <span>{copy.exportMode}</span>
+                  <select
+                    value={governanceDraft.exportMode}
+                    onChange={event => {
+                      setGovernanceDraft(currentValue => ({
+                        ...currentValue,
+                        exportMode: event.target.value as 'allowed' | 'approval_required' | 'blocked',
+                      }));
+                    }}
+                  >
+                    <option value="allowed">{copy.exportAllowed}</option>
+                    <option value="approval_required">{copy.exportApprovalRequired}</option>
+                    <option value="blocked">{copy.exportBlocked}</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>{copy.retentionModePolicy}</span>
+                  <select
+                    value={governanceDraft.retentionMode}
+                    onChange={event => {
+                      setGovernanceDraft(currentValue => ({
+                        ...currentValue,
+                        retentionMode: event.target.value as 'legal_hold' | 'standard' | 'strict',
+                      }));
+                    }}
+                  >
+                    <option value="standard">{copy.retentionStandard}</option>
+                    <option value="strict">{copy.retentionStrict}</option>
+                    <option value="legal_hold">{copy.retentionLegalHold}</option>
+                  </select>
+                </label>
+              </div>
+              <div className="workspace-toolbar">
                 <label className="field">
                   <span>{copy.scimEnabled}</span>
                   <select

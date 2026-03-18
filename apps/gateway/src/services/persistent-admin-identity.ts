@@ -135,6 +135,7 @@ function buildDefaultGovernance(tenantId: string): AdminTenantGovernanceSettings
     },
     policyPack: {
       runtimeMode: 'standard',
+      retrievalMode: 'allowed',
       sharingMode: 'editor',
       artifactDownloadMode: 'shared_readers',
       exportMode: 'allowed',
@@ -199,6 +200,12 @@ function normalizeGovernanceSettings(
         policyPackRecord.runtimeMode === 'standard'
           ? policyPackRecord.runtimeMode
           : defaultValue.policyPack.runtimeMode,
+      retrievalMode:
+        policyPackRecord.retrievalMode === 'flagged' ||
+        policyPackRecord.retrievalMode === 'blocked' ||
+        policyPackRecord.retrievalMode === 'allowed'
+          ? policyPackRecord.retrievalMode
+          : defaultValue.policyPack.retrievalMode,
       sharingMode:
         policyPackRecord.sharingMode === 'read_only' ||
         policyPackRecord.sharingMode === 'commenter' ||

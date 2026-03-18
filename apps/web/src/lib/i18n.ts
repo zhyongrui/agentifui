@@ -31,6 +31,7 @@ type Messages = {
     groups: string;
     apps: string;
     billing: string;
+    policy: string;
     connectors: string;
     sources: string;
     workflows: string;
@@ -335,6 +336,7 @@ const messages: Record<AppLocale, Messages> = {
       groups: '群组',
       apps: '应用',
       billing: '计费',
+      policy: '策略',
       connectors: '连接器',
       sources: '知识源',
       workflows: '工作流',
@@ -638,6 +640,7 @@ const messages: Record<AppLocale, Messages> = {
       groups: 'Groups',
       apps: 'Apps',
       billing: 'Billing',
+      policy: 'Policy',
       connectors: 'Connectors',
       sources: 'Sources',
       workflows: 'Workflows',

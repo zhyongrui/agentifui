@@ -1029,10 +1029,10 @@ Legend:
 ### 7.23 Future Platform Queue: `P4-F` Enterprise Security, Compliance, And Policy Packs
 
 - [ ] `P4-F-01` Define tenant-scoped policy packs for runtime, retrieval, sharing, export, and retention controls
-- [ ] `P4-F-02` Add per-policy evaluation traces so operators can see why a request was blocked or flagged
-- [ ] `P4-F-03` Add DLP-style detectors for secrets, PII, regulated terms, and exfiltration patterns
-- [ ] `P4-F-04` Add allowlist and exception workflows with review history and expiry timestamps
-- [ ] `P4-F-05` Add admin policy simulation mode to test a policy against historical runs before rollout
+- [x] `P4-F-02` Add per-policy evaluation traces so operators can see why a request was blocked or flagged
+- [x] `P4-F-03` Add DLP-style detectors for secrets, PII, regulated terms, and exfiltration patterns
+- [x] `P4-F-04` Add allowlist and exception workflows with review history and expiry timestamps
+- [x] `P4-F-05` Add admin policy simulation mode to test a policy against historical runs before rollout
 - [ ] `P4-F-06` Add evidence export bundles for audit/compliance review
 - [ ] `P4-F-07` Add legal-hold interaction rules for conversation deletion, artifact pruning, and backup restore
 - [ ] `P4-F-08` Add tests for policy precedence across tenant, group, app, and runtime scopes

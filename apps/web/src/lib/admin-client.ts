@@ -25,6 +25,13 @@ import type {
   AdminDomainClaimReviewRequest,
   AdminDomainClaimReviewResponse,
   AdminIdentityOverviewResponse,
+  AdminPolicyExceptionCreateRequest,
+  AdminPolicyExceptionCreateResponse,
+  AdminPolicyExceptionReviewRequest,
+  AdminPolicyExceptionReviewResponse,
+  AdminPolicyOverviewResponse,
+  AdminPolicySimulationRequest,
+  AdminPolicySimulationResponse,
   AdminAuditExportFormat,
   AdminAuditExportMetadata,
   AdminAuditFilters,
@@ -593,6 +600,59 @@ export async function fetchAdminIdentity(
   return fetchAdminJson<AdminIdentityOverviewResponse>(
     `/admin/identity${params.toString() ? `?${params.toString()}` : ''}`,
     sessionToken
+  );
+}
+
+export async function fetchAdminPolicy(
+  sessionToken: string,
+  filters: {
+    tenantId?: string;
+  } = {}
+): Promise<AdminPolicyOverviewResponse | AdminErrorResponse> {
+  const params = new URLSearchParams();
+
+  if (filters.tenantId) {
+    params.set('tenantId', filters.tenantId);
+  }
+
+  return fetchAdminJson<AdminPolicyOverviewResponse>(
+    `/admin/policy${params.toString() ? `?${params.toString()}` : ''}`,
+    sessionToken
+  );
+}
+
+export async function simulateAdminPolicy(
+  sessionToken: string,
+  payload: AdminPolicySimulationRequest
+): Promise<AdminPolicySimulationResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminPolicySimulationResponse>('/admin/policy/simulations', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function createAdminPolicyException(
+  sessionToken: string,
+  payload: AdminPolicyExceptionCreateRequest
+): Promise<AdminPolicyExceptionCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminPolicyExceptionCreateResponse>('/admin/policy/exceptions', sessionToken, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function reviewAdminPolicyException(
+  sessionToken: string,
+  exceptionId: string,
+  payload: AdminPolicyExceptionReviewRequest
+): Promise<AdminPolicyExceptionReviewResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminPolicyExceptionReviewResponse>(
+    `/admin/policy/exceptions/${exceptionId}/review`,
+    sessionToken,
+    {
+      method: 'PUT',
+      body: payload,
+    }
   );
 }
 

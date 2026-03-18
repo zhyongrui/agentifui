@@ -18,6 +18,7 @@ import { registerAdminConnectorRoutes } from './routes/admin-connectors.js';
 import { registerAdminConnectorOpsRoutes } from './routes/admin-connectors-ops.js';
 import { registerAdminBillingRoutes } from './routes/admin-billing.js';
 import { registerAdminIdentityRoutes } from './routes/admin-identity.js';
+import { registerAdminPolicyRoutes } from './routes/admin-policy.js';
 import { registerAdminSourceRoutes } from './routes/admin-sources.js';
 import { registerAdminWorkflowRoutes } from './routes/admin-workflows.js';
 import { registerRootRoutes } from './routes/root.js';
@@ -65,7 +66,9 @@ import {
   type WorkflowDefinitionService,
 } from './services/workflow-definition-service.js';
 import { createPersistentBillingService } from './services/persistent-billing-service.js';
+import { createPersistentPolicyService } from './services/persistent-policy-service.js';
 import { createLocalWorkspaceFileStorage } from './services/workspace-file-storage.js';
+import { createPolicyService, type PolicyService } from './services/policy-service.js';
 import {
   createWorkspaceService,
   type WorkspaceService,
@@ -89,6 +92,7 @@ type BuildAppOptions = {
   knowledgeService?: KnowledgeService;
   connectorService?: ConnectorService;
   billingService?: BillingService;
+  policyService?: PolicyService;
   workflowDefinitionService?: WorkflowDefinitionService;
   workspaceService?: WorkspaceService;
   runtimeService?: WorkspaceRuntimeService;
@@ -176,6 +180,9 @@ export async function buildApp(
   const billingService =
     options.billingService ??
     (database ? createPersistentBillingService(database, adminService) : createBillingService(adminService));
+  const policyService =
+    options.policyService ??
+    (database ? createPersistentPolicyService(database, adminService) : createPolicyService(adminService));
   const workspaceService =
     options.workspaceService ??
     (database
@@ -270,9 +277,18 @@ export async function buildApp(
     adminService,
     auditService,
     toolRegistryService,
+    policyService,
   );
   await registerAdminIdentityRoutes(app, authService, adminService, auditService);
-  await registerAdminBillingRoutes(app, authService, adminService, billingService, auditService);
+  await registerAdminPolicyRoutes(app, authService, adminService, policyService, auditService);
+  await registerAdminBillingRoutes(
+    app,
+    authService,
+    adminService,
+    billingService,
+    auditService,
+    policyService,
+  );
   await registerAdminSourceRoutes(app, authService, adminService, knowledgeService, auditService);
   await registerAdminWorkflowRoutes(
     app,
@@ -323,6 +339,7 @@ export async function buildApp(
     workspaceService,
     auditService,
     knowledgeService,
+    policyService,
     runtimeService,
     toolRegistryService,
   );

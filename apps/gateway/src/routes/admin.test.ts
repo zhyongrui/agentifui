@@ -395,8 +395,11 @@ function createAdminService(canReadAdmin = true, canReadPlatformAdmin = false) {
         },
         policyPack: {
           runtimeMode: 'standard',
+          retrievalMode: 'allowed',
           sharingMode: 'editor',
           artifactDownloadMode: 'shared_readers',
+          exportMode: 'allowed',
+          retentionMode: 'standard',
         },
       },
     }),

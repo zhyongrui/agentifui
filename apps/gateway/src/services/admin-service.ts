@@ -521,6 +521,7 @@ function buildDefaultGovernance(tenantId: string): AdminTenantGovernanceSettings
     },
     policyPack: {
       runtimeMode: 'standard',
+      retrievalMode: 'allowed',
       sharingMode: 'editor',
       artifactDownloadMode: 'shared_readers',
       exportMode: 'allowed',

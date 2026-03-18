@@ -15,6 +15,7 @@ import type { AdminService } from '../services/admin-service.js';
 import type { AuditService } from '../services/audit-service.js';
 import type { AuthService } from '../services/auth-service.js';
 import type { BillingService } from '../services/billing-service.js';
+import type { PolicyService } from '../services/policy-service.js';
 
 function buildErrorResponse(code: AdminErrorResponse['error']['code'], message: string, details?: unknown): AdminErrorResponse {
   return { ok: false, error: { code, message, details } };
@@ -162,7 +163,7 @@ async function requireAdminSession(authService: AuthService, adminService: Admin
   return { ok: true as const, user };
 }
 
-export async function registerAdminBillingRoutes(app: FastifyInstance, authService: AuthService, adminService: AdminService, billingService: BillingService, auditService: AuditService) {
+export async function registerAdminBillingRoutes(app: FastifyInstance, authService: AuthService, adminService: AdminService, billingService: BillingService, auditService: AuditService, policyService: PolicyService) {
   app.get('/admin/billing', async (request, reply): Promise<AdminBillingResponse | AdminErrorResponse> => {
     const session = await requireAdminSession(authService, adminService, request.headers.authorization);
     if (!session.ok) { reply.code(session.statusCode); return session.response; }
@@ -199,6 +200,26 @@ export async function registerAdminBillingRoutes(app: FastifyInstance, authServi
     if (!session.ok) { reply.code(session.statusCode); return session.response; }
     const query = (request.query ?? {}) as { format?: AdminBillingExportFormat; tenantId?: string; search?: string };
     const format = query.format === 'csv' || query.format === 'json' ? query.format : 'json';
+    const exportPolicy = await policyService.evaluateForUser(session.user, {
+      tenantId: query.tenantId ?? session.user.tenantId,
+      scope: 'export',
+      content: JSON.stringify({
+        resource: '/admin/billing/export',
+        format,
+        tenantId: query.tenantId ?? null,
+        search: query.search ?? null,
+      }),
+    });
+    if (exportPolicy.outcome !== 'allowed') {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        exportPolicy.reasons[0] ?? 'Billing exports are blocked by the current tenant policy pack.',
+        {
+          evaluation: exportPolicy,
+        }
+      );
+    }
     const data = await billingService.listBillingForUser(session.user, { tenantId: query.tenantId ?? null, search: query.search ?? null });
     const metadata = buildExportMetadata(format, data.tenants.length);
     const bundle: AdminBillingExportJsonBundle = { metadata, generatedAt: data.generatedAt, tenants: data.tenants, totals: data.totals };

@@ -20,6 +20,7 @@ import {
   fetchAdminContext,
   fetchAdminGroups,
   fetchAdminIdentity,
+  fetchAdminPolicy,
   importAdminWorkflow,
   fetchAdminSources,
   fetchAdminTenants,
@@ -30,7 +31,9 @@ import {
   rollbackAdminWorkflow,
   reviewAdminAccessRequest,
   reviewAdminDomainClaim,
+  reviewAdminPolicyException,
   revokeAdminAppGrant,
+  simulateAdminPolicy,
   updateAdminBillingPlan,
   updateAdminWorkflow,
   updateAdminWorkflowPermissions,
@@ -39,6 +42,7 @@ import {
   updateAdminSourceStatus,
   updateAdminTenantGovernance,
   updateAdminTenantStatus,
+  createAdminPolicyException,
 } from './admin-client.js';
 
 afterEach(() => {
@@ -725,6 +729,70 @@ describe('admin client', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       8,
       '/api/gateway/admin/identity/governance',
+      expect.objectContaining({ method: 'PUT' })
+    );
+  });
+
+  it('loads policy controls and submits simulations plus exception workflows through the same-origin gateway proxy', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-18T00:00:00.000Z',
+            governance: null,
+            exceptions: [],
+            recentEvaluations: [],
+          },
+        }),
+      })
+      .mockResolvedValue({
+        json: async () => ({
+          ok: true,
+          data: {},
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await Promise.all([
+      fetchAdminPolicy('session-123', {
+        tenantId: 'tenant-dev',
+      }),
+      simulateAdminPolicy('session-123', {
+        tenantId: 'tenant-dev',
+        scope: 'retrieval',
+        content: 'Check a candidate prompt',
+      }),
+      createAdminPolicyException('session-123', {
+        tenantId: 'tenant-dev',
+        scope: 'tenant',
+        detector: 'secret',
+        label: 'Approved sandbox secret',
+      }),
+      reviewAdminPolicyException('session-123', 'pol_exc_123', {
+        note: 'Reviewed',
+      }),
+    ]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/gateway/admin/policy?tenantId=tenant-dev',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/gateway/admin/policy/simulations',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/gateway/admin/policy/exceptions',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      '/api/gateway/admin/policy/exceptions/pol_exc_123/review',
       expect.objectContaining({ method: 'PUT' })
     );
   });
