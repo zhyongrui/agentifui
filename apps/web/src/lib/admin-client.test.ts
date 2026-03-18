@@ -11,6 +11,7 @@ import {
   createAdminSource,
   dryRunAdminWorkflow,
   exportAdminAudit,
+  exportAdminAuditEvidenceBundle,
   exportAdminBilling,
   exportAdminWorkflow,
   exportAdminUsage,
@@ -896,6 +897,69 @@ describe('admin client', () => {
         format: 'csv',
         filename: 'admin-audit-export.csv',
         eventCount: 1,
+      },
+    });
+  });
+
+  it('downloads admin audit evidence bundles through the same-origin gateway proxy', async () => {
+    const blob = new Blob([
+      JSON.stringify({
+        metadata: {
+          format: 'json',
+          filename: 'admin-audit-evidence-export.json',
+          exportedAt: '2026-03-18T00:00:00.000Z',
+          eventCount: 1,
+          appliedFilters: {
+            scope: 'tenant',
+            action: 'workspace.policy.blocked',
+            detectorType: 'secret',
+            payloadMode: 'masked',
+          },
+        },
+        events: [],
+        traceSummaries: [],
+      }),
+    ], {
+      type: 'application/json',
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({
+        'content-type': 'application/json; charset=utf-8',
+        'x-agentifui-export-format': 'json',
+        'x-agentifui-export-filename': 'admin-audit-evidence-export.json',
+        'x-agentifui-exported-at': '2026-03-18T00:00:00.000Z',
+        'x-agentifui-export-count': '1',
+      }),
+      blob: async () => blob,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await exportAdminAuditEvidenceBundle('session-123', {
+      action: 'workspace.policy.blocked',
+      detectorType: 'secret',
+      payloadMode: 'masked',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/gateway/admin/audit/evidence-bundle?action=workspace.policy.blocked&detectorType=secret&payloadMode=masked',
+      {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer session-123',
+        },
+        cache: 'no-store',
+      }
+    );
+    expect(result).toMatchObject({
+      metadata: {
+        format: 'json',
+        filename: 'admin-audit-evidence-export.json',
+        eventCount: 1,
+        appliedFilters: {
+          action: 'workspace.policy.blocked',
+          detectorType: 'secret',
+        },
       },
     });
   });

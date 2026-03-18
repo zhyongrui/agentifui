@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { clearAuthSession } from '../../../lib/auth-session';
 import {
   exportAdminAudit,
+  exportAdminAuditEvidenceBundle,
   fetchAdminAudit,
   fetchAdminTenants,
 } from '../../../lib/admin-client';
@@ -138,7 +139,7 @@ export default function AdminAuditPage() {
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [exportingFormat, setExportingFormat] = useState<null | 'csv' | 'json'>(null);
+  const [exportingFormat, setExportingFormat] = useState<null | 'csv' | 'json' | 'evidence'>(null);
   const [draftFilters, setDraftFilters] = useState<AuditFilterFormState>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<AuditFilterFormState>(EMPTY_FILTERS);
   const [didBootstrapPlatformScope, setDidBootstrapPlatformScope] = useState(false);
@@ -181,6 +182,8 @@ export default function AdminAuditPage() {
           clear: '清空',
           exportingJson: '导出 JSON 中...',
           exportJson: '导出 JSON',
+          exportingEvidence: '导出证据包中...',
+          exportEvidence: '导出证据包',
           exportingCsv: '导出 CSV 中...',
           exportCsv: '导出 CSV',
           noPlatformFilters: '未应用筛选，当前显示最新的平台级审计窗口。',
@@ -249,6 +252,8 @@ export default function AdminAuditPage() {
           clear: 'Clear',
           exportingJson: 'Exporting JSON...',
           exportJson: 'Export JSON',
+          exportingEvidence: 'Exporting evidence...',
+          exportEvidence: 'Export evidence bundle',
           exportingCsv: 'Exporting CSV...',
           exportCsv: 'Export CSV',
           noPlatformFilters: 'No filters applied. Showing the latest platform audit window.',
@@ -414,7 +419,7 @@ export default function AdminAuditPage() {
     return <SectionSkeleton blocks={6} lead={copy.loading} title={copy.title} />;
   }
 
-  async function handleExport(format: 'csv' | 'json') {
+  async function handleExport(format: 'csv' | 'json' | 'evidence') {
     if (!session) {
       return;
     }
@@ -424,11 +429,17 @@ export default function AdminAuditPage() {
     setExportingFormat(format);
 
     try {
-      const result = await exportAdminAudit(
-        session.sessionToken,
-        format,
-        normalizeFilters(appliedFilters)
-      );
+      const result =
+        format === 'evidence'
+          ? await exportAdminAuditEvidenceBundle(
+              session.sessionToken,
+              normalizeFilters(appliedFilters)
+            )
+          : await exportAdminAudit(
+              session.sessionToken,
+              format,
+              normalizeFilters(appliedFilters)
+            );
 
       if ('ok' in result) {
         if (result.error.code === 'ADMIN_UNAUTHORIZED') {
@@ -441,7 +452,9 @@ export default function AdminAuditPage() {
         return;
       }
 
-      setExportNotice(copy.exportReady(format, result.metadata.filename));
+      setExportNotice(
+        copy.exportReady(format === 'evidence' ? 'json' : format, result.metadata.filename)
+      );
 
       try {
         const objectUrl = URL.createObjectURL(result.blob);
@@ -456,7 +469,9 @@ export default function AdminAuditPage() {
           URL.revokeObjectURL(objectUrl);
         }, 0);
 
-        setExportNotice(copy.exportDownloaded(format, result.metadata.filename));
+        setExportNotice(
+          copy.exportDownloaded(format === 'evidence' ? 'json' : format, result.metadata.filename)
+        );
       } catch {
         setExportError(copy.exportBrowserFailed);
       }
@@ -752,6 +767,16 @@ export default function AdminAuditPage() {
                   disabled={isDataLoading || exportingFormat !== null}
                 >
                   {exportingFormat === 'json' ? copy.exportingJson : copy.exportJson}
+                </button>
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={() => {
+                    void handleExport('evidence');
+                  }}
+                  disabled={isDataLoading || exportingFormat !== null}
+                >
+                  {exportingFormat === 'evidence' ? copy.exportingEvidence : copy.exportEvidence}
                 </button>
                 <button
                   className="secondary"

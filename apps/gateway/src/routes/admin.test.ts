@@ -1670,6 +1670,132 @@ describe('admin routes', () => {
     }
   });
 
+  it('exports audit evidence bundles with trace summaries', async () => {
+    const authService = createTestAuthService();
+    authService.register({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+      displayName: 'Admin User',
+    });
+    const login = authService.login({
+      email: 'admin@iflabx.com',
+      password: 'Secure123',
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error('expected admin login to succeed');
+    }
+
+    const adminService = createAdminService(true);
+    const tracedEvent: AdminAuditEventSummary = {
+      ...auditEvents[0]!,
+      action: 'workspace.app.launched',
+      context: {
+        ...auditEvents[0]!.context,
+        traceId: 'trace-123',
+      },
+    };
+    adminService.listAuditForUser = vi.fn(async (_user, filters = {}) => ({
+      generatedAt: '2026-03-18T00:00:00.000Z',
+      capabilities: {
+        canReadAdmin: true,
+        canReadPlatformAdmin: false,
+      },
+      scope: filters.scope ?? 'tenant',
+      appliedFilters: {
+        scope: filters.scope ?? 'tenant',
+        tenantId: filters.tenantId ?? null,
+        action: filters.action ?? null,
+        level: filters.level ?? null,
+        detectorType: filters.detectorType ?? null,
+        datePreset: filters.datePreset ?? null,
+        actorUserId: filters.actorUserId ?? null,
+        entityType: filters.entityType ?? null,
+        traceId: filters.traceId ?? null,
+        runId: filters.runId ?? null,
+        conversationId: filters.conversationId ?? null,
+        occurredAfter: filters.occurredAfter ?? null,
+        occurredBefore: filters.occurredBefore ?? null,
+        payloadMode: filters.payloadMode ?? 'masked',
+        limit: filters.limit ?? null,
+      },
+      countsByAction: [
+        {
+          action: 'workspace.app.launched',
+          count: 1,
+        },
+      ],
+      countsByTenant: [],
+      highRiskEventCount: 0,
+      events: [
+        tracedEvent,
+      ],
+    }));
+    const app = await buildApp(testEnv, {
+      logger: false,
+      authService,
+      adminService,
+    });
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/admin/audit/evidence-bundle?action=workspace.app.launched',
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain('application/json');
+      expect(response.headers['content-disposition']).toContain('attachment; filename=');
+      expect(response.headers['x-agentifui-export-format']).toBe('json');
+      expect(adminService.listAuditForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@iflabx.com',
+        }),
+        {
+          scope: 'tenant',
+          tenantId: null,
+          action: 'workspace.app.launched',
+          level: null,
+          detectorType: null,
+          datePreset: null,
+          actorUserId: null,
+          entityType: null,
+          traceId: null,
+          runId: null,
+          conversationId: null,
+          occurredAfter: null,
+          occurredBefore: null,
+          payloadMode: 'masked',
+          limit: 1000,
+        }
+      );
+      expect(JSON.parse(response.body)).toMatchObject({
+        metadata: {
+          format: 'json',
+          eventCount: 1,
+          appliedFilters: {
+            action: 'workspace.app.launched',
+            detectorType: null,
+          },
+        },
+        events: [tracedEvent],
+        traceSummaries: [
+          expect.objectContaining({
+            traceId: 'trace-123',
+            actions: ['workspace.app.launched'],
+          }),
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('records admin workspace read access after successful GET requests', async () => {
     const authService = createTestAuthService();
     authService.register({

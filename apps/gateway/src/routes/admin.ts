@@ -9,6 +9,7 @@ import type {
   AdminContextResponse,
   AdminAuditDatePreset,
   AdminAuditExportFormat,
+  AdminAuditEvidenceBundle,
   AdminAuditExportJsonBundle,
   AdminAuditExportMetadata,
   AdminAuditFilters,
@@ -310,6 +311,134 @@ function buildAuditExportCsv(bundle: AdminAuditExportJsonBundle) {
   );
 
   return [header.map(toCsvCell).join(','), ...rows].join('\n');
+}
+
+function resolveAuditLevelRank(level: AuthAuditLevel) {
+  if (level === 'critical') {
+    return 3;
+  }
+
+  if (level === 'warning') {
+    return 2;
+  }
+
+  return 1;
+}
+
+function buildAuditEvidenceBundle(bundle: AdminAuditExportJsonBundle): AdminAuditEvidenceBundle {
+  const traces = new Map<
+    string,
+    {
+      traceId: string;
+      runIds: Set<string>;
+      conversationIds: Set<string>;
+      eventCount: number;
+      highestLevel: AuthAuditLevel;
+      actions: Set<string>;
+      detectorTypes: Set<string>;
+      firstOccurredAt: string;
+      lastOccurredAt: string;
+    }
+  >();
+
+  for (const event of bundle.events) {
+    const traceId = event.context.traceId;
+
+    if (!traceId) {
+      continue;
+    }
+
+    const existing =
+      traces.get(traceId) ??
+      {
+        traceId,
+        runIds: new Set<string>(),
+        conversationIds: new Set<string>(),
+        eventCount: 0,
+        highestLevel: event.level,
+        actions: new Set<string>(),
+        detectorTypes: new Set<string>(),
+        firstOccurredAt: event.occurredAt,
+        lastOccurredAt: event.occurredAt,
+      };
+
+    existing.eventCount += 1;
+    existing.highestLevel =
+      resolveAuditLevelRank(event.level) > resolveAuditLevelRank(existing.highestLevel)
+        ? event.level
+        : existing.highestLevel;
+    existing.actions.add(event.action);
+
+    if (event.context.runId) {
+      existing.runIds.add(event.context.runId);
+    }
+
+    if (event.context.conversationId) {
+      existing.conversationIds.add(event.context.conversationId);
+    }
+
+    const payload = event.payload as Record<string, unknown>;
+    const detectorMatches = payload.detectorMatches;
+    const safetySignals = payload.safetySignals;
+    const categories = payload.categories;
+
+    if (Array.isArray(detectorMatches)) {
+      for (const match of detectorMatches) {
+        if (typeof match === 'object' && match !== null && typeof match.detector === 'string') {
+          existing.detectorTypes.add(match.detector);
+        }
+      }
+    }
+
+    if (Array.isArray(safetySignals)) {
+      for (const signal of safetySignals) {
+        if (typeof signal === 'object' && signal !== null && typeof signal.category === 'string') {
+          existing.detectorTypes.add(signal.category);
+        }
+      }
+    }
+
+    if (Array.isArray(categories)) {
+      for (const category of categories) {
+        if (typeof category === 'string') {
+          existing.detectorTypes.add(category);
+        }
+      }
+    }
+
+    if (event.occurredAt < existing.firstOccurredAt) {
+      existing.firstOccurredAt = event.occurredAt;
+    }
+
+    if (event.occurredAt > existing.lastOccurredAt) {
+      existing.lastOccurredAt = event.occurredAt;
+    }
+
+    traces.set(traceId, existing);
+  }
+
+  return {
+    metadata: {
+      ...bundle.metadata,
+      filename: bundle.metadata.filename.replace('admin-audit-', 'admin-audit-evidence-'),
+    },
+    events: bundle.events,
+    traceSummaries: [...traces.values()]
+      .map(trace => ({
+        traceId: trace.traceId,
+        runIds: [...trace.runIds],
+        conversationIds: [...trace.conversationIds],
+        eventCount: trace.eventCount,
+        highestLevel: trace.highestLevel,
+        actions: [...trace.actions].sort(),
+        detectorTypes: [...trace.detectorTypes].sort() as NonNullable<
+          AdminAuditFilters['detectorType']
+        >[],
+        firstOccurredAt: trace.firstOccurredAt,
+        lastOccurredAt: trace.lastOccurredAt,
+      }))
+      .sort((left, right) => right.lastOccurredAt.localeCompare(left.lastOccurredAt)),
+  };
 }
 
 function buildUsageExportCsv(bundle: AdminUsageExportJsonBundle) {
@@ -687,6 +816,7 @@ async function recordAdminReadEvent(
       | '/admin/usage/export'
       | '/admin/audit'
       | '/admin/audit/export'
+      | '/admin/audit/evidence-bundle'
       | '/admin/groups'
       | '/admin/tenants'
       | '/admin/users';
@@ -1428,6 +1558,93 @@ export async function registerAdminRoutes(
 
     reply.type('text/csv; charset=utf-8');
     return buildAuditExportCsv(bundle);
+  });
+
+  app.get('/admin/audit/evidence-bundle', async (request, reply) => {
+    const session = await requireTenantAdminSession(
+      authService,
+      adminService,
+      request.headers.authorization
+    );
+
+    if (!session.ok) {
+      reply.code(session.statusCode);
+      return session.response;
+    }
+
+    const query = (request.query ?? {}) as Record<string, unknown>;
+    const parsedFilters = parseAuditFilters(query);
+
+    if (!parsedFilters.ok) {
+      reply.code(400);
+      return parsedFilters.response;
+    }
+
+    const capabilities = await resolveAdminCapabilities(adminService, session.user);
+
+    if (parsedFilters.filters.scope === 'platform' && !capabilities.canReadPlatformAdmin) {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Root admin access is required to export platform audit evidence bundles.'
+      );
+    }
+
+    if (
+      parsedFilters.filters.tenantId &&
+      !capabilities.canReadPlatformAdmin &&
+      parsedFilters.filters.tenantId !== session.user.tenantId
+    ) {
+      reply.code(403);
+      return buildErrorResponse(
+        'ADMIN_FORBIDDEN',
+        'Tenant admins can only export audit evidence bundles for their own tenant.'
+      );
+    }
+
+    const exportPolicy = await enforceAdminExportPolicy(policyService, session.user, {
+      tenantId: parsedFilters.filters.tenantId || session.user.tenantId,
+      content: JSON.stringify({
+        resource: '/admin/audit/evidence-bundle',
+        filters: parsedFilters.filters,
+      }),
+    });
+
+    if (!exportPolicy.ok) {
+      reply.code(403);
+      return exportPolicy.response;
+    }
+
+    const exportFilters: AdminAuditFilters = {
+      ...parsedFilters.filters,
+      scope: parsedFilters.filters.scope ?? 'tenant',
+      payloadMode: parsedFilters.filters.payloadMode ?? 'masked',
+      limit: parsedFilters.filters.limit ?? 1000,
+    };
+    const auditData = await adminService.listAuditForUser(session.user, exportFilters);
+    const metadata = buildAuditExportMetadata('json', exportFilters, auditData.events.length);
+    const bundle = buildAuditEvidenceBundle({
+      metadata,
+      events: auditData.events,
+    });
+
+    reply.header('content-disposition', `attachment; filename="${bundle.metadata.filename}"`);
+    reply.header('x-agentifui-export-format', bundle.metadata.format);
+    reply.header('x-agentifui-export-filename', bundle.metadata.filename);
+    reply.header('x-agentifui-exported-at', bundle.metadata.exportedAt);
+    reply.header('x-agentifui-export-count', String(bundle.metadata.eventCount));
+    reply.type('application/json; charset=utf-8');
+
+    await recordAdminReadEvent(auditService, {
+      user: session.user,
+      ipAddress: request.ip,
+      resource: '/admin/audit/evidence-bundle',
+      resultCount: auditData.events.length,
+      filters: exportFilters,
+      exportFormat: 'json',
+    });
+
+    return JSON.stringify(bundle, null, 2);
   });
 
   app.post('/admin/apps/:appId/grants', async (request, reply) => {

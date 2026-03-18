@@ -36,6 +36,7 @@ import type {
   AdminPolicySimulationRequest,
   AdminPolicySimulationResponse,
   AdminAuditExportFormat,
+  AdminAuditEvidenceBundle,
   AdminAuditExportMetadata,
   AdminAuditFilters,
   AdminAuditResponse,
@@ -95,6 +96,11 @@ import type {
 const GATEWAY_PROXY_BASE_PATH = '/api/gateway';
 
 export type AdminAuditExportDownload = {
+  blob: Blob;
+  metadata: AdminAuditExportMetadata;
+};
+
+export type AdminAuditEvidenceExportDownload = {
   blob: Blob;
   metadata: AdminAuditExportMetadata;
 };
@@ -833,6 +839,41 @@ export async function exportAdminAudit(
       ),
       appliedFilters: filters,
     },
+  };
+}
+
+export async function exportAdminAuditEvidenceBundle(
+  sessionToken: string,
+  filters: AdminAuditFilters = {}
+): Promise<AdminAuditEvidenceExportDownload | AdminErrorResponse> {
+  const suffix = buildAdminAuditQuery(filters);
+  const response = await fetch(
+    `${GATEWAY_PROXY_BASE_PATH}/admin/audit/evidence-bundle${suffix}`,
+    {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${sessionToken}`,
+      },
+      cache: 'no-store',
+    }
+  );
+
+  if (response.headers.get('content-type')?.includes('application/json') && !response.ok) {
+    return (await response.json()) as AdminErrorResponse;
+  }
+
+  const blob = await response.blob();
+  const metadata: AdminAuditExportMetadata = {
+    format: 'json',
+    filename: readRequiredHeader(response.headers, 'x-agentifui-export-filename'),
+    exportedAt: readRequiredHeader(response.headers, 'x-agentifui-exported-at'),
+    eventCount: Number.parseInt(readRequiredHeader(response.headers, 'x-agentifui-export-count'), 10),
+    appliedFilters: (JSON.parse(await blob.text()) as AdminAuditEvidenceBundle).metadata.appliedFilters,
+  };
+
+  return {
+    blob,
+    metadata,
   };
 }
 

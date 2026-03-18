@@ -633,6 +633,24 @@ export type AdminAuditExportJsonBundle = {
   events: AdminAuditEventSummary[];
 };
 
+export type AdminAuditEvidenceTraceSummary = {
+  traceId: string;
+  runIds: string[];
+  conversationIds: string[];
+  eventCount: number;
+  highestLevel: AuthAuditLevel;
+  actions: string[];
+  detectorTypes: AdminAuditDetectorType[];
+  firstOccurredAt: string;
+  lastOccurredAt: string;
+};
+
+export type AdminAuditEvidenceBundle = {
+  metadata: AdminAuditExportMetadata;
+  events: AdminAuditEventSummary[];
+  traceSummaries: AdminAuditEvidenceTraceSummary[];
+};
+
 export type AdminAuditResponse = {
   ok: true;
   data: {

@@ -309,7 +309,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P4-F-06`
+- the active follow-on item is `P4-F-08`
 
 ## 6. Detailed Execution Notes
 
@@ -1033,7 +1033,7 @@ Legend:
 - [x] `P4-F-03` Add DLP-style detectors for secrets, PII, regulated terms, and exfiltration patterns
 - [x] `P4-F-04` Add allowlist and exception workflows with review history and expiry timestamps
 - [x] `P4-F-05` Add admin policy simulation mode to test a policy against historical runs before rollout
-- [ ] `P4-F-06` Add evidence export bundles for audit/compliance review
+- [x] `P4-F-06` Add evidence export bundles for audit/compliance review
 - [x] `P4-F-07` Add legal-hold interaction rules for conversation deletion, artifact pruning, and backup restore
 - [ ] `P4-F-08` Add tests for policy precedence across tenant, group, app, and runtime scopes
 - [ ] `P4-F-09` Add browser coverage for blocked-run explanation surfaces and policy simulation summaries
