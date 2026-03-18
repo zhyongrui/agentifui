@@ -1044,6 +1044,116 @@ describe("workspace routes", () => {
     }
   });
 
+  it("blocks conversation deletion when tenant legal hold is enabled", async () => {
+    const authService = createTestAuthService();
+    const auditService = createAuditService();
+    const adminService = createAdminService();
+    const originalGetIdentityOverviewForUser = adminService.getIdentityOverviewForUser;
+    adminService.getIdentityOverviewForUser = async (user, input) => {
+      const overview = await originalGetIdentityOverviewForUser(user, input);
+
+      return {
+        ...overview,
+        governance: overview.governance
+          ? {
+              ...overview.governance,
+              legalHoldEnabled: true,
+              policyPack: {
+                ...overview.governance.policyPack,
+                retentionMode: "legal_hold",
+              },
+            }
+          : overview.governance,
+      };
+    };
+    const { app } = await createTestApp(authService, {}, { adminService, auditService });
+
+    authService.register({
+      email: "analyst@iflabx.com",
+      password: "Secure123",
+      displayName: "Analyst",
+    });
+
+    const login = authService.login({
+      email: "analyst@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected login to succeed");
+    }
+
+    try {
+      const launch = await app.inject({
+        method: "POST",
+        url: "/workspace/apps/launch",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          appId: "app_policy_watch",
+          activeGroupId: "grp_research",
+        },
+      });
+
+      expect(launch.statusCode).toBe(200);
+      const conversationId = (launch.json() as WorkspaceAppLaunchResponse).data.conversationId;
+
+      const remove = await app.inject({
+        method: "PUT",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+        payload: {
+          status: "deleted",
+        },
+      });
+
+      expect(remove.statusCode).toBe(403);
+      expect(remove.json()).toMatchObject({
+        ok: false,
+        error: {
+          code: "WORKSPACE_FORBIDDEN",
+          details: {
+            reason: "legal_hold",
+            conversationId,
+          },
+        },
+      });
+
+      const stillReadable = await app.inject({
+        method: "GET",
+        url: `/workspace/conversations/${conversationId}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(stillReadable.statusCode).toBe(200);
+      expect(
+        await auditService.listEvents({ actorUserId: login.data.user.id }),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "workspace.conversation.delete_blocked",
+            entityType: "conversation",
+            entityId: conversationId,
+            level: "warning",
+            payload: expect.objectContaining({
+              reason: "legal_hold",
+              legalHoldEnabled: true,
+            }),
+          }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects invalid workspace preference payloads and blocked launches", async () => {
     const authService = createTestAuthService();
     const auditService = createAuditService();

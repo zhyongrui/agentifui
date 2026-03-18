@@ -620,6 +620,7 @@ describe('admin client', () => {
       tenantId: 'tenant-acme',
       action: 'workspace.app.launched',
       level: 'info',
+      detectorType: 'secret',
       traceId: 'trace-123',
       runId: 'run-123',
       payloadMode: 'raw',
@@ -628,7 +629,7 @@ describe('admin client', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/gateway/admin/audit?scope=platform&tenantId=tenant-acme&action=workspace.app.launched&level=info&traceId=trace-123&runId=run-123&payloadMode=raw&datePreset=7d&limit=25',
+      '/api/gateway/admin/audit?scope=platform&tenantId=tenant-acme&action=workspace.app.launched&level=info&detectorType=secret&traceId=trace-123&runId=run-123&payloadMode=raw&datePreset=7d&limit=25',
       {
         method: 'GET',
         headers: {

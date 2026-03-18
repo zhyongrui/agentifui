@@ -71,6 +71,7 @@ export type AuthAuditAction =
   | 'workspace.app.launched'
   | 'workspace.conversation.updated'
   | 'workspace.conversation.deleted'
+  | 'workspace.conversation.delete_blocked'
   | 'workspace.conversation_share.created'
   | 'workspace.conversation_share.expired'
   | 'workspace.conversation_share.revoked'

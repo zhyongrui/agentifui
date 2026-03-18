@@ -561,6 +561,7 @@ export type AdminAuditFilters = {
   tenantId?: string | null;
   action?: string | null;
   level?: AuthAuditLevel | null;
+  detectorType?: AdminAuditDetectorType | null;
   actorUserId?: string | null;
   entityType?: AuthAuditEntityType | null;
   traceId?: string | null;
@@ -584,6 +585,12 @@ export type AdminAuditEventContext = {
 };
 
 export type AdminAuditPayloadMode = 'masked' | 'raw';
+
+export type AdminAuditDetectorType =
+  | AdminPolicyDetectorType
+  | 'prompt_injection'
+  | 'data_exfiltration'
+  | 'policy_violation';
 
 export type AdminAuditPiiDetector = 'email' | 'phone' | 'secret' | 'token';
 

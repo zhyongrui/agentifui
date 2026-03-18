@@ -645,6 +645,7 @@ function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
     tenantId: filters.tenantId?.trim() || null,
     action: filters.action?.trim() || null,
     level: filters.level ?? null,
+    detectorType: filters.detectorType ?? null,
     actorUserId: filters.actorUserId?.trim() || null,
     entityType: filters.entityType ?? null,
     traceId: filters.traceId?.trim() || null,
@@ -659,6 +660,40 @@ function normalizeAuditFilters(filters: AdminAuditFilters = {}) {
         ? filters.limit
         : 40,
   };
+}
+
+function extractAuditDetectorTypes(event: AdminAuditEventSummary) {
+  const detectorTypes = new Set<string>();
+  const payload = event.payload as Record<string, unknown>;
+  const detectorMatches = payload.detectorMatches;
+  const safetySignals = payload.safetySignals;
+  const categories = payload.categories;
+
+  if (Array.isArray(detectorMatches)) {
+    for (const match of detectorMatches) {
+      if (typeof match === 'object' && match !== null && typeof match.detector === 'string') {
+        detectorTypes.add(match.detector);
+      }
+    }
+  }
+
+  if (Array.isArray(safetySignals)) {
+    for (const signal of safetySignals) {
+      if (typeof signal === 'object' && signal !== null && typeof signal.category === 'string') {
+        detectorTypes.add(signal.category);
+      }
+    }
+  }
+
+  if (Array.isArray(categories)) {
+    for (const category of categories) {
+      if (typeof category === 'string') {
+        detectorTypes.add(category);
+      }
+    }
+  }
+
+  return detectorTypes;
 }
 
 function isHighRiskAuditEvent(event: AdminAuditEventSummary) {
@@ -2205,6 +2240,13 @@ export function createPersistentAdminService(database: DatabaseClient): AdminSer
       const filteredEvents = rows
         .map(row => toAuditEvent(row, normalizedFilters.payloadMode))
         .filter(event => {
+          if (
+            normalizedFilters.detectorType &&
+            !extractAuditDetectorTypes(event).has(normalizedFilters.detectorType)
+          ) {
+            return false;
+          }
+
           if (normalizedFilters.traceId && event.context.traceId !== normalizedFilters.traceId) {
             return false;
           }

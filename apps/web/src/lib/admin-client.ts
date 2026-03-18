@@ -149,6 +149,10 @@ function buildAdminAuditQuery(filters: AdminAuditFilters = {}) {
     params.set('level', filters.level);
   }
 
+  if (filters.detectorType) {
+    params.set('detectorType', filters.detectorType);
+  }
+
   if (filters.actorUserId) {
     params.set('actorUserId', filters.actorUserId);
   }

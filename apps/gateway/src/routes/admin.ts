@@ -152,6 +152,20 @@ function isAuditDatePreset(value: unknown): value is AdminAuditDatePreset {
   return value === '24h' || value === '7d' || value === '30d' || value === '90d';
 }
 
+function isAuditDetectorType(
+  value: unknown
+): value is NonNullable<AdminAuditFilters['detectorType']> {
+  return (
+    value === 'secret' ||
+    value === 'pii' ||
+    value === 'regulated_term' ||
+    value === 'exfiltration_pattern' ||
+    value === 'prompt_injection' ||
+    value === 'data_exfiltration' ||
+    value === 'policy_violation'
+  );
+}
+
 function isTenantStatus(value: unknown): value is AdminTenantStatusUpdateRequest['status'] {
   return value === 'active' || value === 'suspended';
 }
@@ -392,6 +406,7 @@ function parseAuditFilters(query: Record<string, unknown>):
       response: AdminErrorResponse;
     } {
   const level = readQueryString(query.level);
+  const detectorType = readQueryString(query.detectorType);
   const entityType = readQueryString(query.entityType);
   const limit = readQueryString(query.limit);
   const occurredAfter = readQueryString(query.occurredAfter);
@@ -416,6 +431,16 @@ function parseAuditFilters(query: Record<string, unknown>):
       response: buildErrorResponse(
         'ADMIN_INVALID_PAYLOAD',
         'Audit filters require level to be info, warning or critical.'
+      ),
+    };
+  }
+
+  if (detectorType && !isAuditDetectorType(detectorType)) {
+    return {
+      ok: false,
+      response: buildErrorResponse(
+        'ADMIN_INVALID_PAYLOAD',
+        'Audit filters require a supported detectorType.'
       ),
     };
   }
@@ -451,6 +476,9 @@ function parseAuditFilters(query: Record<string, unknown>):
   }
 
   const normalizedLevel = level ? (level as AuthAuditLevel) : null;
+  const normalizedDetectorType = detectorType
+    ? (detectorType as NonNullable<AdminAuditFilters['detectorType']>)
+    : null;
   const normalizedEntityType = entityType ? (entityType as AuthAuditEntityType) : null;
   const normalizedPayloadMode = payloadMode ? (payloadMode as AdminAuditPayloadMode) : null;
   const normalizedScope = scope ? (scope as NonNullable<AdminAuditFilters['scope']>) : null;
@@ -521,6 +549,7 @@ function parseAuditFilters(query: Record<string, unknown>):
       tenantId: readQueryString(query.tenantId) || null,
       action: readQueryString(query.action) || null,
       level: normalizedLevel,
+      detectorType: normalizedDetectorType,
       actorUserId: readQueryString(query.actorUserId) || null,
       entityType: normalizedEntityType,
       traceId: readQueryString(query.traceId) || null,

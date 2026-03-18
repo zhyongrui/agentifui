@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  AdminAuditDetectorType,
   AdminAuditFilters,
   AdminAuditPayloadMode,
   AdminAuditResponse,
@@ -25,8 +26,17 @@ type AuditFilterFormState = {
   datePreset: '' | '24h' | '7d' | '30d' | '90d';
   action: string;
   level: '' | 'critical' | 'info' | 'warning';
+  detectorType: '' | AdminAuditDetectorType;
   actorUserId: string;
-  entityType: '' | 'conversation' | 'run' | 'session' | 'tenant' | 'user' | 'workspace_app';
+  entityType:
+    | ''
+    | 'conversation'
+    | 'policy_evaluation'
+    | 'run'
+    | 'session'
+    | 'tenant'
+    | 'user'
+    | 'workspace_app';
   traceId: string;
   runId: string;
   conversationId: string;
@@ -40,6 +50,7 @@ const EMPTY_FILTERS: AuditFilterFormState = {
   datePreset: '',
   action: '',
   level: '',
+  detectorType: '',
   actorUserId: '',
   entityType: '',
   traceId: '',
@@ -58,6 +69,7 @@ function normalizeFilters(filters: AuditFilterFormState): AdminAuditFilters {
     action: filters.action.trim() || null,
     datePreset: filters.datePreset || null,
     level: filters.level || null,
+    detectorType: filters.detectorType || null,
     actorUserId: filters.actorUserId.trim() || null,
     entityType: filters.entityType || null,
     traceId: filters.traceId.trim() || null,
@@ -91,6 +103,7 @@ function buildFilterTags(filters: AdminAuditFilters, tenantNameById: Map<string,
     filters.action ? `Action: ${filters.action}` : null,
     filters.datePreset ? `Window: ${filters.datePreset}` : null,
     filters.level ? `Level: ${filters.level}` : null,
+    filters.detectorType ? `Detector: ${filters.detectorType}` : null,
     filters.actorUserId ? `Actor: ${filters.actorUserId}` : null,
     filters.entityType ? `Entity: ${filters.entityType}` : null,
     filters.traceId ? `Trace: ${filters.traceId}` : null,
@@ -149,8 +162,10 @@ export default function AdminAuditPage() {
           tenant: '租户',
           allTenants: '全部租户',
           action: '动作',
-          level: '级别',
+          level: '严重级别',
           allLevels: '全部级别',
+          detectorType: 'Detector',
+          allDetectors: '全部 detector',
           entityType: '实体类型',
           allEntityTypes: '全部实体类型',
           actorUserId: '执行人用户 ID',
@@ -215,8 +230,10 @@ export default function AdminAuditPage() {
           tenant: 'Tenant',
           allTenants: 'All tenants',
           action: 'Action',
-          level: 'Level',
+          level: 'Severity',
           allLevels: 'All levels',
+          detectorType: 'Detector',
+          allDetectors: 'All detectors',
           entityType: 'Entity Type',
           allEntityTypes: 'All entity types',
           actorUserId: 'Actor User ID',
@@ -571,6 +588,30 @@ export default function AdminAuditPage() {
               </select>
             </label>
             <label className="field">
+              <span>{copy.detectorType}</span>
+              <select
+                aria-label="Audit detector filter"
+                value={draftFilters.detectorType}
+                onChange={event => {
+                  const detectorType = event.target.value as AuditFilterFormState['detectorType'];
+
+                  setDraftFilters(currentValue => ({
+                    ...currentValue,
+                    detectorType,
+                  }));
+                }}
+              >
+                <option value="">{copy.allDetectors}</option>
+                <option value="secret">secret</option>
+                <option value="pii">pii</option>
+                <option value="regulated_term">regulated_term</option>
+                <option value="exfiltration_pattern">exfiltration_pattern</option>
+                <option value="prompt_injection">prompt_injection</option>
+                <option value="data_exfiltration">data_exfiltration</option>
+                <option value="policy_violation">policy_violation</option>
+              </select>
+            </label>
+            <label className="field">
               <span>{copy.entityType}</span>
               <select
                 aria-label="Audit entity type filter"
@@ -590,6 +631,7 @@ export default function AdminAuditPage() {
                 <option value="session">session</option>
                 <option value="workspace_app">workspace_app</option>
                 <option value="conversation">conversation</option>
+                <option value="policy_evaluation">policy_evaluation</option>
                 <option value="run">run</option>
               </select>
             </label>

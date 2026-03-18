@@ -1034,10 +1034,10 @@ Legend:
 - [x] `P4-F-04` Add allowlist and exception workflows with review history and expiry timestamps
 - [x] `P4-F-05` Add admin policy simulation mode to test a policy against historical runs before rollout
 - [ ] `P4-F-06` Add evidence export bundles for audit/compliance review
-- [ ] `P4-F-07` Add legal-hold interaction rules for conversation deletion, artifact pruning, and backup restore
+- [x] `P4-F-07` Add legal-hold interaction rules for conversation deletion, artifact pruning, and backup restore
 - [ ] `P4-F-08` Add tests for policy precedence across tenant, group, app, and runtime scopes
 - [ ] `P4-F-09` Add browser coverage for blocked-run explanation surfaces and policy simulation summaries
-- [ ] `P4-F-10` Add admin filters for safety/policy audit events, including severity and detector type
+- [x] `P4-F-10` Add admin filters for safety/policy audit events, including severity and detector type
 - [ ] `P4-F-11` Add masking standards for screenshots, shared links, and export payloads
 - [ ] `P4-F-12` Document compliance operating procedures and exception-review governance
 

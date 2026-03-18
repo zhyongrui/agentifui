@@ -970,6 +970,37 @@ export async function registerWorkspaceRoutes(
       );
     }
 
+    if (nextStatus === 'deleted') {
+      const governance = await readTenantGovernance(access.user);
+
+      if (governance?.legalHoldEnabled) {
+        await auditService.recordEvent({
+          tenantId: access.user.tenantId,
+          actorUserId: access.user.id,
+          action: 'workspace.conversation.delete_blocked',
+          level: 'warning',
+          entityType: 'conversation',
+          entityId: conversationId,
+          ipAddress: request.ip,
+          payload: {
+            conversationId,
+            reason: 'legal_hold',
+            legalHoldEnabled: true,
+          },
+        });
+
+        reply.code(403);
+        return buildErrorResponse(
+          'WORKSPACE_FORBIDDEN',
+          'This conversation cannot be deleted while tenant legal hold is enabled.',
+          {
+            reason: 'legal_hold',
+            conversationId,
+          }
+        );
+      }
+    }
+
     const result = await workspaceService.updateConversationForUser(access.user, {
       conversationId,
       expectedUpdatedAt: nextExpectedUpdatedAt,
