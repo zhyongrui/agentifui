@@ -5,7 +5,7 @@ import type {
   AdminPolicyPackExceptionScope,
   AdminPolicyPackSimulationScope,
 } from '@agentifui/shared/admin';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { useI18n } from '../../../components/i18n-provider';
 import { SectionSkeleton } from '../../../components/section-state';
@@ -62,11 +62,15 @@ export default function AdminPolicyPage() {
   });
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { expiresAt: string; note: string }>>({});
 
-  const { data, error, isLoading, reload, session } = useAdminPageData(sessionToken =>
-    fetchAdminPolicy(sessionToken, {
-      tenantId: selectedTenantId || undefined,
-    })
+  const loadPolicy = useCallback(
+    (sessionToken: string) =>
+      fetchAdminPolicy(sessionToken, {
+        tenantId: selectedTenantId || undefined,
+      }),
+    [selectedTenantId]
   );
+
+  const { data, error, isLoading, reload, session } = useAdminPageData(loadPolicy);
 
   useEffect(() => {
     if (!session || !data?.governance || !data.governance.tenantId) {
@@ -76,7 +80,7 @@ export default function AdminPolicyPage() {
     if (!selectedTenantId) {
       setSelectedTenantId(data.governance.tenantId);
     }
-  }, [data?.governance, selectedTenantId, session]);
+  }, [data?.governance?.tenantId, selectedTenantId, session]);
 
   useEffect(() => {
     if (!session || !data?.governance) {
@@ -103,7 +107,7 @@ export default function AdminPolicyPage() {
     return () => {
       cancelled = true;
     };
-  }, [data?.governance, session]);
+  }, [data?.governance?.tenantId, session]);
 
   const copy = useMemo(
     () =>

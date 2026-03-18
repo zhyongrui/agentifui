@@ -309,7 +309,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P4-F-08`
+- the active follow-on item is `P4-G-02`
 
 ## 6. Detailed Execution Notes
 
@@ -1035,11 +1035,11 @@ Legend:
 - [x] `P4-F-05` Add admin policy simulation mode to test a policy against historical runs before rollout
 - [x] `P4-F-06` Add evidence export bundles for audit/compliance review
 - [x] `P4-F-07` Add legal-hold interaction rules for conversation deletion, artifact pruning, and backup restore
-- [ ] `P4-F-08` Add tests for policy precedence across tenant, group, app, and runtime scopes
-- [ ] `P4-F-09` Add browser coverage for blocked-run explanation surfaces and policy simulation summaries
+- [x] `P4-F-08` Add tests for policy precedence across tenant, group, app, and runtime scopes
+- [x] `P4-F-09` Add browser coverage for blocked-run explanation surfaces and policy simulation summaries
 - [x] `P4-F-10` Add admin filters for safety/policy audit events, including severity and detector type
-- [ ] `P4-F-11` Add masking standards for screenshots, shared links, and export payloads
-- [ ] `P4-F-12` Document compliance operating procedures and exception-review governance
+- [x] `P4-F-11` Add masking standards for screenshots, shared links, and export payloads
+- [x] `P4-F-12` Document compliance operating procedures and exception-review governance
 
 ### 7.24 Future Platform Queue: `P4-G` Observability, Incident Response, And SLO Management
 
