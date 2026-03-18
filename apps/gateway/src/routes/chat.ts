@@ -2337,6 +2337,11 @@ export async function registerChatRoutes(
             matches: [],
           }
         : retrievalResult;
+    const policyOverview = await policyService.getOverviewForUser(access.user, {
+      tenantId: access.user.tenantId,
+    });
+    const tenantRuntimeMode =
+      policyOverview.governance?.policyPack.runtimeMode ?? "standard";
 
     if (retrievalPolicy.outcome !== "allowed") {
       await auditService.recordEvent({
@@ -2443,6 +2448,7 @@ export async function registerChatRoutes(
       requestedModel: model,
       retrieval,
       runtimeInput,
+      tenantRuntimeMode,
       toolChoice: functionToolChoice ?? body.tool_choice,
       tools: runtimeTools,
     });

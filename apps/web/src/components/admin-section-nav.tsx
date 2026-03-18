@@ -68,6 +68,10 @@ export function AdminSectionNav() {
       label: messages.adminNav.policy,
     },
     {
+      href: '/admin/observability',
+      label: messages.adminNav.observability,
+    },
+    {
       href: '/admin/connectors',
       label: messages.adminNav.connectors,
     },

@@ -200,4 +200,39 @@ describe("workspace runtime service", () => {
       ]),
     });
   });
+
+  it("honors the per-invocation tenant runtime mode override", async () => {
+    const service = createWorkspaceRuntimeService();
+
+    const result = await service.invoke({
+      appId: "app_policy_watch",
+      attachments: [],
+      conversation: baseConversation,
+      latestPrompt: "Summarize the latest policy change.",
+      messages: [
+        {
+          role: "user",
+          content: "Summarize the latest policy change.",
+        },
+      ],
+      requestedModel: "policy-watch",
+      retrieval: null,
+      runtimeInput: null,
+      tenantId: "tenant-dev",
+      tenantRuntimeMode: "strict",
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error("expected runtime invocation to succeed");
+    }
+
+    expect(result.data.runtime).toMatchObject({
+      providerId: "local_structured",
+      selection: {
+        source: "tenant_runtime_mode",
+      },
+    });
+  });
 });

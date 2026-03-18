@@ -25,6 +25,9 @@ import type {
   AdminDomainClaimReviewRequest,
   AdminDomainClaimReviewResponse,
   AdminIdentityOverviewResponse,
+  AdminObservabilityAnnotationCreateRequest,
+  AdminObservabilityAnnotationCreateResponse,
+  AdminObservabilityResponse,
   AdminPolicyExceptionCreateRequest,
   AdminPolicyExceptionCreateResponse,
   AdminPolicyExceptionReviewRequest,
@@ -618,6 +621,38 @@ export async function fetchAdminPolicy(
   return fetchAdminJson<AdminPolicyOverviewResponse>(
     `/admin/policy${params.toString() ? `?${params.toString()}` : ''}`,
     sessionToken
+  );
+}
+
+export async function fetchAdminObservability(
+  sessionToken: string,
+  filters: {
+    tenantId?: string;
+  } = {}
+): Promise<AdminObservabilityResponse | AdminErrorResponse> {
+  const params = new URLSearchParams();
+
+  if (filters.tenantId) {
+    params.set('tenantId', filters.tenantId);
+  }
+
+  return fetchAdminJson<AdminObservabilityResponse>(
+    `/admin/observability${params.toString() ? `?${params.toString()}` : ''}`,
+    sessionToken
+  );
+}
+
+export async function createAdminObservabilityAnnotation(
+  sessionToken: string,
+  payload: AdminObservabilityAnnotationCreateRequest
+): Promise<AdminObservabilityAnnotationCreateResponse | AdminErrorResponse> {
+  return fetchAdminJson<AdminObservabilityAnnotationCreateResponse>(
+    '/admin/observability/annotations',
+    sessionToken,
+    {
+      method: 'POST',
+      body: payload,
+    }
   );
 }
 

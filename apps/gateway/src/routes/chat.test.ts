@@ -11,8 +11,10 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import { buildApp } from "../app.js";
+import { createAdminService } from "../services/admin-service.js";
 import { createAuditService } from "../services/audit-service.js";
 import { createAuthService } from "../services/auth-service.js";
+import { createPolicyService } from "../services/policy-service.js";
 import type { WorkspaceRuntimeService } from "../services/workspace-runtime.js";
 
 const testEnv: {
@@ -1204,7 +1206,7 @@ describe("chat routes", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json()).toMatchObject({
-        model: "runbook-mentor",
+        model: "local-structured-v1",
         metadata: {
           app_id: "app_runbook_mentor",
           run_id: expect.any(String),
@@ -1244,6 +1246,104 @@ describe("chat routes", () => {
         providerId: "local_structured",
         modelId: "local-structured-v1",
         requestType: "chat_completion",
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("applies tenant runtime governance to provider routing decisions", async () => {
+    const authService = createTestAuthService();
+    const adminService = createAdminService();
+    const originalGetIdentityOverview = adminService.getIdentityOverviewForUser;
+    adminService.getIdentityOverviewForUser = async (user, input) => {
+      const overview = await originalGetIdentityOverview(user, input);
+
+      return {
+        ...overview,
+        governance: overview.governance
+          ? {
+              ...overview.governance,
+              policyPack: {
+                ...overview.governance.policyPack,
+                runtimeMode: "strict",
+              },
+            }
+          : overview.governance,
+      };
+    };
+    const app = await buildApp(testEnv, {
+      adminService,
+      authService,
+      policyService: createPolicyService(adminService),
+    });
+
+    authService.register({
+      email: "admin@iflabx.com",
+      password: "Secure123",
+      displayName: "Tenant Admin",
+    });
+
+    const login = authService.login({
+      email: "admin@iflabx.com",
+      password: "Secure123",
+    });
+
+    expect(login.ok).toBe(true);
+
+    if (!login.ok) {
+      throw new Error("expected active login to succeed");
+    }
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+          "x-active-group-id": "grp_research",
+        },
+        payload: {
+          app_id: "app_policy_watch",
+          messages: [
+            {
+              role: "user",
+              content: "Summarize the latest policy change.",
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        metadata: {
+          app_id: "app_policy_watch",
+          run_id: expect.any(String),
+          active_group_id: "grp_research",
+          runtime_id: "placeholder_structured",
+          provider_id: "local_structured",
+          provider_model_id: "local-structured-v1",
+        },
+      } satisfies Partial<ChatCompletionResponse>);
+
+      const body = response.json() as ChatCompletionResponse;
+      const runResponse = await app.inject({
+        method: "GET",
+        url: `/workspace/runs/${body.id}`,
+        headers: {
+          authorization: `Bearer ${login.data.sessionToken}`,
+        },
+      });
+
+      expect(runResponse.statusCode).toBe(200);
+      expect(
+        (runResponse.json() as WorkspaceRunResponse).data.runtime,
+      ).toMatchObject({
+        id: "placeholder_structured",
+        providerId: "local_structured",
+        selection: {
+          source: "tenant_runtime_mode",
+        },
       });
     } finally {
       await app.close();
@@ -1454,7 +1554,7 @@ describe("chat routes", () => {
         id: runId,
         object: "chat.completion",
         created: expect.any(Number),
-        model: "policy-watch",
+        model: "local-fast-v1",
         choices: [
           {
             index: 0,

@@ -18,6 +18,7 @@ import { registerAdminConnectorRoutes } from './routes/admin-connectors.js';
 import { registerAdminConnectorOpsRoutes } from './routes/admin-connectors-ops.js';
 import { registerAdminBillingRoutes } from './routes/admin-billing.js';
 import { registerAdminIdentityRoutes } from './routes/admin-identity.js';
+import { registerAdminObservabilityRoutes } from './routes/admin-observability.js';
 import { registerAdminPolicyRoutes } from './routes/admin-policy.js';
 import { registerAdminSourceRoutes } from './routes/admin-sources.js';
 import { registerAdminWorkflowRoutes } from './routes/admin-workflows.js';
@@ -67,6 +68,11 @@ import {
 } from './services/workflow-definition-service.js';
 import { createPersistentBillingService } from './services/persistent-billing-service.js';
 import { createPersistentPolicyService } from './services/persistent-policy-service.js';
+import {
+  createAdminObservabilityService,
+  type AdminObservabilityService,
+} from './services/admin-observability-service.js';
+import { createPersistentAdminObservabilityService } from './services/persistent-admin-observability-service.js';
 import { createLocalWorkspaceFileStorage } from './services/workspace-file-storage.js';
 import { createPolicyService, type PolicyService } from './services/policy-service.js';
 import {
@@ -93,6 +99,7 @@ type BuildAppOptions = {
   connectorService?: ConnectorService;
   billingService?: BillingService;
   policyService?: PolicyService;
+  adminObservabilityService?: AdminObservabilityService;
   workflowDefinitionService?: WorkflowDefinitionService;
   workspaceService?: WorkspaceService;
   runtimeService?: WorkspaceRuntimeService;
@@ -211,6 +218,19 @@ export async function buildApp(
     (database
       ? createPersistentToolRegistryService(database)
       : createToolRegistryService());
+  const adminObservabilityService =
+    options.adminObservabilityService ??
+    (database
+      ? createPersistentAdminObservabilityService(database, {
+          auditService,
+          observabilityService,
+          runtimeService,
+        })
+      : createAdminObservabilityService({
+          auditService,
+          observabilityService,
+          runtimeService,
+        }));
 
   if (ownsDatabase && database) {
     app.addHook('onClose', async () => {
@@ -281,6 +301,13 @@ export async function buildApp(
   );
   await registerAdminIdentityRoutes(app, authService, adminService, auditService);
   await registerAdminPolicyRoutes(app, authService, adminService, policyService, auditService);
+  await registerAdminObservabilityRoutes(
+    app,
+    authService,
+    adminService,
+    adminObservabilityService,
+    auditService,
+  );
   await registerAdminBillingRoutes(
     app,
     authService,

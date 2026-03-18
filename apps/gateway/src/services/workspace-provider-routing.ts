@@ -15,6 +15,7 @@ export type WorkspaceProviderRoutingInput = {
   latestPrompt: string;
   requestedModel: string;
   tenantId: string;
+  tenantRuntimeMode?: WorkspaceTenantRuntimeMode;
   requestType: RuntimeProviderRequestType;
 };
 
@@ -259,7 +260,9 @@ export function createWorkspaceProviderRoutingService(input: {
       requestType: routingInput.requestType,
     });
     const tenantRuntimeMode =
-      input.resolveTenantRuntimeMode?.(routingInput.tenantId) ?? "standard";
+      routingInput.tenantRuntimeMode ??
+      input.resolveTenantRuntimeMode?.(routingInput.tenantId) ??
+      "standard";
     const promptOverride = readPromptProviderOverride(routingInput.latestPrompt);
     const modelOverride = readModelProviderOverride(routingInput.requestedModel);
     const overrideProviderId = promptOverride ?? modelOverride;

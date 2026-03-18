@@ -121,6 +121,7 @@ function isAuditEntityType(value: unknown): value is AuthAuditEntityType {
   return (
     value === 'conversation' ||
     value === 'knowledge_source' ||
+    value === 'operator_annotation' ||
     value === 'policy_evaluation' ||
     value === 'policy_exception' ||
     value === 'run' ||

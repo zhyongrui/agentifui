@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createAdminBreakGlassSession,
+  createAdminObservabilityAnnotation,
   createAdminDomainClaim,
   createAdminTenant,
   createAdminWorkflow,
@@ -20,6 +21,7 @@ import {
   fetchAdminContext,
   fetchAdminGroups,
   fetchAdminIdentity,
+  fetchAdminObservability,
   fetchAdminPolicy,
   importAdminWorkflow,
   fetchAdminSources,
@@ -794,6 +796,63 @@ describe('admin client', () => {
       4,
       '/api/gateway/admin/policy/exceptions/pol_exc_123/review',
       expect.objectContaining({ method: 'PUT' })
+    );
+  });
+
+  it('loads observability data and creates operator annotations through the same-origin gateway proxy', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            generatedAt: '2026-03-18T00:00:00.000Z',
+            sli: [],
+            routes: [],
+            alerts: [],
+            incidentTimeline: [],
+            annotations: [],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          data: {
+            annotation: {
+              id: 'obs_note_123',
+              tenantId: 'tenant-dev',
+              traceId: 'trace-123',
+              runId: null,
+              note: 'Pinned to deploy #42',
+              createdAt: '2026-03-18T00:00:00.000Z',
+              createdByUserId: 'usr_admin',
+            },
+          },
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await Promise.all([
+      fetchAdminObservability('session-123', {
+        tenantId: 'tenant-dev',
+      }),
+      createAdminObservabilityAnnotation('session-123', {
+        tenantId: 'tenant-dev',
+        traceId: 'trace-123',
+        note: 'Pinned to deploy #42',
+      }),
+    ]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/gateway/admin/observability?tenantId=tenant-dev',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/gateway/admin/observability/annotations',
+      expect.objectContaining({ method: 'POST' })
     );
   });
 

@@ -32,6 +32,7 @@ type Messages = {
     apps: string;
     billing: string;
     policy: string;
+    observability: string;
     connectors: string;
     sources: string;
     workflows: string;
@@ -337,6 +338,7 @@ const messages: Record<AppLocale, Messages> = {
       apps: '应用',
       billing: '计费',
       policy: '策略',
+      observability: '可观测性',
       connectors: '连接器',
       sources: '知识源',
       workflows: '工作流',
@@ -641,6 +643,7 @@ const messages: Record<AppLocale, Messages> = {
       apps: 'Apps',
       billing: 'Billing',
       policy: 'Policy',
+      observability: 'Observability',
       connectors: 'Connectors',
       sources: 'Sources',
       workflows: 'Workflows',

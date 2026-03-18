@@ -309,7 +309,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P4-F-01`
+- the active follow-on item is `P4-F-06`
 
 ## 6. Detailed Execution Notes
 
@@ -1028,7 +1028,7 @@ Legend:
 
 ### 7.23 Future Platform Queue: `P4-F` Enterprise Security, Compliance, And Policy Packs
 
-- [ ] `P4-F-01` Define tenant-scoped policy packs for runtime, retrieval, sharing, export, and retention controls
+- [x] `P4-F-01` Define tenant-scoped policy packs for runtime, retrieval, sharing, export, and retention controls
 - [x] `P4-F-02` Add per-policy evaluation traces so operators can see why a request was blocked or flagged
 - [x] `P4-F-03` Add DLP-style detectors for secrets, PII, regulated terms, and exfiltration patterns
 - [x] `P4-F-04` Add allowlist and exception workflows with review history and expiry timestamps
@@ -1043,17 +1043,17 @@ Legend:
 
 ### 7.24 Future Platform Queue: `P4-G` Observability, Incident Response, And SLO Management
 
-- [ ] `P4-G-01` Define service-level indicators for auth latency, launch latency, chat latency, and run completion success
+- [x] `P4-G-01` Define service-level indicators for auth latency, launch latency, chat latency, and run completion success
 - [ ] `P4-G-02` Add request tracing that links web requests, gateway work, provider calls, and DB writes
 - [ ] `P4-G-03` Add structured logs for every run lifecycle transition with trace and tenant context
 - [ ] `P4-G-04` Add dashboards for queue depth, degraded mode frequency, and stop-request rates
-- [ ] `P4-G-05` Add incident timelines that stitch together audit events, run events, and provider failures
+- [x] `P4-G-05` Add incident timelines that stitch together audit events, run events, and provider failures
 - [ ] `P4-G-06` Add alert routing for on-call, admin owners, and tenant-specific escalation
-- [ ] `P4-G-07` Add operator annotations so incidents can be correlated with deploys and config changes
+- [x] `P4-G-07` Add operator annotations so incidents can be correlated with deploys and config changes
 - [ ] `P4-G-08` Add error budget reporting and monthly SLO review summaries
-- [ ] `P4-G-09` Add tests for observability payload completeness on core request paths
+- [x] `P4-G-09` Add tests for observability payload completeness on core request paths
 - [ ] `P4-G-10` Add synthetic smoke probes for login, launch, completion, artifact preview, and admin audit
-- [ ] `P4-G-11` Add runbook links directly into alert payloads and admin health surfaces
+- [x] `P4-G-11` Add runbook links directly into alert payloads and admin health surfaces
 - [ ] `P4-G-12` Document incident command flow, trace collection, and postmortem expectations
 
 ### 7.25 Future Platform Queue: `P4-H` Automated QA, Test Infrastructure, And Release Certification

@@ -61,6 +61,7 @@ export type WorkspaceRuntimeInvocationInput = {
   retrieval: KnowledgeRetrievalResult | null;
   runtimeInput: Record<string, unknown> | null;
   tenantId?: string;
+  tenantRuntimeMode?: WorkspaceTenantRuntimeMode;
   toolChoice?: ChatToolChoice;
   tools?: ChatToolDescriptor[];
 };
@@ -1060,6 +1061,7 @@ export function createWorkspaceRuntimeService(input: {
         latestPrompt: runtimeInput.latestPrompt,
         requestedModel: runtimeInput.requestedModel,
         tenantId: runtimeInput.tenantId ?? "default-tenant",
+        tenantRuntimeMode: runtimeInput.tenantRuntimeMode,
         requestType:
           runtimeInput.tools && runtimeInput.tools.length > 0
             ? "tool_execution"
