@@ -88,6 +88,11 @@ import {
   type ToolRegistryService,
 } from './services/tool-registry-service.js';
 import { createPersistentToolRegistryService } from './services/persistent-tool-registry-service.js';
+import {
+  resolveRequestTraceId,
+  runWithRequestTraceContext,
+  type RequestTraceSource,
+} from './services/request-tracing.js';
 
 type BuildAppOptions = {
   logger?: boolean;
@@ -125,6 +130,7 @@ export async function buildApp(
   });
   const observabilityService: ObservabilityService = createObservabilityService();
   const requestStartTimes = new WeakMap<object, bigint>();
+  const requestTraceSources = new WeakMap<object, RequestTraceSource>();
 
   const usePersistentBacking = Boolean(options.database || env.databaseUrl);
   const database =
@@ -246,15 +252,37 @@ export async function buildApp(
   }
 
   await registerBasePlugins(app, env);
-  app.addHook('onRequest', async request => {
+  app.addHook('onRequest', (request, reply, done) => {
+    const incomingTraceId = request.headers['x-trace-id']?.toString();
+    const traceId = resolveRequestTraceId(incomingTraceId);
+    const traceSource = incomingTraceId?.trim() ? 'incoming' : 'generated';
+    const route = new URL(request.url, 'http://localhost').pathname;
+
+    request.headers['x-trace-id'] = traceId;
+    requestTraceSources.set(request.raw, traceSource);
     observabilityService.onRequestStarted();
     requestStartTimes.set(request.raw, process.hrtime.bigint());
+    reply.header('X-Trace-ID', traceId);
+
+    runWithRequestTraceContext(
+      {
+        method: request.method,
+        requestId: request.id,
+        route,
+        traceId,
+        traceSource,
+        url: request.url,
+      },
+      done
+    );
   });
 
   app.addHook('onResponse', async (request, reply) => {
     const startedAt = requestStartTimes.get(request.raw) ?? process.hrtime.bigint();
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
     const route = request.routeOptions.url || new URL(request.url, 'http://localhost').pathname;
+    const traceId = request.headers['x-trace-id']?.toString() ?? null;
+    const traceSource = requestTraceSources.get(request.raw) ?? null;
 
     observabilityService.onRequestCompleted({
       method: request.method,
@@ -266,7 +294,8 @@ export async function buildApp(
     request.log.info(
       {
         requestId: request.id,
-        traceId: request.headers['x-trace-id']?.toString() ?? null,
+        traceId,
+        traceSource,
         method: request.method,
         route,
         statusCode: reply.statusCode,
@@ -282,6 +311,8 @@ export async function buildApp(
     request.log.warn(
       {
         requestId: request.id,
+        traceId: request.headers['x-trace-id']?.toString() ?? null,
+        traceSource: requestTraceSources.get(request.raw) ?? null,
         method: request.method,
         url: request.url,
       },

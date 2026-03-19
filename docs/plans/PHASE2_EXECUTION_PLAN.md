@@ -309,7 +309,7 @@ Current batch status:
 - `P3-B-06` complete
 - `P3-B-07` complete
 - `P3-B-08` complete
-- the active follow-on item is `P4-G-02`
+- the active follow-on item is `P4-G-03`
 
 ## 6. Detailed Execution Notes
 
@@ -1044,7 +1044,7 @@ Legend:
 ### 7.24 Future Platform Queue: `P4-G` Observability, Incident Response, And SLO Management
 
 - [x] `P4-G-01` Define service-level indicators for auth latency, launch latency, chat latency, and run completion success
-- [ ] `P4-G-02` Add request tracing that links web requests, gateway work, provider calls, and DB writes
+- [x] `P4-G-02` Add request tracing that links web requests, gateway work, provider calls, and DB writes
 - [ ] `P4-G-03` Add structured logs for every run lifecycle transition with trace and tenant context
 - [ ] `P4-G-04` Add dashboards for queue depth, degraded mode frequency, and stop-request rates
 - [x] `P4-G-05` Add incident timelines that stitch together audit events, run events, and provider failures

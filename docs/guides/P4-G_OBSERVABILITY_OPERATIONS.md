@@ -31,6 +31,14 @@
 4. Add an operator annotation with the trace, run id, or deployment marker used during triage.
 5. Escalate to the owning workstream if the regression persists beyond one verification cycle.
 
+## Trace Collection
+
+1. Start with the `x-trace-id` returned by any `/api/gateway/*` response in the browser or gateway response headers.
+2. The web proxy preserves an inbound `x-trace-id` and generates one when the browser request does not provide it.
+3. Gateway request logs include the same trace id plus a `traceSource` field so you can tell whether the trace came from upstream or was generated at the edge.
+4. Audited DB-backed mutations now persist `traceId`, `requestId`, `method`, and `route` in the audit payload, so `/admin/audit` can pivot on the same request path.
+5. Chat/runtime flows reuse that trace id for run persistence, provider selection metadata, and audit lookups.
+
 ## Notes
 - `/admin/observability` is intentionally tenant-scoped by default.
 - platform admins can switch tenant scope; tenant admins should remain on their own tenant.

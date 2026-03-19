@@ -7,6 +7,7 @@ import type {
   ListAuditEventsInput,
   RecordAuditEventInput,
 } from './audit-service.js';
+import { withRequestTracePayload } from './request-tracing.js';
 
 function toAuditEvent(row: {
   id: string;
@@ -58,6 +59,7 @@ export function createPersistentAuditService(database: DatabaseClient): AuditSer
     async recordEvent(input: RecordAuditEventInput) {
       const eventId = randomUUID();
       const occurredAt = input.occurredAt ?? new Date().toISOString();
+      const payload = withRequestTracePayload(input.payload);
       const [row] = await database<{
         id: string;
         tenant_id: string | null;
@@ -91,7 +93,7 @@ export function createPersistentAuditService(database: DatabaseClient): AuditSer
           ${input.entityType},
           ${input.entityId ?? null},
           ${input.ipAddress ?? null},
-          ${input.payload ?? {}}::jsonb,
+          ${payload}::jsonb,
           ${occurredAt}::timestamptz
         )
         returning

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
@@ -17,6 +18,10 @@ function joinGatewayPath(pathSegments: string[]) {
   return pathname.startsWith('/') ? pathname : `/${pathname}`;
 }
 
+function buildTraceId() {
+  return randomUUID().replace(/-/g, '');
+}
+
 async function proxyGatewayRequest(
   request: NextRequest,
   context: {
@@ -26,22 +31,28 @@ async function proxyGatewayRequest(
   const { path } = await context.params;
   const upstreamUrl = new URL(joinGatewayPath(path), getGatewayOrigin());
   const requestUrl = new URL(request.url);
+  const traceId = request.headers.get('x-trace-id')?.trim() || buildTraceId();
 
   if (requestUrl.search) {
     upstreamUrl.search = requestUrl.search;
   }
 
   const headers = new Headers();
-  const authorization = request.headers.get('authorization');
-  const contentType = request.headers.get('content-type');
+  const passthroughRequestHeaders = [
+    'authorization',
+    'content-type',
+    'x-active-group-id',
+  ] as const;
 
-  if (authorization) {
-    headers.set('authorization', authorization);
+  for (const headerName of passthroughRequestHeaders) {
+    const value = request.headers.get(headerName);
+
+    if (value) {
+      headers.set(headerName, value);
+    }
   }
 
-  if (contentType) {
-    headers.set('content-type', contentType);
-  }
+  headers.set('x-trace-id', traceId);
 
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   const upstreamResponse = await fetch(upstreamUrl, {
@@ -58,6 +69,10 @@ async function proxyGatewayRequest(
     if (passthroughHeaders.has(headerName) || headerName.startsWith('x-agentifui-')) {
       responseHeaders.set(headerName, headerValue);
     }
+  }
+
+  if (!responseHeaders.has('x-trace-id')) {
+    responseHeaders.set('x-trace-id', traceId);
   }
 
   return new NextResponse(upstreamResponse.body, {

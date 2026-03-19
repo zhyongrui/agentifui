@@ -6,6 +6,8 @@ import type {
 } from '@agentifui/shared/auth';
 import { randomUUID } from 'node:crypto';
 
+import { withRequestTracePayload } from './request-tracing.js';
+
 type Awaitable<T> = T | Promise<T>;
 
 type RecordAuditEventInput = {
@@ -46,7 +48,7 @@ export function createAuditService(): AuditService {
         entityType: input.entityType,
         entityId: input.entityId ?? null,
         ipAddress: input.ipAddress ?? null,
-        payload: input.payload ?? {},
+        payload: withRequestTracePayload(input.payload),
         occurredAt: input.occurredAt ?? new Date().toISOString(),
       };
 

@@ -1,6 +1,8 @@
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app.js';
+import { createAuthService } from './services/auth-service.js';
+import { createAuditService } from './services/audit-service.js';
 
 const env = {
   nodeEnv: 'test' as const,
@@ -28,6 +30,7 @@ describe('gateway app', () => {
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.headers['x-trace-id']).toEqual(expect.any(String));
     expect(response.json()).toMatchObject({
       status: 'ok',
       service: 'gateway',
@@ -55,6 +58,7 @@ describe('gateway app', () => {
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.headers['x-trace-id']).toEqual(expect.any(String));
     expect(response.json()).toMatchObject({
       name: 'AgentifUI Gateway',
       environment: 'test',
@@ -108,6 +112,58 @@ describe('gateway app', () => {
       });
     } finally {
       await degradedApp.close();
+    }
+  });
+
+  it('reuses inbound trace ids and injects request metadata into audit events', async () => {
+    const auditService = createAuditService();
+    const authService = createAuthService({
+      defaultTenantId: env.defaultTenantId,
+      defaultSsoUserStatus: env.defaultSsoUserStatus,
+      lockoutThreshold: env.authLockoutThreshold,
+      lockoutDurationMs: env.authLockoutDurationMs,
+    });
+    const tracedApp = await buildApp(env, {
+      logger: false,
+      auditService,
+      authService,
+    });
+
+    try {
+      await tracedApp.inject({
+        method: 'POST',
+        url: '/auth/register',
+        payload: {
+          email: 'trace-test@iflabx.com',
+          password: 'TracePass123!',
+        },
+      });
+
+      const response = await tracedApp.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: {
+          'x-trace-id': 'trace-web-123',
+        },
+        payload: {
+          email: 'trace-test@iflabx.com',
+          password: 'TracePass123!',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['x-trace-id']).toBe('trace-web-123');
+
+      const [event] = await auditService.listEvents();
+      expect(event?.payload).toMatchObject({
+        traceId: 'trace-web-123',
+        requestId: expect.any(String),
+        method: 'POST',
+        route: '/auth/login',
+        url: '/auth/login',
+      });
+    } finally {
+      await tracedApp.close();
     }
   });
 });
