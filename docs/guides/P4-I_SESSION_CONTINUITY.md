@@ -24,3 +24,4 @@
 
 ## Push-Before-Stop Rule
 - No long-running implementation round is complete until commits are pushed and the dev log records the resulting hashes.
+- CI now runs `npm run release:round-check` so code-bearing rounds also need matching plan, guide, and dev-log updates before merge.

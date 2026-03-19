@@ -20,12 +20,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run docs:coverage
+      - name: Resolve release round diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "RELEASE_CHECK_BASE=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_CHECK_BASE=${{ github.event.before }}" >> "$GITHUB_ENV"
+          fi
+          echo "RELEASE_CHECK_HEAD=${{ github.sha }}" >> "$GITHUB_ENV"
+      - run: npm run release:round-check -- --base "$RELEASE_CHECK_BASE" --head "$RELEASE_CHECK_HEAD"
 
   typecheck:
     runs-on: ubuntu-latest

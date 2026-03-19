@@ -1068,7 +1068,7 @@ Legend:
 - [ ] `P4-H-07` Add scripted public-access QA fallback using `cloudflared` when stable ingress is unavailable `owner: ops`
 - [ ] `P4-H-08` Add scripted `80/443` smoke checks for same-origin proxy correctness and export headers `owner: ops`
 - [ ] `P4-H-09` Add pre-release certification scripts that run auth, workspace, admin, safety, and backup drills `owner: qa`
-- [ ] `P4-H-10` Add release checklists that force plan/doc/dev-log updates before merge `owner: qa`
+- [x] `P4-H-10` Add release checklists that force plan/doc/dev-log updates before merge
 - [ ] `P4-H-11` Add artifact retention and pruning for CI logs, traces, screenshots, and replay fixtures `owner: qa`
 - [x] `P4-H-12` Document the exact QA matrix that a fresh AI session should rerun before claiming readiness
 

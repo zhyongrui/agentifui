@@ -21,6 +21,7 @@
     "smoke:browser": "node scripts/public-browser-smoke.mjs",
     "perf:seed": "node scripts/perf-seed.mjs",
     "perf:smoke": "node scripts/perf-smoke.mjs",
+    "release:round-check": "node scripts/check-release-round.mjs",
     "backup:export": "node scripts/backup-export.mjs",
     "backup:restore": "node scripts/backup-restore.mjs",
     "ops:fixture-version": "node scripts/report-fixture-version.mjs",
