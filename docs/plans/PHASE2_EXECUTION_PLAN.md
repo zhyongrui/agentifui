@@ -1070,7 +1070,7 @@ Legend:
 - [ ] `P4-H-09` Add pre-release certification scripts that run auth, workspace, admin, safety, and backup drills `owner: qa`
 - [ ] `P4-H-10` Add release checklists that force plan/doc/dev-log updates before merge `owner: qa`
 - [ ] `P4-H-11` Add artifact retention and pruning for CI logs, traces, screenshots, and replay fixtures `owner: qa`
-- [ ] `P4-H-12` Document the exact QA matrix that a fresh AI session should rerun before claiming readiness `owner: docs`
+- [x] `P4-H-12` Document the exact QA matrix that a fresh AI session should rerun before claiming readiness
 
 ### 7.26 Future Platform Queue: `P4-I` Documentation, Onboarding, And AI-Session Continuity
 

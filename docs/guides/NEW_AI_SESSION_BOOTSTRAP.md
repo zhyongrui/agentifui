@@ -5,6 +5,7 @@
 2. `docs/plans/PHASE2_EXECUTION_PLAN.md`
 3. latest entry in `docs/dev-log/`
 4. `docs/RELEASE_STATE.md`
+5. `docs/guides/P4-H_QA_MATRIX.md`
 
 ## Verify Before Editing
 1. `git status --short`
