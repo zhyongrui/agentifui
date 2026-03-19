@@ -3,6 +3,7 @@
 ## Purpose
 - provide the runbook targets referenced by `/admin/observability`
 - document the minimum triage flow for gateway latency, degraded providers, and SLI regressions
+- define the current incident-command and postmortem expectations for fresh sessions
 
 ## Triage Gateway 5xx
 <a id="triage-gateway-5xx"></a>
@@ -38,6 +39,39 @@
 3. Gateway request logs include the same trace id plus a `traceSource` field so you can tell whether the trace came from upstream or was generated at the edge.
 4. Audited DB-backed mutations now persist `traceId`, `requestId`, `method`, and `route` in the audit payload, so `/admin/audit` can pivot on the same request path.
 5. Chat/runtime flows reuse that trace id for run persistence, provider selection metadata, and audit lookups.
+
+## Incident Command Flow
+
+1. Assign one incident commander and record the start time, tenant scope, and the first known `x-trace-id`.
+2. Assign one operator to evidence collection:
+   - gateway `/health`
+   - gateway `/metrics`
+   - `/admin/observability`
+   - `/admin/audit` filtered by trace, tenant, and run id
+3. Assign one operator to mitigation:
+   - reduce blast radius first
+   - switch tenant runtime mode only if the observability trail shows provider or policy mismatch
+   - record every manual action as an observability annotation
+4. Keep one running timeline in the incident notes:
+   - first detection time
+   - current user impact
+   - active mitigations
+   - unresolved risks
+5. Do not close the incident until the same trace family or smoke path succeeds after the mitigation.
+
+## Postmortem Expectations
+
+1. Every incident needs a short postmortem entry within the next working cycle.
+2. The postmortem must capture:
+   - customer-visible impact
+   - start and end timestamps
+   - primary trace ids and run ids used during triage
+   - root cause
+   - mitigation applied
+   - follow-up work with explicit owner
+3. If the issue was detected through degraded-provider or SLI alerts, include the exact alert card and threshold that fired.
+4. If a manual config or policy change helped recovery, link the related annotation or audit event.
+5. Follow-up items should land back in `docs/plans/PHASE2_EXECUTION_PLAN.md` or the current execution queue before the postmortem is considered complete.
 
 ## Notes
 - `/admin/observability` is intentionally tenant-scoped by default.

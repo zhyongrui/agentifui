@@ -1054,7 +1054,7 @@ Legend:
 - [x] `P4-G-09` Add tests for observability payload completeness on core request paths
 - [ ] `P4-G-10` Add synthetic smoke probes for login, launch, completion, artifact preview, and admin audit
 - [x] `P4-G-11` Add runbook links directly into alert payloads and admin health surfaces
-- [ ] `P4-G-12` Document incident command flow, trace collection, and postmortem expectations
+- [x] `P4-G-12` Document incident command flow, trace collection, and postmortem expectations
 
 ### 7.25 Future Platform Queue: `P4-H` Automated QA, Test Infrastructure, And Release Certification
 
