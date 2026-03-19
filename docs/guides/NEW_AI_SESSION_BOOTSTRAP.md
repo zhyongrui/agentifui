@@ -9,7 +9,7 @@
 ## Verify Before Editing
 1. `git status --short`
 2. confirm whether the current round already has uncommitted work
-3. identify the active plan item and the next blocked dependency
+3. identify the active plan item, its `owner:` workstream, and the next blocked dependency
 
 ## Host Safety Rules
 - Prefer very small `apply_patch` hunks.

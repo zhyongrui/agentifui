@@ -692,6 +692,7 @@ Legend:
 
 - `[x]` completed
 - `[ ]` not started or still open
+- `owner:` stable workstream label for future-session routing (`gateway`, `web`, `qa`, `ops`, `docs`)
 
 ### 7.1 Completed Baseline Checklist
 
@@ -1045,31 +1046,31 @@ Legend:
 
 - [x] `P4-G-01` Define service-level indicators for auth latency, launch latency, chat latency, and run completion success
 - [x] `P4-G-02` Add request tracing that links web requests, gateway work, provider calls, and DB writes
-- [ ] `P4-G-03` Add structured logs for every run lifecycle transition with trace and tenant context
-- [ ] `P4-G-04` Add dashboards for queue depth, degraded mode frequency, and stop-request rates
+- [ ] `P4-G-03` Add structured logs for every run lifecycle transition with trace and tenant context `owner: gateway`
+- [ ] `P4-G-04` Add dashboards for queue depth, degraded mode frequency, and stop-request rates `owner: ops`
 - [x] `P4-G-05` Add incident timelines that stitch together audit events, run events, and provider failures
-- [ ] `P4-G-06` Add alert routing for on-call, admin owners, and tenant-specific escalation
+- [ ] `P4-G-06` Add alert routing for on-call, admin owners, and tenant-specific escalation `owner: ops`
 - [x] `P4-G-07` Add operator annotations so incidents can be correlated with deploys and config changes
-- [ ] `P4-G-08` Add error budget reporting and monthly SLO review summaries
+- [ ] `P4-G-08` Add error budget reporting and monthly SLO review summaries `owner: ops`
 - [x] `P4-G-09` Add tests for observability payload completeness on core request paths
-- [ ] `P4-G-10` Add synthetic smoke probes for login, launch, completion, artifact preview, and admin audit
+- [ ] `P4-G-10` Add synthetic smoke probes for login, launch, completion, artifact preview, and admin audit `owner: qa`
 - [x] `P4-G-11` Add runbook links directly into alert payloads and admin health surfaces
 - [x] `P4-G-12` Document incident command flow, trace collection, and postmortem expectations
 
 ### 7.25 Future Platform Queue: `P4-H` Automated QA, Test Infrastructure, And Release Certification
 
-- [ ] `P4-H-01` Split browser suites into smoke, regression, long-run, and production-like certification lanes
-- [ ] `P4-H-02` Add deterministic seeded runtime fixtures for chat, retrieval, safety, and HITL scenarios
-- [ ] `P4-H-03` Add snapshot baselines for admin tables, transcript panels, and artifact previews
-- [ ] `P4-H-04` Add flaky-test detection and quarantine flow with owner tracking
-- [ ] `P4-H-05` Add host-capability checks so browser suites can skip safely when runtime libs are missing
-- [ ] `P4-H-06` Add ephemeral environment provisioning for branch-based QA
-- [ ] `P4-H-07` Add scripted public-access QA fallback using `cloudflared` when stable ingress is unavailable
-- [ ] `P4-H-08` Add scripted `80/443` smoke checks for same-origin proxy correctness and export headers
-- [ ] `P4-H-09` Add pre-release certification scripts that run auth, workspace, admin, safety, and backup drills
-- [ ] `P4-H-10` Add release checklists that force plan/doc/dev-log updates before merge
-- [ ] `P4-H-11` Add artifact retention and pruning for CI logs, traces, screenshots, and replay fixtures
-- [ ] `P4-H-12` Document the exact QA matrix that a fresh AI session should rerun before claiming readiness
+- [ ] `P4-H-01` Split browser suites into smoke, regression, long-run, and production-like certification lanes `owner: qa`
+- [ ] `P4-H-02` Add deterministic seeded runtime fixtures for chat, retrieval, safety, and HITL scenarios `owner: qa`
+- [ ] `P4-H-03` Add snapshot baselines for admin tables, transcript panels, and artifact previews `owner: qa`
+- [ ] `P4-H-04` Add flaky-test detection and quarantine flow with owner tracking `owner: qa`
+- [ ] `P4-H-05` Add host-capability checks so browser suites can skip safely when runtime libs are missing `owner: qa`
+- [ ] `P4-H-06` Add ephemeral environment provisioning for branch-based QA `owner: ops`
+- [ ] `P4-H-07` Add scripted public-access QA fallback using `cloudflared` when stable ingress is unavailable `owner: ops`
+- [ ] `P4-H-08` Add scripted `80/443` smoke checks for same-origin proxy correctness and export headers `owner: ops`
+- [ ] `P4-H-09` Add pre-release certification scripts that run auth, workspace, admin, safety, and backup drills `owner: qa`
+- [ ] `P4-H-10` Add release checklists that force plan/doc/dev-log updates before merge `owner: qa`
+- [ ] `P4-H-11` Add artifact retention and pruning for CI logs, traces, screenshots, and replay fixtures `owner: qa`
+- [ ] `P4-H-12` Document the exact QA matrix that a fresh AI session should rerun before claiming readiness `owner: docs`
 
 ### 7.26 Future Platform Queue: `P4-I` Documentation, Onboarding, And AI-Session Continuity
 
@@ -1081,7 +1082,7 @@ Legend:
 - [x] `P4-I-06` Add a “known flaky host behaviors” appendix with mitigation commands and recovery steps
 - [x] `P4-I-07` Add onboarding checklists for local dev, browser QA, staging deploy, and production diagnostics
 - [x] `P4-I-08` Add naming/versioning rules for plans, migrations, fixtures, and seeded app data
-- [ ] `P4-I-09` Add ownership fields to long-range plan items so future sessions can group work coherently
+- [x] `P4-I-09` Add ownership fields to long-range plan items so future sessions can group work coherently
 - [x] `P4-I-10` Add archival rules for old dev logs, stale plans, and superseded deployment guides
 - [x] `P4-I-11` Add documentation coverage checks into CI so critical guides cannot silently drift
 - [x] `P4-I-12` Document what must be pushed to git before ending any long-running implementation round
