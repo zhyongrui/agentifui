@@ -43,9 +43,14 @@ Run this path when the change is local to docs, UI copy, or isolated route logic
 ### Browser-Critical User Flow
 
 1. targeted Playwright spec through `node scripts/run-e2e.mjs <spec>`
-2. if host behavior is unstable, isolate ports and use the direct `next start` pattern recorded in the dev log
-3. record any public URL, tunnel, or port override in the dev log
-4. use `PLAYWRIGHT_STRICT_HOST_CHECK=1` only when browser-host dependency gaps must fail hard instead of skipping safely
+2. when the change maps cleanly to a lane, prefer:
+   - `npm run test:e2e:smoke`
+   - `npm run test:e2e:regression`
+   - `npm run test:e2e:long-run`
+   - `npm run test:e2e:certification`
+3. if host behavior is unstable, isolate ports and use the direct `next start` pattern recorded in the dev log
+4. record any public URL, tunnel, or port override in the dev log
+5. use `PLAYWRIGHT_STRICT_HOST_CHECK=1` only when browser-host dependency gaps must fail hard instead of skipping safely
 
 ### Release-Oriented Round
 

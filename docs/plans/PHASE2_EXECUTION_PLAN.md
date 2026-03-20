@@ -1059,7 +1059,7 @@ Legend:
 
 ### 7.25 Future Platform Queue: `P4-H` Automated QA, Test Infrastructure, And Release Certification
 
-- [ ] `P4-H-01` Split browser suites into smoke, regression, long-run, and production-like certification lanes `owner: qa`
+- [x] `P4-H-01` Split browser suites into smoke, regression, long-run, and production-like certification lanes
 - [ ] `P4-H-02` Add deterministic seeded runtime fixtures for chat, retrieval, safety, and HITL scenarios `owner: qa`
 - [ ] `P4-H-03` Add snapshot baselines for admin tables, transcript panels, and artifact previews `owner: qa`
 - [ ] `P4-H-04` Add flaky-test detection and quarantine flow with owner tracking `owner: qa`

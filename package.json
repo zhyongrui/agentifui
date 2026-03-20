@@ -46,6 +46,10 @@
     "test": "npm run test:unit && npm run test:persistence",
     "test:watch": "vitest",
     "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:smoke": "node scripts/run-e2e-lane.mjs smoke",
+    "test:e2e:regression": "node scripts/run-e2e-lane.mjs regression",
+    "test:e2e:long-run": "node scripts/run-e2e-lane.mjs long_run",
+    "test:e2e:certification": "node scripts/run-e2e-lane.mjs certification",
     "eval:staging-drill": "tsx scripts/evals/replay-staging.ts"
   },
   "devDependencies": {
