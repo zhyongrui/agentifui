@@ -56,11 +56,12 @@ Run this path when the change is local to docs, UI copy, or isolated route logic
 
 1. `npm run build`
 2. `npm run test:unit`
-3. the smallest matching smoke command:
+3. for a unified release drill, prefer `npm run release:certify`
+4. the smallest matching smoke command when you only need one slice:
    - `npm run smoke:deploy`
    - `npm run smoke:browser`
    - `npm run perf:smoke`
-4. if the round changes release expectations, update `docs/RELEASE_STATE.md`
+5. if the round changes release expectations, update `docs/RELEASE_STATE.md`
 
 ## Minimum Claim Standard
 
