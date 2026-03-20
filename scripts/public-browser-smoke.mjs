@@ -1,6 +1,6 @@
 import { chromium } from '@playwright/test';
 
-import { ensurePlaywrightRuntime } from './prepare-playwright-runtime.mjs';
+import { getPlaywrightHostCapability } from './prepare-playwright-runtime.mjs';
 
 function requireEnv(name) {
   const value = process.env[name]?.trim();
@@ -20,6 +20,21 @@ function buildUrl(baseUrl, path) {
   return new URL(path, `${baseUrl}/`).toString();
 }
 
+async function resolvePlaywrightRuntimeOrSkip(scriptName) {
+  const capability = await getPlaywrightHostCapability();
+
+  if (capability.ok) {
+    return capability.runtimeLibDir;
+  }
+
+  if (process.env.PLAYWRIGHT_STRICT_HOST_CHECK === '1') {
+    throw new Error(capability.reason ?? `${scriptName} requires browser host capabilities.`);
+  }
+
+  process.stdout.write(`[skip] ${scriptName}: ${capability.reason ?? 'browser host capability unavailable'}\n`);
+  return null;
+}
+
 async function waitForAnyLocator(page, locators, timeout = 30_000) {
   const startedAt = Date.now();
 
@@ -37,13 +52,18 @@ async function waitForAnyLocator(page, locators, timeout = 30_000) {
 }
 
 async function main() {
+  const runtimeLibDir = await resolvePlaywrightRuntimeOrSkip('public-browser-smoke');
+
+  if (runtimeLibDir === null) {
+    return;
+  }
+
   const baseUrl = normalizeBaseUrl(requireEnv('PUBLIC_BASE_URL'));
   const email = requireEnv('PUBLIC_SMOKE_EMAIL');
   const password = requireEnv('PUBLIC_SMOKE_PASSWORD');
   const appsPath = process.env.PUBLIC_SMOKE_APPS_PATH?.trim() || '/apps';
   const chatPath = process.env.PUBLIC_SMOKE_CHAT_PATH?.trim() || '/chat';
   const headless = process.env.PUBLIC_SMOKE_HEADLESS !== 'false';
-  const runtimeLibDir = await ensurePlaywrightRuntime();
 
   if (runtimeLibDir) {
     process.env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH

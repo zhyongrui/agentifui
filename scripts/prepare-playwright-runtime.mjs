@@ -92,17 +92,42 @@ async function ensureToolAvailable(command) {
   }
 }
 
-export async function ensurePlaywrightRuntime() {
+export async function getPlaywrightHostCapability() {
+  if (process.env.PLAYWRIGHT_FORCE_HOST_UNAVAILABLE === '1') {
+    return {
+      ok: false,
+      reason: 'forced unavailable host capability for validation',
+      runtimeLibDir: null,
+    };
+  }
+
   if (process.platform !== 'linux' || process.arch !== 'x64') {
-    return null;
+    return {
+      ok: false,
+      reason: `unsupported host platform ${process.platform}/${process.arch}`,
+      runtimeLibDir: null,
+    };
   }
 
   if (await hasRequiredLibraries()) {
-    return PLAYWRIGHT_LIB_DIR;
+    return {
+      ok: true,
+      reason: null,
+      runtimeLibDir: PLAYWRIGHT_LIB_DIR,
+    };
   }
 
-  await ensureToolAvailable('apt');
-  await ensureToolAvailable('dpkg-deb');
+  try {
+    await ensureToolAvailable('apt');
+    await ensureToolAvailable('dpkg-deb');
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+      runtimeLibDir: null,
+    };
+  }
+
   await mkdir(PLAYWRIGHT_DEB_DIR, {
     recursive: true,
   });
@@ -110,37 +135,61 @@ export async function ensurePlaywrightRuntime() {
     recursive: true,
   });
 
-  for (const packageName of REQUIRED_PACKAGES) {
-    const existingDeb = await findDebForPackage(packageName);
+  try {
+    for (const packageName of REQUIRED_PACKAGES) {
+      const existingDeb = await findDebForPackage(packageName);
 
-    if (!existingDeb) {
-      await run('apt', ['download', packageName], {
-        cwd: PLAYWRIGHT_DEB_DIR,
-      });
-    }
-  }
-
-  for (const packageName of REQUIRED_PACKAGES) {
-    const debName = await findDebForPackage(packageName);
-
-    if (!debName) {
-      throw new Error(`Could not locate downloaded package for ${packageName}.`);
+      if (!existingDeb) {
+        await run('apt', ['download', packageName], {
+          cwd: PLAYWRIGHT_DEB_DIR,
+        });
+      }
     }
 
-    await run('dpkg-deb', ['-x', path.join(PLAYWRIGHT_DEB_DIR, debName), PLAYWRIGHT_RUNTIME_DIR]);
+    for (const packageName of REQUIRED_PACKAGES) {
+      const debName = await findDebForPackage(packageName);
+
+      if (!debName) {
+        throw new Error(`Could not locate downloaded package for ${packageName}.`);
+      }
+
+      await run('dpkg-deb', ['-x', path.join(PLAYWRIGHT_DEB_DIR, debName), PLAYWRIGHT_RUNTIME_DIR]);
+    }
+
+    if (!(await hasRequiredLibraries())) {
+      throw new Error('Playwright runtime libraries are still incomplete after extraction.');
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+      runtimeLibDir: null,
+    };
   }
 
-  if (!(await hasRequiredLibraries())) {
-    throw new Error('Playwright runtime libraries are still incomplete after extraction.');
+  return {
+    ok: true,
+    reason: null,
+    runtimeLibDir: PLAYWRIGHT_LIB_DIR,
+  };
+}
+
+export async function ensurePlaywrightRuntime() {
+  const capability = await getPlaywrightHostCapability();
+
+  if (!capability.ok) {
+    throw new Error(capability.reason);
   }
 
-  return PLAYWRIGHT_LIB_DIR;
+  return capability.runtimeLibDir;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const runtimePath = await ensurePlaywrightRuntime();
+  const capability = await getPlaywrightHostCapability();
 
-  if (runtimePath) {
-    console.log(runtimePath);
+  if (capability.ok && capability.runtimeLibDir) {
+    console.log(capability.runtimeLibDir);
+  } else if (capability.reason) {
+    console.log(`skip: ${capability.reason}`);
   }
 }

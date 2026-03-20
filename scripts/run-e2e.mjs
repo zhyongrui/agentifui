@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import postgres from "postgres";
 
-import { ensurePlaywrightRuntime } from "./prepare-playwright-runtime.mjs";
+import { getPlaywrightHostCapability } from "./prepare-playwright-runtime.mjs";
 
 const DATABASE_URL =
   "postgresql://agentifui:agentifui@localhost:5432/agentifui";
@@ -193,6 +193,21 @@ function startServer(command, args, env) {
   });
 }
 
+async function resolvePlaywrightRuntimeOrSkip(scriptName) {
+  const capability = await getPlaywrightHostCapability();
+
+  if (capability.ok) {
+    return capability.runtimeLibDir;
+  }
+
+  if (process.env.PLAYWRIGHT_STRICT_HOST_CHECK === "1") {
+    throw new Error(capability.reason ?? `${scriptName} requires browser host capabilities.`);
+  }
+
+  process.stdout.write(`[skip] ${scriptName}: ${capability.reason ?? "browser host capability unavailable"}\n`);
+  return null;
+}
+
 function createPlaywrightEnv(runtimeLibDir, webPort) {
   const env = {
     ...process.env,
@@ -240,6 +255,11 @@ async function stopServer(child) {
 
 async function main() {
   const playwrightArgs = process.argv.slice(2);
+  const runtimeLibDir = await resolvePlaywrightRuntimeOrSkip("run-e2e");
+
+  if (runtimeLibDir === null) {
+    return;
+  }
   const gatewayPort = await resolvePort(
     Number(process.env.PLAYWRIGHT_GATEWAY_PORT ?? DEFAULT_GATEWAY_PORT),
   );
@@ -250,7 +270,6 @@ async function main() {
   const web = null;
   let gatewayChild = gateway;
   let webChild = web;
-  const runtimeLibDir = await ensurePlaywrightRuntime();
 
   try {
     await run("npm", ["run", "build"]);

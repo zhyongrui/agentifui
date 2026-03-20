@@ -1063,7 +1063,7 @@ Legend:
 - [ ] `P4-H-02` Add deterministic seeded runtime fixtures for chat, retrieval, safety, and HITL scenarios `owner: qa`
 - [ ] `P4-H-03` Add snapshot baselines for admin tables, transcript panels, and artifact previews `owner: qa`
 - [ ] `P4-H-04` Add flaky-test detection and quarantine flow with owner tracking `owner: qa`
-- [ ] `P4-H-05` Add host-capability checks so browser suites can skip safely when runtime libs are missing `owner: qa`
+- [x] `P4-H-05` Add host-capability checks so browser suites can skip safely when runtime libs are missing
 - [ ] `P4-H-06` Add ephemeral environment provisioning for branch-based QA `owner: ops`
 - [ ] `P4-H-07` Add scripted public-access QA fallback using `cloudflared` when stable ingress is unavailable `owner: ops`
 - [ ] `P4-H-08` Add scripted `80/443` smoke checks for same-origin proxy correctness and export headers `owner: ops`
